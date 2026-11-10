@@ -6,7 +6,10 @@ Working rules for AI-assisted development in this repository.
 
 Architecture is **planned, not implemented**, apart from the Phase 2 backend
 skeleton (settings, `accounts.User`, health endpoints; see
-`docs/development/runbook.md`). See `README.md` and
+`docs/development/runbook.md`) and a database-independent request-intake
+preparation slice (plain-Python schema, validation, deterministic test extractor;
+see `docs/development/request-intake-slice.md`). Approvals, exports, background
+execution, persistence, and real AI adapters are not implemented. See `README.md` and
 `docs/architecture/README.md`. Do not describe planned components as existing.
 
 ## Working rules

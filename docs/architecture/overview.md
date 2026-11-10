@@ -236,6 +236,7 @@ Rules:
 | These architecture documents and ADRs | Reviewed and revised in the Phase 1 review; accepted decisions are marked in the [decision index](../decisions/README.md); everything else is proposed |
 | Django project skeleton (settings, `accounts`, `health`) | Implemented in Phase 2; DB-free tests pass; PostgreSQL-backed checks pending |
 | `accounts.User` model and its initial migration | Implemented; migration not yet applied to any database |
+| Request-intake preparation slice (`workflows/request_intake`: result schema, pure validation, deterministic test extractor; plain Python, DB-free tests) | Implemented as preparation only; no persistence, approvals, export, or state machine |
 | Domain models (cases, documents, revisions, approvals, exports) and other migrations | Not started |
 | Worker, queue, AI gateway, adapters | Not started |
 | Frontend | Not started |

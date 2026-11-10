@@ -49,6 +49,8 @@ Exact versions in use are recorded in the
 - [Open questions](docs/architecture/open-questions.md)
 - [Decision records](docs/decisions/README.md)
 - [Development runbook](docs/development/runbook.md): setup, tests, and current status
+- [Request-intake preparation slice](docs/development/request-intake-slice.md):
+  the database-independent schema, validation, and test extractor
 
 ## Repository conventions
 

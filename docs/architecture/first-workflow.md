@@ -1,6 +1,11 @@
 # First Workflow: Request Document to Approved Structured Draft
 
-> **Status: Not implemented.** This specification defines the first vertical
+> **Status: The workflow is not implemented.** Only a small database-independent
+> preparation slice exists (the result schema, pure validation, and a
+> deterministic test extractor, as plain Python; see
+> [request-intake-slice.md](../development/request-intake-slice.md)). Approval,
+> revisions, export, the state machine, tasks, storage, and persistence are not
+> implemented. This specification defines the first vertical
 > slice. Confirmed directions: plain-text input, JSON export, a deterministic
 > test AI adapter, and no automatic email sending or ERP writes (PDF parsing and
 > CSV export are deferred). The detailed rules, states, and acceptance
@@ -80,7 +85,7 @@ The result schema belongs to the workflow package and is versioned with it.
 | `requester.contact` | Optional | Free text contact detail if present in the document |
 | `items` | Required, at least one | List of requested items |
 | `items[].description` | Required | What is requested, as stated |
-| `items[].quantity` | Required | Positive number as stated |
+| `items[].quantity` | Required | Positive number as stated. Fractions are allowed in this generic schema; the canonical validated type is `Decimal`, kept exactly as given (no rounding, no precision limit). Booleans, NaN, infinity, zero, and negative values are invalid. Unit-specific integer restrictions are deferred. |
 | `items[].unit` | Optional | Unit text if stated (for example "boxes"); not normalized in this slice |
 | `items[].notes` | Optional | Item-level remarks |
 | `notes` | Optional | Request-level remarks |
@@ -98,7 +103,11 @@ The system must **not invent missing information**.
 - Each missing required value produces a **blocking** finding
   (`missing_required`) on the revision.
 - An ambiguous value (for example a quantity written as "a few") is stored as
-  `null` with a finding (`ambiguous_value`) that quotes the source excerpt.
+  `null` with a finding that quotes the source excerpt. The finding is
+  **blocking** (`ambiguous_required_value`) when the field is required and a
+  **warning** (`ambiguous_optional_value`) when it is optional. A required
+  field's ambiguity blocks approval even if the field still holds a value, and it
+  never replaces the `missing_required` finding for a missing required value.
 - A draft with blocking findings is still saved as a revision so a human can
   see it and complete it. It cannot be approved until the blocking findings are
   resolved in a newer revision.
@@ -117,14 +126,25 @@ Findings have a severity: **blocking** (prevents approval) or **warning**
 | `requester.name` is non-empty after trimming whitespace | Blocking |
 | `items` contains at least one item | Blocking |
 | Every item has a non-empty `description` | Blocking |
-| Every `quantity` is a number greater than zero | Blocking |
+| Every `quantity` is a finite number (not a boolean) greater than zero | Blocking |
 | `quantity` does not exceed the configured maximum (if configured) | Blocking |
-| Text fields do not exceed configured length limits | Blocking |
-| Two items have identical normalized descriptions | Warning |
+| Text fields do not exceed configured length limits (if configured) | Blocking |
+| An extractor-reported ambiguity affects a required field | Blocking |
+| A source reference does not match the supplied source text (unknown field, missing item, line outside the text, or excerpt differing from the cited line) | Blocking |
+| Two items have identical normalized descriptions (never merged, deleted, or summed) | Warning |
+| An extractor-reported ambiguity affects an optional field | Warning |
 | An extracted value cannot be located in the source text (simple deterministic check, applies to text sources) | Warning |
 
 Numeric limits and length limits are company configuration values within
-ranges the package allows. This document proposes no specific numbers.
+ranges the package allows. This document proposes no specific numbers, and no
+business limit is invented: a limit that is not configured is not applied.
+
+Finding codes, severities, and field paths are the **initial stable contract,
+version 1**. An incompatible change (renaming or removing a code, changing a
+severity, or changing the path grammar) requires a version bump. The
+database-independent preparation slice implements these rules as plain Python
+(see [request-intake-slice.md](../development/request-intake-slice.md)); how
+they are applied to stored revisions is not implemented.
 
 ## 7. Human review and approval
 
