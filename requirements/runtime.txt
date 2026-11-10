@@ -1,0 +1,19 @@
+# GENERATED lock file: every runtime package, including transitive ones, pinned
+# to an exact version with sha256 hashes. Regenerate; do not edit by hand.
+# Direct dependencies: requirements/runtime.in
+# Resolved for: CPython 3.14 on Windows AMD64 (psycopg-binary is platform specific).
+# Install with: python -m pip install --require-hashes --only-binary=:all: -r requirements/runtime.txt
+asgiref==3.13.0 \
+    --hash=sha256:f9596a2434512686473d50f96ff6207fbba49ae1a785dfac614df4aeb085674d
+Django==5.2.19 \
+    --hash=sha256:5965d974a5218a2b68a11dd1276434707f23886525c23f0598eccedaf4f4ca00
+djangorestframework==3.18.3 \
+    --hash=sha256:8544bb674846731b1e3c9b309236ee1dc412905a0aa725be2ec193ca950a7d12
+psycopg-binary==3.3.8 \
+    --hash=sha256:6d899f361effad9a23d90940b6b55683bc87ed2d457ef64a7fa76fee7c3b9dfc
+psycopg==3.3.8 \
+    --hash=sha256:ca50af6072ba9ea6866f33021975230c2555d7bfdb9d8f94ca3af5c3d1bf2167
+sqlparse==0.6.1 \
+    --hash=sha256:3be5a72d04c873d690d7c6dedd33d6fae2ef82759881ceec02fc2efd0cba564f
+tzdata==2026.6 \
+    --hash=sha256:0a10eec6e13ef16b627fabed9a5f2ba61a62b1c67f327305f4e7e412a70b4aec

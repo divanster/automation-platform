@@ -1,0 +1,4 @@
+# GENERATED lock file for DEVELOPMENT. Currently identical to the runtime set
+# because there are no development-only packages yet (requirements/development.in).
+# Install with: python -m pip install --require-hashes --only-binary=:all: -r requirements/development.txt
+-r runtime.txt

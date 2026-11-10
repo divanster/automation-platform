@@ -1,6 +1,7 @@
 # Open Questions
 
-> **Status: Phase 1 review applied (2026-11-10).** Items below are either
+> **Status: Phase 1 review and Phase 2 implementation applied (2026-11-10).**
+> Items below are either
 > **resolved** (with the recording location), or **unresolved**. "Recommended
 > direction" entries are suggestions for discussion, not confirmed choices.
 > Nothing here is implemented.
@@ -21,19 +22,24 @@
 | First export format | JSON. CSV export deferred. | first-workflow.md |
 | First AI adapter | Deterministic test adapter before real providers. | [ai-policy.md](ai-policy.md), [ADR 0004](../decisions/0004-provider-neutral-ai-gateway.md) |
 | External actions | No automatic email sending and no ERP writes. | overview.md, first-workflow.md |
+| PostgreSQL | **Version 18**, native Windows install (not Docker, not WSL). Selected by the owner; **not yet installed or provisioned**. | [runbook](../development/runbook.md) |
+| Django user model | `accounts.User` extending `AbstractUser`, no added fields, no custom authentication backend. Implemented; its migration is not yet applied. | ADR 0007, runbook |
+| PostgreSQL driver | Psycopg 3 as `psycopg[binary]` 3.3.8 (wheel for CPython 3.14 on Windows AMD64). Python 3.14 compatibility confirmed by a wheels-only install. | ADR 0007, runbook |
+| Exact versions and lock | Python 3.14.4, Django 5.2.19, DRF 3.18.3, psycopg 3.3.8, hash-locked. | runbook, `requirements/` |
+| Repository and module layout | `backend/` with `config/` (split settings), `apps/accounts`, `apps/health`, `tests/`. | runbook |
+| Health endpoint access | Minimal public (no login) liveness and readiness endpoints are **accepted for the current local development skeleton**, returning only a fixed `ok` or `unavailable`. Authentication elsewhere is unaffected (enforced by tests). Network exposure for a future hub remains a deployment decision (item 1.4). | runbook, [deployment.md](deployment.md) |
 
-## 1. Decisions still needed before Phase 2 (backend skeleton)
+## 1. Phase 2 follow-ups
 
-The first two items must be settled by the project owner before Phase 2
-starts. The remainder are resolved inside Phase 2 under the stated policies.
+No decision is blocking Phase 2 implementation any more. What remains is
+verification that needs a database:
 
-| # | Question | Recommended direction (not confirmed) |
+| # | Item | Status |
 | --- | --- | --- |
-| 1.1 | **PostgreSQL major version and development instance.** PostgreSQL is not installed on the VM. Which major version, and how do developers obtain a local instance (native Windows install, or Docker for development only)? | Consider a major version with the longest remaining support that has a suitable Windows installer and driver support. As of the 2026-11-10 verification, supported majors were 14 to 18 and 14 ends on 2026-11-12, so it should not be chosen. Decide after checking driver support. Installer experiments must use a native Windows setup regardless. |
-| 1.2 | **Django user model.** Use the built-in model directly, or declare a project user model that adds no fields. This must be decided **before the first migration**, because changing it later is complex ([ADR 0007](../decisions/0007-technology-baseline.md)). | Declare a project user model with no added fields, which keeps the "no custom fields" direction and avoids a hard later migration. Needs owner confirmation. |
-| 1.3 | **PostgreSQL driver** and its Python 3.14 support. | Verify against the driver's own documentation in Phase 2; if unsupported on 3.14, apply the 3.13 fallback. |
-| 1.4 | **Repository and module layout.** | Derive from [overview.md](overview.md), section 5; decide at the start of Phase 2. |
-| 1.5 | **Exact version pins and the hash/lock mechanism** under the ADR 0007 reproducibility policy. | Resolved inside Phase 2 by recording exact versions after the first successful install. |
+| 1.1 | **Provision PostgreSQL 18 natively** and run the PostgreSQL-backed checks. | Pending; steps in the [runbook](../development/runbook.md), section 6 |
+| 1.2 | **Confirm Django 5.2 works with PostgreSQL 18 in practice.** Django 5.2 documents "PostgreSQL 14 and higher" and does not name 18. | Pending the item above |
+| 1.3 | **Binary versus source-built Psycopg for production.** Psycopg describes binary packages as best-effort. | Deferred to Phase 8 packaging |
+| 1.4 | **Network exposure of the public health endpoints and the Django admin route** for a future company hub. Local development use is accepted (see section 0); a hub may need these restricted to local or monitoring networks, or `/admin/` disabled or moved. | Deferred to the hub deployment decision ([deployment.md](deployment.md)) |
 
 ## 2. Decisions needed before Phase 3 (data, documents, authorization)
 

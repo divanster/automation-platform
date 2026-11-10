@@ -1,6 +1,7 @@
 # Data Model
 
-> **Status: Proposed. No models or migrations exist.** This document defines
+> **Status: Proposed. No domain models exist** (only the `accounts.User`
+> skeleton model, which adds no fields to Django's default user). This document defines
 > entity responsibilities and relationships. Field lists are illustrative and
 > will be refined when the backend is built (Phase 3). Confirmed product
 > directions (one company per installation, UUID public identifiers) are

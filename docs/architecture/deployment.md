@@ -1,7 +1,8 @@
 # Deployment
 
-> **Status: Proposed. Nothing is built or installed.** Runtime versions,
-> packaging tools, and exact directory paths are not selected. This document
+> **Status: Proposed. No deployment artifact is built or installed** (the
+> Phase 2 skeleton runs only as a development server). Packaging tools and
+> exact directory paths are not selected. This document
 > describes intended deployment structure and operational responsibilities, and
 > it names the questions that must be answered by experiment.
 
@@ -14,11 +15,12 @@
   developed later.
 - Development conveniences (debug mode, test adapter, sample data) must not be
   present in a deployed installation by default.
-- The technology baseline (Python 3.14 series, Django 5.2 LTS, DRF,
-  `venv` and `pip`) is recorded in
-  [ADR 0007](../decisions/0007-technology-baseline.md). The PostgreSQL major
-  version and the exact patch versions are not selected yet
-  ([open-questions.md](open-questions.md)).
+- The technology baseline (Python 3.14, Django 5.2 LTS, DRF, `venv` and `pip`)
+  is recorded in [ADR 0007](../decisions/0007-technology-baseline.md), and the
+  exact versions in use in the
+  [development runbook](../development/runbook.md). PostgreSQL 18, installed
+  natively on Windows (not Docker or WSL), is selected but **not yet
+  provisioned** on the development VM.
 - Development data must not contain real customer documents or credentials.
 
 ### Standalone deployment (first target)
@@ -66,6 +68,10 @@ machines. It is still one installation serving one company.
 - The standalone design must not preclude this: no assumption that the browser
   and server share a machine, no database access from the UI, and authorization
   enforced in the API.
+- The Phase 2 skeleton exposes minimal public (no login) liveness and readiness
+  endpoints and a Django admin route. These are accepted for local development
+  only. Whether they stay reachable, are restricted to local or monitoring
+  networks, or are disabled or moved is a decision for hub network exposure.
 - Out of scope, intentionally: **synchronizing independent desktop databases.**
   A company that wants shared access uses a hub, not many synced copies.
 

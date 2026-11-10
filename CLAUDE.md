@@ -4,7 +4,9 @@ Working rules for AI-assisted development in this repository.
 
 ## Project state
 
-Architecture is **planned, not implemented**. See `README.md` and
+Architecture is **planned, not implemented**, apart from the Phase 2 backend
+skeleton (settings, `accounts.User`, health endpoints; see
+`docs/development/runbook.md`). See `README.md` and
 `docs/architecture/README.md`. Do not describe planned components as existing.
 
 ## Working rules

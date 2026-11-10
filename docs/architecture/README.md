@@ -1,8 +1,10 @@
 # Architecture
 
-> **Status: Proposed. Architecture is planned, not implemented.** No Django
-> project, React app, Docker setup, PostgreSQL service, virtual environment, or
-> dependency file exists yet. These documents are drafts for review.
+> **Status: Architecture is planned, not implemented, except for a minimal
+> backend skeleton** (Django project, `accounts.User`, health endpoints; see the
+> [development runbook](../development/runbook.md)). The business workflow,
+> worker, AI gateway, frontend, installer, and a provisioned PostgreSQL do not
+> exist. Everything below is a design unless an Accepted ADR says otherwise.
 
 This directory contains the initial architecture specification and
 implementation plan for the Automation Platform.
@@ -25,6 +27,8 @@ implementation plan for the Automation Platform.
    scope, tests, and a stop-and-report gate.
 8. [open-questions.md](open-questions.md): unresolved decisions, grouped by when
    they are needed.
+
+What currently exists and how to run it: [../development/runbook.md](../development/runbook.md).
 
 Decision records are in [../decisions/README.md](../decisions/README.md),
 including the [technology baseline](../decisions/0007-technology-baseline.md).

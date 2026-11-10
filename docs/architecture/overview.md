@@ -1,7 +1,8 @@
 # Architecture Overview
 
-> **Status: Nothing described here is implemented.** This document describes
-> intended structure, not existing code. Confirmed directions are listed in
+> **Status: Apart from the Phase 2 backend skeleton (section 9), nothing
+> described here is implemented.** This document describes intended structure,
+> not existing code. Confirmed directions are listed in
 > section 2; other statements are proposals unless an Accepted ADR says
 > otherwise.
 
@@ -233,11 +234,14 @@ Rules:
 | --- | --- |
 | Repository, README, CLAUDE.md, `.gitignore`, `.gitattributes` | Implemented (documentation and configuration only) |
 | These architecture documents and ADRs | Reviewed and revised in the Phase 1 review; accepted decisions are marked in the [decision index](../decisions/README.md); everything else is proposed |
-| Django project, modules, models, migrations | Not started |
+| Django project skeleton (settings, `accounts`, `health`) | Implemented in Phase 2; DB-free tests pass; PostgreSQL-backed checks pending |
+| `accounts.User` model and its initial migration | Implemented; migration not yet applied to any database |
+| Domain models (cases, documents, revisions, approvals, exports) and other migrations | Not started |
 | Worker, queue, AI gateway, adapters | Not started |
 | Frontend | Not started |
 | Installer, backup/restore tooling | Not started |
-| Any test, CI, or runtime check | None exist |
+| PostgreSQL 18 on the development VM | Selected, **not installed or contacted** |
+| CI | None |
 
 This table must be updated whenever a component is actually built.
 

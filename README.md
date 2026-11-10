@@ -2,9 +2,12 @@
 
 A local-first business process automation platform.
 
-> **Status: implementation has not started.** This repository currently contains
-> only project documentation and repository configuration. Everything described
-> below is planned, not built.
+> **Status: implementation of the product has not started.** The repository
+> contains documentation, repository configuration, and a minimal Django backend
+> skeleton (project settings, a user model, and health endpoints). The business
+> workflow, background worker, AI adapters, frontend, and installer are **not**
+> built. Everything else described below is planned, not built. See the
+> [development runbook](docs/development/runbook.md) for exactly what exists.
 
 ## Purpose
 
@@ -26,12 +29,13 @@ keeping company data under the company's control by default.
 
 ## Planned stack
 
-- Django 5.2 LTS with Django REST Framework (API), on the Python 3.14 series
-- PostgreSQL
+- Django 5.2 LTS with Django REST Framework (API), on Python 3.14
+- PostgreSQL 18 (native Windows install; not yet provisioned on the development VM)
 - Persistent background worker
 - React / TypeScript (frontend)
 
-Exact versions are not pinned yet; see the
+Exact versions in use are recorded in the
+[development runbook](docs/development/runbook.md); the reasoning is in the
 [technology baseline](docs/decisions/0007-technology-baseline.md).
 
 ## Documentation
@@ -43,6 +47,7 @@ Exact versions are not pinned yet; see the
 - [Implementation plan](docs/architecture/implementation-plan.md)
 - [Open questions](docs/architecture/open-questions.md)
 - [Decision records](docs/decisions/README.md)
+- [Development runbook](docs/development/runbook.md): setup, tests, and current status
 
 ## Repository conventions
 

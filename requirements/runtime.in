@@ -1,0 +1,6 @@
+# Direct RUNTIME dependencies, each pinned to an exact version (ADR 0007).
+# The fully resolved, hash-verified set is requirements/runtime.txt.
+# Target: CPython 3.14 on Windows AMD64. See docs/development/runbook.md.
+Django==5.2.19
+djangorestframework==3.18.3
+psycopg[binary]==3.3.8

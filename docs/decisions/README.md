@@ -26,7 +26,7 @@ under its Status as qualifications or as "Proposed, unproven".
 | [0004](0004-provider-neutral-ai-gateway.md) | Provider-neutral AI gateway | Accepted for the gateway, deterministic adapter first, and no silent cloud fallback; **policy-mode details Proposed** |
 | [0005](0005-company-configuration-not-forks.md) | Company configuration, not forks | Accepted |
 | [0006](0006-local-execution-independent-of-control-plane.md) | Local execution independent of a control plane | Accepted |
-| [0007](0007-technology-baseline.md) | Technology baseline for the backend skeleton | Accepted (exact patch versions and PostgreSQL version not yet selected) |
+| [0007](0007-technology-baseline.md) | Technology baseline for the backend skeleton | Accepted; exact versions pinned and PostgreSQL 18 selected in Phase 2 (see its implementation record); PostgreSQL not yet provisioned |
 
 ## Conventions
 

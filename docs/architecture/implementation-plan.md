@@ -1,10 +1,10 @@
 # Implementation Plan
 
-> **Status: Implementation has not started.** This plan sequences the work. It
-> contains **no delivery dates** and no effort estimates; those require
-> decisions and measurements that do not exist yet. Phases 0 and 1 (and the
-> Phase 1 review that closed the Phase 2 technology decisions) produced
-> documentation only. No application code exists.
+> **Status: Product implementation has not started.** This plan sequences the
+> work. It contains **no delivery dates** and no effort estimates; those require
+> decisions and measurements that do not exist yet. Phases 0 and 1 produced
+> documentation only. Phase 2 has produced a backend skeleton (see "Phase 2
+> status"); no business workflow, worker, AI, frontend, or installer code exists.
 
 ## How to use this plan
 
@@ -25,7 +25,7 @@
 | --- | --- | --- |
 | 0 | Repository preflight | Performed (read-only checks) |
 | 1 | Architecture specification | Reviewed and revised; decisions recorded |
-| 2 | Backend skeleton | Not started |
+| 2 | Backend skeleton | **Implemented, acceptance incomplete**: DB-free checks pass; PostgreSQL-backed checks are blocked until PostgreSQL 18 is provisioned (see "Phase 2 status" below) |
 | 3 | Data, documents, and basic authorization | Not started |
 | 4 | Persistent worker | Not started |
 | (checkpoint) | Installation feasibility experiment | Not started |
@@ -92,10 +92,9 @@
   authentication; a health endpoint; test runner and lint/format configuration;
   a connection to a local PostgreSQL development database; a basic CI definition
   if desired.
-- **Dependencies:** Phase 1 reviewed; the owner has decided the PostgreSQL
-  major version and development-instance approach and the Django user-model
-  question (open questions 1.1 and 1.2 in
-  [open-questions.md](open-questions.md)).
+- **Dependencies:** Phase 1 reviewed; the owner decided PostgreSQL 18 (native
+  Windows, not Docker or WSL) and `accounts.User` extending `AbstractUser`
+  (see [open-questions.md](open-questions.md), section 0).
 - **Allowed scope:** structure, configuration, tooling, and the health endpoint.
 - **Exclusions:** domain models beyond what tooling needs, workflow logic,
   worker, AI code, frontend, installer, Docker unless decided, JWT, custom user
@@ -110,6 +109,38 @@
 - **Stop-and-report gate:** report the chosen versions and tools, how to run
   tests, and any deviation from the plan.
 
+### Phase 2 status
+
+Recorded after the implementation pass. **Phase 2 is not complete.**
+
+Done and verified (DB-free; PostgreSQL was not contacted):
+
+- Backend skeleton: `backend/config` (split base/development/production
+  settings), `accounts` (`accounts.User`, no added fields, standard `UserAdmin`,
+  initial migration generated) and `health` (liveness and readiness).
+- Exact versions and a hash-locked, runtime/development-separated dependency set
+  ([runbook](../development/runbook.md)); a fresh environment built from the lock
+  matched `.venv`, and an altered hash was rejected.
+- 59 DB-free tests pass, including settings parsing, the production secret and
+  host requirements, and tests that fail if any API view other than the two
+  health views becomes public. `manage.py check`, compile checks, and a DB-free
+  migration-state test pass. A live development server answered both health
+  endpoints (readiness 503 with no database configured).
+
+Not done (acceptance gaps):
+
+| Gap | Blocked by |
+| --- | --- |
+| A real PostgreSQL connectivity check (readiness returning 200 against a real server) | PostgreSQL 18 not installed on the VM |
+| `migrate` of `accounts.0001_initial` against PostgreSQL | Same |
+| The `requires_postgres` tests (real user creation, uniqueness, real readiness) | Same |
+| Compatibility of Django 5.2 with PostgreSQL 18 in practice | Same (Django 5.2 documents PostgreSQL 14+ and does not name 18) |
+| Confirmation that `runserver` plus `migrate` works end to end | Same |
+| CI definition (optional in the plan) | Not requested |
+
+Phase 2 should be marked complete only after the PostgreSQL-backed checks pass
+and are recorded.
+
 ## Phase 3: Data, documents, and basic authorization
 
 - **Goal:** persistent core entities, safe document storage, and role-based
@@ -122,7 +153,9 @@
   document storage service with hashing and atomic writes; upload with content
   type detection and size limits; authentication per the chosen approach; role
   checks; audit recording; configuration validation and versioning.
-- **Dependencies:** Phase 2; the duplicate-upload policy, upload size limit,
+- **Dependencies:** Phase 2 accepted, including its PostgreSQL-backed checks
+  (a provisioned PostgreSQL 18 is required before this phase's migrations can be
+  tested); the duplicate-upload policy, upload size limit,
   role model details, and password/account-recovery handling decided
   (open questions 2.1 to 2.4). Authentication approach, input format (plain
   text), and public identifiers (UUID) are already decided.

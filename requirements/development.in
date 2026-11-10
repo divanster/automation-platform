@@ -1,0 +1,6 @@
+# Direct DEVELOPMENT dependencies (tools that are never installed in production).
+# Everything from runtime is included.
+#
+# There are no development-only packages yet: tests use Django's built-in test
+# runner. Add exact-pinned entries here when a tool is actually needed.
+-r runtime.in

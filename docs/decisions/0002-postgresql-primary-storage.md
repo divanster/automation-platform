@@ -7,8 +7,10 @@ modeling and managed file storage for document bytes. pgvector remains an
 optional, deferred capability.
 
 Qualification: installing and operating PostgreSQL on client Windows machines
-is **unproven** until the installation feasibility experiment. The PostgreSQL
-major version is not yet selected ([ADR 0007](0007-technology-baseline.md)).
+is **unproven** until the installation feasibility experiment. PostgreSQL 18
+(native Windows) is selected ([ADR 0007](0007-technology-baseline.md)) but not
+yet installed on the development machine, and Django 5.2 with PostgreSQL 18 is
+unverified until the PostgreSQL-backed tests have run.
 
 ## Context
 

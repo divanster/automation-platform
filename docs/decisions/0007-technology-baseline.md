@@ -2,8 +2,9 @@
 
 ## Status
 
-Accepted, with the qualifications in the "Open items" section. Exact patch
-versions and the PostgreSQL major version are **not** selected yet.
+Accepted, with the qualifications in the "Open items" section. The Phase 2
+implementation record below lists the exact versions pinned and the PostgreSQL
+major version selected by the owner (18). PostgreSQL is not yet provisioned.
 
 Verification date: **2026-11-10**.
 
@@ -69,7 +70,7 @@ Nothing was installed, created, or modified on the machine.
 | API framework | **Django REST Framework, 3.18 series** | Latest listed on the verification date was 3.18.3. Exact version pinned in Phase 2. |
 | Dependency management | **Standard `venv` and `pip`** | No additional dependency manager initially. |
 | Authentication | **Django's built-in users and session authentication** | See user-model open item. |
-| Database | **PostgreSQL as the only application database** | Major version not yet selected. |
+| Database | **PostgreSQL as the only application database** | Major version 18 was selected later by the owner (see the Phase 2 implementation record). |
 
 ### Explicitly excluded from the initial skeleton
 
@@ -100,21 +101,35 @@ These rules apply from Phase 2:
 6. The Python version used is recorded in the repository so developers and
    automation use the same one.
 
-No dependency file or virtual environment has been created by this decision.
+This decision itself created no files. The dependency files and the virtual
+environment were created later, in Phase 2 (see the implementation record).
+
+## Phase 2 implementation record (added 2026-11-10)
+
+The owner closed the items below. They are recorded here without changing the
+decision above.
+
+| Item | Outcome |
+| --- | --- |
+| PostgreSQL | **Version 18**, native Windows install; not Docker or WSL. **Not installed or provisioned yet.** |
+| Django user model | **`accounts.User` extending `AbstractUser`**, no added fields, no custom authentication backend. `AUTH_USER_MODEL` was set before the first migration was generated. |
+| PostgreSQL driver | **Psycopg 3**, installed as `psycopg[binary]`. A wheels-only install succeeded for CPython 3.14 on Windows AMD64, so the 3.13 fallback was not needed. |
+| Pinned versions | Python 3.14.4, Django 5.2.19, DRF 3.18.3, psycopg 3.3.8, psycopg-binary 3.3.8, asgiref 3.13.0, sqlparse 0.6.1, tzdata 2026.6 |
+| Reproducibility | Direct dependencies pinned exactly in `requirements/*.in`; the full set with sha256 hashes in `requirements/*.txt`, resolved for CPython 3.14 on Windows AMD64. Verified in a fresh environment; an altered hash was rejected. No development-only packages exist yet. |
+
+Psycopg's documentation lists Python 3.10 to 3.15 and PostgreSQL 10 to 18 and
+describes the `binary` option as needing no local libpq or compiler; it also
+says binary packages are produced on a best-effort basis (source:
+https://www.psycopg.org/psycopg3/docs/basic/install.html, read 2026-11-10).
+Django 5.2's documentation requires psycopg 3.1.8 or later and states
+"PostgreSQL 14 and higher" without naming 18 (source:
+https://docs.djangoproject.com/en/5.2/ref/databases/). **Django 5.2 with
+PostgreSQL 18 is therefore unverified until the PostgreSQL-backed tests run.**
 
 ## Open items (not decided here)
 
-- **PostgreSQL major version** and how developers obtain a local instance
-  (native install or Docker). PostgreSQL is not installed on the VM. Candidate
-  majors are those listed as supported above; the choice must consider the
-  Windows installation story and driver support.
-- **PostgreSQL driver** and its Python 3.14 support.
-- **Django user model.** The owner's direction is Django's built-in users with
-  no custom fields. Because changing the user model after the first migration is
-  complex, Phase 2 must confirm, **before the first migration**, whether to use
-  the built-in model directly or declare a project user model that adds no
-  fields. Recommendation: declare a project user model with no added fields
-  at the start, which keeps the owner's "no custom fields" direction.
+- **Binary versus source-built Psycopg for production.** Revisit during
+  installer and packaging work (Phase 8).
 - **Django 6.2 LTS transition.** Django 5.2 extended support ends April 2028,
   and the next LTS (6.2) is listed for April 2027. A planned move to 6.2 is
   expected during the project's life; it depends on DRF declaring support
