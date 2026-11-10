@@ -131,7 +131,7 @@ Not done (acceptance gaps):
 
 | Gap | Blocked by |
 | --- | --- |
-| A real PostgreSQL connectivity check (readiness returning 200 against a real server) | PostgreSQL 18 not installed on the VM |
+| A real PostgreSQL connectivity check (readiness returning 200 against a real server) | PostgreSQL 18 not installed on the VM. The setup and validation procedure is prepared in the [runbook](../development/runbook.md), section 6, and has not been run. The VM account is not a local Administrator, so the binaries-archive route is the proposed install path. |
 | `migrate` of `accounts.0001_initial` against PostgreSQL | Same |
 | The `requires_postgres` tests (real user creation, uniqueness, real readiness) | Same |
 | Compatibility of Django 5.2 with PostgreSQL 18 in practice | Same (Django 5.2 documents PostgreSQL 14+ and does not name 18) |
