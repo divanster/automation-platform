@@ -19,8 +19,11 @@
   is recorded in [ADR 0007](../decisions/0007-technology-baseline.md), and the
   exact versions in use in the
   [development runbook](../development/runbook.md). PostgreSQL 18, installed
-  natively on Windows (not Docker or WSL), is selected but **not yet
-  provisioned** on the development VM.
+  natively on Windows (not Docker or WSL), is selected. It is to be installed on
+  the owner's **local** Windows computer, where the real-database tests and
+  application smoke tests run; the Claude Code development VM hosts no database
+  and never connects to the local one. The local installation is **not yet
+  done or validated**.
 - Development data must not contain real customer documents or credentials.
 
 ### Standalone deployment (first target)

@@ -4,7 +4,9 @@
 
 Accepted, with the qualifications in the "Open items" section. The Phase 2
 implementation record below lists the exact versions pinned and the PostgreSQL
-major version selected by the owner (18). PostgreSQL is not yet provisioned.
+major version selected by the owner (18). PostgreSQL 18 is to be installed on
+the owner's local Windows computer (not in the development VM) and is not yet
+provisioned; local validation is pending the owner.
 
 Verification date: **2026-11-10**.
 
@@ -31,7 +33,7 @@ Three things are deliberately kept apart in this record:
 | Python | 3.14.4 found on `PATH` (installed under `D:\Software\Python.Python.3.14\`, and a second launcher location under the user profile). No `py` launcher was found, so other installed Python versions were **not enumerated**. |
 | pip | 26.0.1 (shipped with that Python) |
 | `venv` module | Available |
-| PostgreSQL tools (`psql`, `pg_ctl`) | **Not found on `PATH`.** No PostgreSQL installation was detected. |
+| PostgreSQL tools (`psql`, `pg_ctl`) | **Not found on `PATH`.** No PostgreSQL installation was detected. This is by design: PostgreSQL 18 is to be installed on the owner's local computer, not in the VM. |
 
 Nothing was installed, created, or modified on the machine.
 
@@ -111,7 +113,7 @@ decision above.
 
 | Item | Outcome |
 | --- | --- |
-| PostgreSQL | **Version 18**, native Windows install; not Docker or WSL. **Not installed or provisioned yet.** |
+| PostgreSQL | **Version 18**, native Windows install; not Docker or WSL. To be installed on the owner's **local** computer, never in the development VM. **Not installed or provisioned yet.** |
 | Django user model | **`accounts.User` extending `AbstractUser`**, no added fields, no custom authentication backend. `AUTH_USER_MODEL` was set before the first migration was generated. |
 | PostgreSQL driver | **Psycopg 3**, installed as `psycopg[binary]`. A wheels-only install succeeded for CPython 3.14 on Windows AMD64, so the 3.13 fallback was not needed. |
 | Pinned versions | Python 3.14.4, Django 5.2.19, DRF 3.18.3, psycopg 3.3.8, psycopg-binary 3.3.8, asgiref 3.13.0, sqlparse 0.6.1, tzdata 2026.6 |

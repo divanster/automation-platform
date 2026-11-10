@@ -240,7 +240,7 @@ Rules:
 | Worker, queue, AI gateway, adapters | Not started |
 | Frontend | Not started |
 | Installer, backup/restore tooling | Not started |
-| PostgreSQL 18 on the development VM | Selected, **not installed or contacted** |
+| PostgreSQL 18 | Selected; to be installed on the owner's **local** computer, never in the development VM. **Not installed or contacted yet**; local validation is pending the owner |
 | CI | None |
 
 This table must be updated whenever a component is actually built.

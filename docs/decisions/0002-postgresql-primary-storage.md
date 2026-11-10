@@ -8,9 +8,11 @@ optional, deferred capability.
 
 Qualification: installing and operating PostgreSQL on client Windows machines
 is **unproven** until the installation feasibility experiment. PostgreSQL 18
-(native Windows) is selected ([ADR 0007](0007-technology-baseline.md)) but not
-yet installed on the development machine, and Django 5.2 with PostgreSQL 18 is
-unverified until the PostgreSQL-backed tests have run.
+(native Windows) is selected ([ADR 0007](0007-technology-baseline.md)) and will
+be installed on the owner's local Windows computer, not in the development VM.
+It is not yet installed, and Django 5.2 with PostgreSQL 18 is unverified until
+the PostgreSQL-backed tests have run locally and the owner has reported the
+results.
 
 ## Context
 

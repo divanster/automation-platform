@@ -25,7 +25,7 @@
 | --- | --- | --- |
 | 0 | Repository preflight | Performed (read-only checks) |
 | 1 | Architecture specification | Reviewed and revised; decisions recorded |
-| 2 | Backend skeleton | **Implemented, acceptance incomplete**: DB-free checks pass; PostgreSQL-backed checks are blocked until PostgreSQL 18 is provisioned (see "Phase 2 status" below) |
+| 2 | Backend skeleton | **Implemented, acceptance incomplete**: DB-free checks pass; PostgreSQL-backed checks are **pending the owner running them on the local Windows computer**, where PostgreSQL 18 is to be installed (see "Phase 2 status" below) |
 | 3 | Data, documents, and basic authorization | Not started |
 | 4 | Persistent worker | Not started |
 | (checkpoint) | Installation feasibility experiment | Not started |
@@ -113,7 +113,17 @@
 
 Recorded after the implementation pass. **Phase 2 is not complete.**
 
-Done and verified (DB-free; PostgreSQL was not contacted):
+**Division of work.** The Claude Code development VM is used for code
+development and database-free checks only; PostgreSQL is **not** installed there
+and the VM never connects to a database on another machine. PostgreSQL 18 is
+**to be installed** on the owner's **local** Windows computer (it is not installed
+yet), and migrations, the PostgreSQL-backed tests, the real readiness probe, and
+the application smoke test are to run there. The local PyCharm project and environment are not confirmed as
+configured. Local validation stays **pending until the owner runs the
+[runbook](../development/runbook.md) section 6 commands locally and provides the
+results**; nothing local has been done or observed.
+
+Done and verified on the VM (DB-free; PostgreSQL was not contacted):
 
 - Backend skeleton: `backend/config` (split base/development/production
   settings), `accounts` (`accounts.User`, no added fields, standard `UserAdmin`,
@@ -131,11 +141,12 @@ Not done (acceptance gaps):
 
 | Gap | Blocked by |
 | --- | --- |
-| A real PostgreSQL connectivity check (readiness returning 200 against a real server) | PostgreSQL 18 not installed on the VM. The setup and validation procedure is prepared in the [runbook](../development/runbook.md), section 6, and has not been run. The VM account is not a local Administrator, so the binaries-archive route is the proposed install path. |
-| `migrate` of `accounts.0001_initial` against PostgreSQL | Same |
-| The `requires_postgres` tests (real user creation, uniqueness, real readiness) | Same |
+| A real PostgreSQL connectivity check (readiness returning 200 against a real server) | PostgreSQL 18 is not yet installed on the owner's local computer. The local setup and validation procedure is prepared in the [runbook](../development/runbook.md), section 6, and has **not been run**. The selected install path is the EDB installer; the binaries archive is only an optional alternative. The local computer's permissions, Python, and paths are unknown. |
+| `migrate` of `accounts.0001_initial` against PostgreSQL | Same (local, pending the owner) |
+| The `requires_postgres` tests (real user creation, uniqueness, real readiness) | Same (local, pending the owner) |
 | Compatibility of Django 5.2 with PostgreSQL 18 in practice | Same (Django 5.2 documents PostgreSQL 14+ and does not name 18) |
-| Confirmation that `runserver` plus `migrate` works end to end | Same |
+| Confirmation that `runserver` plus `migrate` works end to end, and the localhost application smoke test | Same (local, pending the owner) |
+| Hash-locked dependency install on the local computer | Verified only on the VM; pending locally |
 | CI definition (optional in the plan) | Not requested |
 
 Phase 2 should be marked complete only after the PostgreSQL-backed checks pass
@@ -154,8 +165,8 @@ and are recorded.
   type detection and size limits; authentication per the chosen approach; role
   checks; audit recording; configuration validation and versioning.
 - **Dependencies:** Phase 2 accepted, including its PostgreSQL-backed checks
-  (a provisioned PostgreSQL 18 is required before this phase's migrations can be
-  tested); the duplicate-upload policy, upload size limit,
+  (a provisioned PostgreSQL 18 on the owner's local computer is required before
+  this phase's migrations can be tested); the duplicate-upload policy, upload size limit,
   role model details, and password/account-recovery handling decided
   (open questions 2.1 to 2.4). Authentication approach, input format (plain
   text), and public identifiers (UUID) are already decided.

@@ -30,7 +30,8 @@ keeping company data under the company's control by default.
 ## Planned stack
 
 - Django 5.2 LTS with Django REST Framework (API), on Python 3.14
-- PostgreSQL 18 (native Windows install; not yet provisioned on the development VM)
+- PostgreSQL 18 (native Windows install on the owner's local computer, not in the
+  development VM; not installed or validated yet)
 - Persistent background worker
 - React / TypeScript (frontend)
 
