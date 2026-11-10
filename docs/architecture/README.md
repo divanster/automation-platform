@@ -1,31 +1,52 @@
-# Architecture (proposed)
+# Architecture
 
-> **Status: planned, not implemented.** These are initial proposed boundaries
-> and may change before implementation.
+> **Status: Proposed. Architecture is planned, not implemented.** No Django
+> project, React app, Docker setup, PostgreSQL service, virtual environment, or
+> dependency file exists yet. These documents are drafts for review.
 
-## Proposed boundaries
+This directory contains the initial architecture specification and
+implementation plan for the Automation Platform.
+
+## Reading order
+
+1. [overview.md](overview.md): scope, non-goals, components, boundaries, trust
+   boundaries, planned versus implemented status.
+2. [first-workflow.md](first-workflow.md): the first vertical slice (request
+   document to approved structured draft), its state machine, and acceptance
+   criteria.
+3. [data-model.md](data-model.md): entities, relationships, revisions, hashes,
+   versioning, provenance.
+4. [background-execution.md](background-execution.md): PostgreSQL-backed queue
+   and persistent worker design.
+5. [ai-policy.md](ai-policy.md): AI gateway, data-policy modes, and safeguards.
+6. [deployment.md](deployment.md): development, standalone, and future hub
+   deployment; operations.
+7. [implementation-plan.md](implementation-plan.md): phases 0 to 9, each with
+   scope, tests, and a stop-and-report gate.
+8. [open-questions.md](open-questions.md): unresolved decisions, grouped by when
+   they are needed.
+
+Decision records are in [../decisions/README.md](../decisions/README.md),
+including the [technology baseline](../decisions/0007-technology-baseline.md).
+Accepted ADRs record owner-confirmed decisions; they do not mean anything is
+implemented.
+
+## Summary of proposed boundaries
 
 | Component | Responsibility |
 | --- | --- |
 | Frontend | React/TypeScript user interface for uploads, review, and approvals. |
-| Django API | Business logic, authentication, workflow orchestration, and the public API. |
-| Persistent background worker | Runs long-lived and retryable jobs (extraction, validation, export) outside request handling. |
-| PostgreSQL | System of record for configuration, workflow state, and audit data. |
-| Managed document storage | Controlled storage for uploaded and generated documents. |
-| AI gateway | Single entry point for AI calls; routes to configured local or external providers and enforces local-only mode with no silent cloud fallback. |
-| Approvals and audit | Human approval gates before significant external actions, with an auditable record of decisions and AI outputs. |
-| Optional future control portal | Possible later portal for managing deployments; not part of the initial scope. |
+| Django API | Authentication, authorization, use-case orchestration, and the public API over the shared domain layer. |
+| Persistent background worker | Separate process that runs retryable tasks (extraction, export) using the same domain code. |
+| PostgreSQL | System of record for business records, workflow state, tasks, approvals, configuration, and audit events. |
+| Managed document storage | Controlled file storage outside the source tree, referenced by key and hash. |
+| AI gateway | Provider-neutral entry point for model calls; enforces the company data policy with no silent cloud fallback. |
+| Approvals and audit | Human approvals tied to specific result revisions, and an append-only event history. |
+| Optional future control portal | Possible later portal; never required for local operation. |
 
 ## First vertical slice
 
-The first end-to-end slice will be:
+**document upload -> extraction -> validation -> human review and approval -> export**
 
-**document upload -> extraction -> validation -> approval -> export**
-
-It is intended to exercise every core boundary above (except the optional
-control portal) with the smallest useful workflow.
-
-## Out of scope for now
-
-No Django project, React app, Docker setup, PostgreSQL services, virtual
-environments, or dependency files exist yet.
+Specified in [first-workflow.md](first-workflow.md). It uses a deterministic test
+AI adapter first and performs no consequential external actions.
