@@ -1,0 +1,35 @@
+# Python environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# IDE
+.idea/
+
+# Build and dependency output
+node_modules/
+dist/
+build/
+
+# Runtime data, never commit
+runtime/
+backups/
+logs/
+models/
+*.log
+
+# Local Claude Code settings (the rest of .claude/ is tracked)
+.claude/settings.local.json
