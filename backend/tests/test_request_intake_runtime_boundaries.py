@@ -96,7 +96,7 @@ FORBIDDEN_PREFIXES = (
 )
 
 CHILD_PROGRAM = r"""
-import json, sys
+import decimal, json, sys
 
 backend_dir = sys.argv[1]
 blocked = json.loads(sys.argv[2])
@@ -125,16 +125,21 @@ limits = ri.ValidationLimits(max_quantity=100, max_text_length=40)
 
 recording = True
 outcomes = []
+canonical_hashes = []
 for text in texts:
     extraction = extractor.extract(text)
     for kwargs in ({}, {"limits": limits}, {"source_text": text}, {"limits": limits, "source_text": text, "ambiguities": extraction.ambiguities}):
         result = ri.validate_request(extraction.candidate, **kwargs)
         outcomes.append([f.code.value for f in result.findings])
+    if not ri.validate_request(extraction.candidate, source_text=text, ambiguities=extraction.ambiguities).blocking:
+        canonical = ri.canonicalize_request(extraction.candidate, source_text=text, ambiguities=extraction.ambiguities)
+        canonical_hashes.append(canonical.content_hash)
 ri.to_decimal(2.5); ri.to_decimal(10 ** 40)
+ri.canonical_decimal_string(decimal.Decimal("1E+30"))
 recording = False
 
 leaked = sorted(m for m in sys.modules if (m == "django" or m.startswith("django.")) and sys.modules[m] is not None)
-print(json.dumps({"events": sorted(set(events)), "outcomes": len(outcomes), "django_loaded": leaked}))
+print(json.dumps({"events": sorted(set(events)), "outcomes": len(outcomes), "canonical_runs": len(canonical_hashes), "django_loaded": leaked}))
 """
 
 
@@ -162,6 +167,7 @@ class CleanInterpreterTests(unittest.TestCase):
         self.assertEqual(self.completed.returncode, 0, self.completed.stderr[-2000:])
         self.assertIsNotNone(self.report, self.completed.stderr[-2000:])
         self.assertEqual(self.report["outcomes"], 16)  # 4 texts x 4 validation variants all completed
+        self.assertEqual(self.report["canonical_runs"], 1)  # the one fully valid candidate was canonicalized and hashed
 
     def test_django_was_never_loaded_by_the_package(self):
         self.assertIsNotNone(self.report)

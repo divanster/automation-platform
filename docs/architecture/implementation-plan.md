@@ -131,7 +131,7 @@ Done and verified on the VM (DB-free; PostgreSQL was not contacted):
 - Exact versions and a hash-locked, runtime/development-separated dependency set
   ([runbook](../development/runbook.md)); a fresh environment built from the lock
   matched `.venv`, and an altered hash was rejected.
-- 242 DB-free tests pass (59 for the skeleton plus 183 for the request-intake
+- 343 DB-free tests pass (59 for the skeleton plus 284 for the request-intake
   preparation slice described below), including settings parsing, the production
   secret and host requirements, and tests that fail if any API view other than the
   two health views becomes public. `manage.py check`, compile checks, and a DB-free
@@ -231,13 +231,14 @@ and are recorded.
 
 > **Status: not started.** A small database-independent *preparation slice*
 > already exists outside this phase: the request result schema, pure validation
-> rules, and a deterministic test extractor as plain Python with DB-free tests
+> rules, a deterministic test extractor, and canonical serialization with SHA-256
+> content hashing (an internal component, not an export), as plain Python with DB-free tests
 > ([request-intake-slice.md](../development/request-intake-slice.md)). It does not
 > complete or start Phase 5: there is no persistence, no revision or approval
 > logic, no export, no state machine, no tasks or worker, no storage, and no
 > API. Phase 2 database acceptance is still pending the owner's local PostgreSQL
 > validation. Some specification questions it surfaced are open (open-questions.md
-> items 2.6 to 2.12).
+> items 2.6 to 2.14).
 
 - **Goal:** the full first vertical slice working end to end without any real AI.
 - **Deliverables:** the request-document workflow package (schema, validation

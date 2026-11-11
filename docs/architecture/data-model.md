@@ -312,7 +312,16 @@ AuditEvent * --- 0..1 Case / WorkflowRun / other subject
 - A run's `current revision` pointer moves forward only.
 - Approval and export always reference a revision id plus its content hash.
 - Hashes are computed over a canonical serialization so equal content yields
-  equal hashes.
+  equal hashes. The version-1 format for the request workflow is defined and
+  tested as a database-independent preparation component (see
+  [request-intake-slice.md](../development/request-intake-slice.md)): it hashes the
+  requester, items, notes, and source references, and excludes validation findings
+  and execution metadata, which stay separate revision attributes. Source references
+  must be verified against the source text, so canonicalizing a draft that has any
+  requires that text; the text itself is not hashed, and the hash does not identify the
+  original document, whose own identity and hash remain separate revision metadata. A
+  revision must store the canonical format version with its hash. Nothing is persisted
+  yet.
 
 ## 7. File hashes and storage references
 

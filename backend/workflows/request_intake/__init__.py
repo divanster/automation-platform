@@ -5,6 +5,17 @@ any AI provider. See docs/development/request-intake-slice.md for what exists an
 what is deferred.
 """
 
+from .canonical import (
+    CANONICAL_FORMAT_VERSION,
+    HASH_ALGORITHM,
+    CanonicalContent,
+    CanonicalizationError,
+    DraftNotValidError,
+    SerializationSafetyError,
+    SourceTextRequiredError,
+    canonical_decimal_string,
+    canonicalize_request,
+)
 from .extraction import DeterministicTestExtractor, ExtractionResult, RequestExtractor
 from .findings import (
     AMBIGUITY_CODES,
@@ -35,13 +46,18 @@ from .validation import ValidationLimits, validate_request
 __all__ = [
     "AMBIGUITY_CODES",
     "Ambiguity",
+    "CANONICAL_FORMAT_VERSION",
+    "CanonicalContent",
     "CanonicalQuantity",
+    "CanonicalizationError",
     "DeterministicTestExtractor",
+    "DraftNotValidError",
     "ExtractionResult",
     "FINDINGS_CONTRACT_VERSION",
     "FieldPath",
     "Finding",
     "FindingCode",
+    "HASH_ALGORITHM",
     "INVALID_VALUE_CODES",
     "MISSING_DATA_CODES",
     "Quantity",
@@ -49,12 +65,16 @@ __all__ = [
     "RequestedItem",
     "Requester",
     "SEVERITY_BY_CODE",
+    "SerializationSafetyError",
     "SOURCE_REF_EXCERPT_MAX",
     "Severity",
     "SourceRef",
+    "SourceTextRequiredError",
     "StructuredRequest",
     "ValidationLimits",
     "ValidationResult",
+    "canonical_decimal_string",
+    "canonicalize_request",
     "make_excerpt",
     "parse_field_path",
     "to_decimal",

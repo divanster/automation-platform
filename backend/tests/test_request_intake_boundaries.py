@@ -22,7 +22,8 @@ from workflows import request_intake
 # Standard-library modules the package may import. Anything else (django, rest_framework,
 # psycopg, os, sys, pathlib, io, socket, urllib, http, requests, sqlite3, subprocess,
 # importlib, anthropic, openai, ...) fails the test and needs a deliberate decision.
-ALLOWED_IMPORTS = {"__future__", "collections", "dataclasses", "decimal", "enum", "math", "re", "typing"}
+# hashlib and json were added deliberately for canonical serialization and hashing (canonical.py).
+ALLOWED_IMPORTS = {"__future__", "collections", "dataclasses", "decimal", "enum", "hashlib", "json", "math", "re", "typing"}
 
 # Built-ins that read files, run code, or import dynamically.
 FORBIDDEN_NAMES = {"open", "exec", "eval", "compile", "__import__", "input", "breakpoint", "globals", "locals", "vars", "getattr", "setattr", "delattr"}
@@ -33,6 +34,7 @@ TESTS_DIR = Path(__file__).parent
 PURE_TEST_MODULES = [
     "test_request_intake_validation.py",
     "test_request_intake_quantity.py",
+    "test_request_intake_canonical.py",
     "test_request_intake_extraction.py",
     "test_request_intake_contract.py",
     "test_request_intake_isolation.py",
@@ -65,7 +67,7 @@ class ImportBoundaryTests(unittest.TestCase):
         names = {p.name for p in PACKAGE_DIR.glob("*.py")}
         self.assertEqual(
             names,
-            {"__init__.py", "schema.py", "findings.py", "paths.py", "quantity.py", "validation.py", "extraction.py"},
+            {"__init__.py", "schema.py", "findings.py", "paths.py", "quantity.py", "validation.py", "extraction.py", "canonical.py"},
         )
 
     def test_only_allowed_standard_library_modules_are_imported(self):

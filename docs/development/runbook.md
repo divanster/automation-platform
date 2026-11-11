@@ -27,7 +27,7 @@ permissions, Python installation, drive letters, or paths.
 | Code and documentation development, Git commits | **Yes** | Pull only (the owner may also work there) |
 | Moving code between machines | Owner pushes from the VM with their normal Git authentication | Clone or fast-forward update from GitHub |
 | Python virtual environment | Its own `.venv` (git-ignored), used for DB-free checks | Creates its **own** `.venv` from the committed locks; **never copies the VM's** |
-| DB-free checks (`check`, compile, 242 tests) | **Yes** | Yes, as the first environment check |
+| DB-free checks (`check`, compile, 343 tests) | **Yes** | Yes, as the first environment check |
 | PostgreSQL 18 | **None. Never installed in the VM.** | To be installed and configured by the owner (not done yet) |
 | Migrations, PostgreSQL-backed tests, real readiness, application smoke test | **Not performed. No acceptance claims.** | **Owner runs these and reports the results** |
 | PyCharm | Not used | **Not confirmed as configured**; set up later (section 6.9) |
@@ -212,7 +212,7 @@ python -m compileall -q apps config tests manage.py
 python manage.py test                       # DB-free tests (see below)
 ```
 
-`python manage.py test` runs **242 tests that need no PostgreSQL**. The project
+`python manage.py test` runs **343 tests that need no PostgreSQL**. The project
 test runner (`config/test_runner.py`) excludes tests tagged `requires_postgres`
 unless `AP_RUN_DB_TESTS=1` is set, so a default run never asks Django to create a
 test database on whatever server the environment points at. SQLite is never used.
@@ -390,7 +390,7 @@ report the exact message**. Do not remove `--require-hashes` or `--only-binary`.
 Get-ChildItem Env: | Where-Object Name -like "AP_*" | Select-Object -ExpandProperty Name   # names only; expect nothing
 Set-Location "$LocalProject\backend"
 ..\.venv\Scripts\python.exe manage.py check          # expect: System check identified no issues
-..\.venv\Scripts\python.exe manage.py test           # expect: Ran 242 tests ... OK
+..\.venv\Scripts\python.exe manage.py test           # expect: Ran 343 tests ... OK
 Set-Location -LiteralPath $LocalProject
 ```
 
@@ -602,7 +602,7 @@ if ($env:AP_RUN_DB_TESTS) { throw "AP_RUN_DB_TESTS is already set in this window
 
 # F4. DB-FREE tests. AP_RUN_DB_TESTS is unset (guarded above), so the runner excludes every
 #     'requires_postgres' test and Django sets up no test database.
-& $Py manage.py test                               # expect: Ran 242 tests ... OK
+& $Py manage.py test                               # expect: Ran 343 tests ... OK
 "exit code: $LASTEXITCODE"                         # expect 0
 
 # F5. REAL PostgreSQL tests. These DO touch PostgreSQL: Django creates and drops 'test_automation_dev'
@@ -619,10 +619,10 @@ try {
 #     If Django asks whether to delete an existing test database, answer 'no' and report it.
 if ($env:AP_RUN_DB_TESTS) { "WARNING: AP_RUN_DB_TESTS is still set" } else { "AP_RUN_DB_TESTS is unset again" }
 
-# F6. Optional: the whole suite in one run (242 DB-free + 3 PostgreSQL, an expectation: the PostgreSQL tests have not been run). Same try/finally rule.
+# F6. Optional: the whole suite in one run (343 DB-free + 3 PostgreSQL, an expectation: the PostgreSQL tests have not been run). Same try/finally rule.
 try {
     $env:AP_RUN_DB_TESTS = "1"
-    & $Py manage.py test                           # expect: Ran 245 tests ... OK
+    & $Py manage.py test                           # expect: Ran 346 tests ... OK
     "exit code: $LASTEXITCODE"
 } finally {
     Remove-Item Env:AP_RUN_DB_TESTS -ErrorAction SilentlyContinue
@@ -691,13 +691,13 @@ be updated when that is done and confirmed.
 | Area | Status |
 | --- | --- |
 | Backend skeleton (`config`, `accounts`, `health`, tests) | **Implemented** (Phase 2) |
-| 242 DB-free tests, `manage.py check`, compile checks | **Passing on the VM** (this is all the VM can verify) |
+| 343 DB-free tests, `manage.py check`, compile checks | **Passing on the VM** (this is all the VM can verify) |
 | `accounts.User` (extends `AbstractUser`, no added fields) and its initial migration | **Implemented**; migration **not applied** anywhere |
 | PostgreSQL 18 | **Not installed anywhere yet.** To be installed on the owner's local computer; never on the VM |
 | Local clone, local `.venv`, hash-locked install on the local computer | **Pending** (owner) |
 | Migrations, the 3 PostgreSQL-required tests, real readiness 200, localhost smoke test | **Pending** (owner runs locally and reports); **no acceptance claim** |
 | PyCharm project and interpreter | Not confirmed as configured |
-| Request-intake preparation slice: plain-Python schema, pure validation, deterministic test fixture parser, 183 DB-free tests ([details](request-intake-slice.md)) | **Implemented**; DB-free only; passing on the VM |
+| Request-intake preparation slice: plain-Python schema, pure validation, deterministic test fixture parser, canonical serialization and content hashing, 284 DB-free tests ([details](request-intake-slice.md)) | **Implemented**; DB-free only; passing on the VM |
 | Business workflow: cases, documents, revisions, approvals, exports (and persistence of the above) | Not implemented |
 | Task queue and background worker | Not implemented |
 | AI gateway and any AI adapter | Not implemented |

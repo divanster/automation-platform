@@ -50,7 +50,7 @@ Exact versions in use are recorded in the
 - [Decision records](docs/decisions/README.md)
 - [Development runbook](docs/development/runbook.md): setup, tests, and current status
 - [Request-intake preparation slice](docs/development/request-intake-slice.md):
-  the database-independent schema, validation, and test extractor
+  the database-independent schema, validation, test extractor, and canonical content hashing
 
 ## Repository conventions
 
