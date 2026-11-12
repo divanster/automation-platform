@@ -6,8 +6,10 @@ A local-first business process automation platform.
 > contains documentation, repository configuration, and a minimal Django backend
 > skeleton (project settings, a user model, and health endpoints), database-independent
 > workflow rules, and minimal persistence for cases, runs, revisions, and approvals (its
-> PostgreSQL tests passed in the owner's local run, for the tested scenarios only). The business workflow, authentication,
-> background worker, AI adapters, frontend, and installer are **not** built. Everything else described below is planned, not built. See the
+> PostgreSQL tests passed in the owner's local run, for the tested scenarios only), and a first
+> persistent-worker slice (a generic task queue and one deterministic test handler; its PostgreSQL
+> tests are written but **not yet run**, so the queue is unproven). The business workflow, authentication,
+> real background work, AI adapters, frontend, and installer are **not** built. Everything else described below is planned, not built. See the
 > [development runbook](docs/development/runbook.md) for exactly what exists.
 
 ## Purpose

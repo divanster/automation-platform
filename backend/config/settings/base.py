@@ -22,6 +22,7 @@ INSTALLED_APPS = [
     "apps.accounts",
     "apps.cases",
     "apps.health",
+    "apps.tasks",
 ]
 
 MIDDLEWARE = [
@@ -73,6 +74,12 @@ DATABASES = {
 }
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Persistent worker (python manage.py runworker; docs/development/persistent-worker-slice.md).
+# Provisional defaults, not measured. A handler must finish within the lease: this slice has no
+# heartbeat to renew it. Bounds are checked again by apps.tasks.policy.
+WORKER_LEASE_SECONDS = get_int("AP_WORKER_LEASE_SECONDS", 60, minimum=5)
+WORKER_POLL_SECONDS = get_int("AP_WORKER_POLL_SECONDS", 2, minimum=1)
 
 # Keeps PostgreSQL-requiring tests out of a default `manage.py test` run.
 TEST_RUNNER = "config.test_runner.ProjectTestRunner"

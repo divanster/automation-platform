@@ -12,8 +12,12 @@ canonical serialization and content hashing, and pure revision, approval, and ex
 see `docs/development/request-intake-slice.md`), plus persistence for cases, runs, result
 revisions, and approvals (`apps/cases`; see `docs/development/revision-approval-policy.md`;
 its PostgreSQL tests passed in the owner's local run, see
-`docs/development/local-validation-record.md`). Authentication and authorization, exports,
-background execution, an API, a UI, audit events, and real AI adapters are not implemented. See `README.md` and
+`docs/development/local-validation-record.md`), plus a first persistent-worker slice (`apps/tasks`:
+a generic PostgreSQL-backed queue, a `runworker` command, and one deterministic test handler; see
+`docs/development/persistent-worker-slice.md`; its DB-free tests pass, its PostgreSQL tests are
+written but NOT RUN, so queue correctness is unproven and nothing is connected to the request-intake
+workflow). Authentication and authorization, exports, an API, a UI, audit events, and real AI
+adapters are not implemented. See `README.md` and
 `docs/architecture/README.md`. Do not describe planned components as existing.
 
 ## Working rules

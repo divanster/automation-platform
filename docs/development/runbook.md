@@ -1,7 +1,9 @@
 # Development Runbook
 
 > **Status (Phase 2 skeleton): the backend skeleton exists; the business
-> workflow, worker, real AI adapters, frontend, and installer do not.**
+> workflow, real AI adapters, frontend, and installer do not. A first generic
+> worker slice exists whose PostgreSQL tests have NOT been run
+> ([persistent-worker-slice.md](persistent-worker-slice.md)).**
 >
 > **Two machines are involved, with different jobs** (section 0). Claude Code
 > develops code in a Windows **VM** and runs only database-free checks there.
@@ -259,6 +261,13 @@ All are tagged `requires_postgres` and guarded by `AP_RUN_DB_TESTS=1`. They cann
 the VM. **The owner ran them locally: `Ran 35 tests`, `OK`, exit code 0** (pasted output; see
 the [local validation record](local-validation-record.md)). That result covers the tested
 scenarios only and does not prove that no other race exists.
+
+The persistent-worker slice adds `backend/tests/test_tasks_postgres.py` (**95** tests, tagged
+`requires_postgres`). They are **written but NOT RUN**: the VM cannot run them and the owner has
+not yet run them. Exact commands and expected counts are in
+[persistent-worker-slice.md](persistent-worker-slice.md), section 9. Together with the 35 above,
+`--tag requires_postgres` should then collect **130** tests; re-check the number, it changes as
+tests are added.
 
 Expected collection at the commit that added the persistence slice (re-check it, counts
 change as tests are added): **3** skeleton tests (`PostgresUserTests` 2, `PostgresReadinessTests` 1)

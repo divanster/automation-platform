@@ -13,6 +13,24 @@
 > is confirmed is only the *direction*: a separate persistent worker sharing
 > the backend domain code ([ADR 0003](../decisions/0003-persistent-background-worker.md)).
 > The PostgreSQL-backed queue mechanism remains a proposal.
+>
+> **A first slice now exists in code** ([persistent-worker-slice.md](../development/persistent-worker-slice.md)):
+> a generic queue and one deterministic test handler. Its database-free tests pass; its
+> PostgreSQL tests, including the concurrency and recovery tests of section 15, are
+> **written but NOT RUN**. Nothing in section 15 is proven yet.
+
+## Implementation status of the first slice (differences from this proposal)
+
+- The state `ready` is named **`queued`** in code. Everything below that says `ready` means `queued`.
+- There is no `cancel_requested` flag. Queued tasks can be cancelled; cancelling a **running** task
+  is refused with a clear error (section 8's cooperative cancellation is not built).
+- Claim takes only `queued` tasks. Expired leases are handled by a separate recovery step the worker
+  runs before each claim (sections 4 and 5), not by the claim query.
+- There is no heartbeat: lease renewal exists as a service function, but no process calls it.
+  Handlers must finish within the lease.
+- Idempotency keys are caller-supplied strings, unique across the installation; the
+  `(run, step, retry generation)` composition of section 11 and the manual-retry task are not built.
+- No concurrency limits (section 9), no `LISTEN/NOTIFY`, no cleanup of finished tasks, no Windows service.
 
 ## 1. Proposal
 

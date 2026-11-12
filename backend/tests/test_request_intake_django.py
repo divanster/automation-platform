@@ -14,4 +14,4 @@ class NotWiredIntoDjangoTests(SimpleTestCase):
         self.assertFalse([app for app in settings.INSTALLED_APPS if "workflows" in app])
 
     def test_only_the_planned_project_apps_are_installed(self):
-        self.assertEqual([a for a in settings.INSTALLED_APPS if a.startswith("apps.")], ["apps.accounts", "apps.cases", "apps.health"])
+        self.assertEqual([a for a in settings.INSTALLED_APPS if a.startswith("apps.")], ["apps.accounts", "apps.cases", "apps.health", "apps.tasks"])
