@@ -5,8 +5,9 @@
 > decisions and measurements that do not exist yet. Phases 0 and 1 produced
 > documentation only. Phase 2 has produced a backend skeleton (see "Phase 2
 > status") and early persistence for revisions and approvals. A first Phase 4 slice (a generic
-> queue and test handler) is written, with its PostgreSQL tests **not yet run**. No business workflow,
-> AI, frontend, or installer code exists.
+> queue and test handler) is implemented; its PostgreSQL tests and a manual smoke test passed in the
+> owner's local run, for the tested scenarios only. No business workflow, AI, frontend, or installer
+> code exists.
 
 ## How to use this plan
 
@@ -29,7 +30,7 @@
 | 1 | Architecture specification | Reviewed and revised; decisions recorded |
 | 2 | Backend skeleton | **Implemented; database-backed acceptance criteria supported by local evidence** (PostgreSQL 18.6, 35 PostgreSQL-required tests OK, health endpoints `ok`); open: a clean-checkout reproduction (not yet reported) and the `listen_addresses='*'` hardening item; closure is the owner's decision (see "Phase 2 status" below and the [local validation record](../development/local-validation-record.md)) |
 | 3 | Data, documents, and basic authorization | Not started |
-| 4 | Persistent worker | **First slice written** (generic queue, `runworker`, one test handler; DB-free tests pass; PostgreSQL tests **NOT RUN**; unproven; see [persistent-worker-slice.md](../development/persistent-worker-slice.md)) |
+| 4 | Persistent worker | **First slice implemented; phase not complete** (generic queue, `runworker`, one test handler; DB-free tests pass; the 95 PostgreSQL tests and a manual smoke test passed in the owner's local run for the tested scenarios only; see [persistent-worker-slice.md](../development/persistent-worker-slice.md) and the [local validation record](../development/local-validation-record.md)) |
 | (checkpoint) | Installation feasibility experiment | Not started |
 | 5 | End-to-end workflow with deterministic test adapter | Not started |
 | 6 | Real AI adapters and policy enforcement | Not started |
@@ -221,9 +222,11 @@ Later phases are not marked complete by this validation.
 - **Stop-and-report gate:** report measured behavior and decisions on lease,
   retry, and limit values, and any reliability concern.
 - **Status of the first slice (not the whole phase):** a generic queue and one deterministic test
-  handler are written ([persistent-worker-slice.md](../development/persistent-worker-slice.md)).
-  Its PostgreSQL tests are **NOT RUN**. Still open for this phase: running them, killing a real
-  worker process mid-task, heartbeat, concurrency limits, and measured lease and retry values.
+  handler are implemented ([persistent-worker-slice.md](../development/persistent-worker-slice.md)).
+  Its 95 PostgreSQL tests and a manual smoke test passed in the owner's local run, for the tested
+  scenarios only ([record](../development/local-validation-record.md)). Still open for this phase:
+  killing a real worker process mid-task, heartbeat, concurrency limits, behavior across restart and
+  sleep on Windows, and measured lease and retry values.
 
 ## Checkpoint: Installation feasibility experiment (after Phase 4)
 

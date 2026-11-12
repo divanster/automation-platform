@@ -4,11 +4,11 @@ Excluded from the default run and skipped unless ``AP_RUN_DB_TESTS=1`` is set ex
 test_postgres_required.py and docs/development/runbook.md). When they run, Django creates and
 later destroys a separate ``test_<AP_DB_NAME>`` database; the mixin below refuses any other name.
 
-STATUS: WRITTEN BUT NOT RUN. These were written on a development VM that has no PostgreSQL and
-have never been executed anywhere. They are NOT evidence that claim, lease, recovery, or
-idempotency work; the project owner must run them on the local Windows computer (see
-docs/development/persistent-worker-slice.md, section 9). Passing tests would still cover only the
-scenarios written here. This file is ASCII only.
+STATUS: written on a development VM that has no PostgreSQL and never run there. The project owner
+ran them on the local Windows computer: 95 passed, exit code 0, and all 130 PostgreSQL-required
+tests passed (see docs/development/local-validation-record.md). That covers the scenarios written
+here only; it does not prove that no other race exists, and no test kills a real worker process.
+This file is ASCII only.
 
 Run (from backend\\, after the runbook's database setup):
     python manage.py test tests.test_tasks_postgres --tag requires_postgres

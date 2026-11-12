@@ -1,23 +1,25 @@
 # Background Execution
 
-> **Status: Proposed design. Not implemented and not proven.** Nothing here has
-> been built, benchmarked, or tested. The mechanisms described are intended
-> designs to be validated in Phase 4 and by the installation experiment that
-> follows it.
+> **Status: Proposed design; only a first slice is implemented, and the design as a whole is
+> not proven.** Apart from that slice (see below), nothing here has been built, benchmarked, or
+> tested. The mechanisms described are intended designs to be validated in Phase 4 and by the
+> installation experiment that follows it.
 >
-> **Correctness of the PostgreSQL-backed queue is unproven.** Statements such
-> as "two workers cannot hold the same task" or "recovery is bounded by the
-> lease" describe the *intended* behavior of a design. They must not be treated
-> as established facts until the implementation exists and the concurrency and
-> recovery tests listed in section 15 have been written and have passed. What
-> is confirmed is only the *direction*: a separate persistent worker sharing
-> the backend domain code ([ADR 0003](../decisions/0003-persistent-background-worker.md)).
-> The PostgreSQL-backed queue mechanism remains a proposal.
+> **Correctness of the PostgreSQL-backed queue is proven only for the scenarios tested.**
+> Statements such as "two workers cannot hold the same task" or "recovery is bounded by the
+> lease" describe the *intended* behavior of a design. The first slice's PostgreSQL tests passed
+> in the owner's local run, which supports them for the tested scenarios; it does not support them
+> beyond those (no real worker process was killed, restart and sleep on Windows were not tested,
+> and nothing was measured). What is otherwise confirmed is the *direction*: a separate persistent
+> worker sharing the backend domain code ([ADR 0003](../decisions/0003-persistent-background-worker.md)).
+> ADR 0003 still records the queue mechanism as Proposed; this document does not change an ADR's status.
 >
 > **A first slice now exists in code** ([persistent-worker-slice.md](../development/persistent-worker-slice.md)):
-> a generic queue and one deterministic test handler. Its database-free tests pass; its
-> PostgreSQL tests, including the concurrency and recovery tests of section 15, are
-> **written but NOT RUN**. Nothing in section 15 is proven yet.
+> a generic queue and one deterministic test handler. Its database-free tests pass, and its 95
+> PostgreSQL tests (including concurrency, lease, and recovery tests) and a manual smoke test passed
+> in the owner's local run ([record](../development/local-validation-record.md)). That is evidence
+> for the tested scenarios only; see "Evidence status" after the table in section 15 for what
+> remains unproven.
 
 ## Implementation status of the first slice (differences from this proposal)
 
@@ -290,3 +292,17 @@ queue design stays **unproven**.
 | Cancellation behaves as specified, including races | Tests for each cancellable state and for cancel-versus-complete races |
 | Manual retry creates a new task and keeps history | Test following the retry-generation rule |
 | Behavior across restart and sleep on Windows | Part of the installation feasibility experiment, not only unit tests |
+
+**Evidence status after the first slice** (owner-reported local run; the tests are in
+`backend/tests/test_tasks_postgres.py`):
+
+| Claim | Status |
+| --- | --- |
+| Two workers never run the same task at the same time | Supported for the tested scenarios: competing **threads**, each on its own connection. Not tested with separate worker processes |
+| A crashed worker's task is recovered after lease expiry | Supported only by a **simulated** crash (a claim that is never finished). No test kills a real worker process |
+| A stale worker cannot commit | Supported: tested before recovery, after recovery, and after reclaim |
+| Retries are bounded and backed off | Supported for the tested limits and values (provisional, not measured) |
+| No transaction is held open during task work | Supported by an in-handler check and a read from a second connection |
+| Cancellation behaves as specified, including races | Supported for queued tasks and for cancel versus claim; running-task cancellation is deliberately unsupported |
+| Manual retry creates a new task and keeps history | Not built |
+| Behavior across restart and sleep on Windows | Not tested |

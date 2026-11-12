@@ -14,8 +14,9 @@ revisions, and approvals (`apps/cases`; see `docs/development/revision-approval-
 its PostgreSQL tests passed in the owner's local run, see
 `docs/development/local-validation-record.md`), plus a first persistent-worker slice (`apps/tasks`:
 a generic PostgreSQL-backed queue, a `runworker` command, and one deterministic test handler; see
-`docs/development/persistent-worker-slice.md`; its DB-free tests pass, its PostgreSQL tests are
-written but NOT RUN, so queue correctness is unproven and nothing is connected to the request-intake
+`docs/development/persistent-worker-slice.md`; its DB-free tests pass, and its PostgreSQL tests and a
+manual smoke test passed in the owner's local run for the tested scenarios only, see
+`docs/development/local-validation-record.md`; nothing is connected to the request-intake
 workflow). Authentication and authorization, exports, an API, a UI, audit events, and real AI
 adapters are not implemented. See `README.md` and
 `docs/architecture/README.md`. Do not describe planned components as existing.

@@ -104,7 +104,7 @@ was run locally by the owner (see the
 | 4.7 | Multi-step approval chains and per-item approval. | Out of scope for the first slice. |
 | 4.8 | Frontend tooling and component library. | Decide before Phase 7. |
 | 4.9 | Personal-data deletion and retention rules. | Depends on the pilot company's jurisdiction and policies. |
-| 4.10 | Task queue library versus custom implementation. | Decided at the start of Phase 4 ([ADR 0003](../decisions/0003-persistent-background-worker.md)); queue correctness remains unproven until its tests pass. |
+| 4.10 | Task queue library versus custom implementation. | Decided at the start of Phase 4 ([ADR 0003](../decisions/0003-persistent-background-worker.md)); the first slice's PostgreSQL tests passed in the owner's local run for the tested scenarios only; broader queue correctness (a real killed worker process, restart and sleep on Windows) remains unproven. |
 | 4.11 | JWT or external identity (single sign-on). | Excluded from the initial skeleton; revisit for a hub. |
 
 ## 5. Assumptions embedded in the documents

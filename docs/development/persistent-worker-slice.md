@@ -1,11 +1,11 @@
 # Persistent worker slice (generic queue and one test handler)
 
-> **Status: written and checked only without a database. NOT proven against PostgreSQL.**
-> The DB-free tests pass in the development VM. The 95 PostgreSQL-required tests are written but
-> **NOT RUN**: the VM has no PostgreSQL and the owner has not yet run them on the local Windows
-> computer (section 9). Until they pass there, claim, lease, recovery, and idempotency behavior is
-> **unproven** ([background-execution.md](../architecture/background-execution.md), section 15), and
-> even passing tests cover only the scenarios written. This slice does not connect the
+> **Status: implemented. DB-free tests pass in the VM; the 95 PostgreSQL tests and a manual smoke
+> test passed in the owner's local run** ([record](local-validation-record.md); owner-supplied local
+> results). That supports claim, lease, recovery, and idempotency behavior **for the tested
+> scenarios only**; it does not prove that no other race exists, and no test kills a real worker
+> process ([background-execution.md](../architecture/background-execution.md), section 15, "Evidence
+> status"). The VM never ran the PostgreSQL tests. This slice does not connect the
 > request-intake workflow, performs **no external effect**, authorizes none, and registers no Windows service.
 
 ## 1. Scope
@@ -138,13 +138,15 @@ Run from `backend\` with `..\.venv\Scripts\python.exe`:
 The migration-state test (`tests/test_tasks_models.py`, `MigrationTests`) also runs in the suite.
 `migrate`, `sqlmigrate`, and `showmigrations` need a database and were **not** run.
 
-### 9.2 PostgreSQL tests: written, NOT RUN
+### 9.2 PostgreSQL tests: run locally by the owner
 
 `backend/tests/test_tasks_postgres.py`, 95 tests, all tagged `requires_postgres`: `SchemaTests` 15,
 `EnqueueTests` 12, `ClaimTests` 9, `LeaseTests` 21, `RecoveryTests` 10, `CancellationTests` 7,
 `TerminalStateProtectionTests` 3, `ClaimConcurrencyTests` 8, `WorkerProcessTests` 10. In the VM they
-were only collected and reported as skipped (95 skipped, no connection opened). Together with the 35
-earlier PostgreSQL tests, `--tag requires_postgres` should collect 130 tests.
+were only collected and reported as skipped (95 skipped, no connection opened). The owner then ran
+them locally: **95 passed, exit code 0**, and all **130** PostgreSQL-required tests (35 earlier plus
+95) **passed, exit code 0**, with the test database destroyed afterwards, as supplied by the owner. The manual smoke test and the shutdown check of section 9.3 were also run; the
+results are in the [local validation record](local-validation-record.md).
 
 ### 9.3 Local validation steps (owner; on the local Windows computer only)
 
@@ -194,7 +196,7 @@ timeouts (10 s and 30 s), so a stuck lock shows up as a failure, not a frozen ru
 
 ## 10. Remaining limitations
 
-* Everything database-dependent is unproven until section 9.3 is run and reported. Even then, the tests do not prove the absence of other races, and no test kills a real worker **process**; a crash is simulated by claiming and never finishing.
+* The database-dependent behavior is supported only for the scenarios in `test_tasks_postgres.py` and the manual smoke test. The tests do not prove the absence of other races, and no test kills a real worker **process**; a crash is simulated by claiming and never finishing. The manual Ctrl+C check ran against an idle worker (0 tasks), so finishing a task in progress on shutdown is covered only by DB-free tests with mocks.
 * Time comes from the application clock; skewed clocks across hosts are not handled.
 * No heartbeat, no concurrency limits, no cooperative cancellation of running tasks, no cleanup of finished tasks, no monitoring, no Windows service.
 * Lease, retry, and polling values are provisional guesses, not measurements.

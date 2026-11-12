@@ -263,10 +263,11 @@ the [local validation record](local-validation-record.md)). That result covers t
 scenarios only and does not prove that no other race exists.
 
 The persistent-worker slice adds `backend/tests/test_tasks_postgres.py` (**95** tests, tagged
-`requires_postgres`). They are **written but NOT RUN**: the VM cannot run them and the owner has
-not yet run them. Exact commands and expected counts are in
-[persistent-worker-slice.md](persistent-worker-slice.md), section 9. Together with the 35 above,
-`--tag requires_postgres` should then collect **130** tests; re-check the number, it changes as
+`requires_postgres`). The VM cannot run them. **The owner ran them locally: 95 passed, exit code 0,
+and all 130 PostgreSQL-required tests passed, exit code 0** (owner-supplied local results; see the
+[local validation record](local-validation-record.md)). That covers the tested scenarios only. Exact
+commands are in [persistent-worker-slice.md](persistent-worker-slice.md), section 9. Together with
+the 35 above, `--tag requires_postgres` collects **130** tests; re-check the number, it changes as
 tests are added.
 
 Expected collection at the commit that added the persistence slice (re-check it, counts
