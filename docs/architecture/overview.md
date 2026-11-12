@@ -240,7 +240,8 @@ Rules:
 | Revision identity and run scope (UUID identifiers), approval bound to a revision and content hash, and export eligibility (`workflows/revision_approval`: pure rules; plain Python, DB-free tests) | Implemented as pure policy only; no persistence, stored approvals, authentication or authorization, export, or state machine |
 | Persistence of cases, workflow runs, result revisions, and approvals (`apps/cases`: minimal `Case` and `WorkflowRun`, immutable `ResultRevision` and `Approval`, unique revision numbers per run, a stored current-revision pointer, transactional services) | Implemented; ORM/service-level immutability only; PostgreSQL tests passed in the owner's local run for the tested scenarios only ([record](../development/local-validation-record.md)); not database tamper protection |
 | Other domain models (documents, exports, audit events, configuration, roles) and their migrations | Not started |
-| Worker, queue, AI gateway, adapters | Not started |
+| Generic persistent task queue and worker (`apps/tasks`: enqueue with idempotency key, atomic claim, lease fencing, bounded retries, recovery, queued-task cancellation, `runworker`, one deterministic test handler; see [persistent-worker-slice.md](../development/persistent-worker-slice.md)) | Implemented; DB-free tests pass; the 95 PostgreSQL tests and a manual smoke test passed in the owner's local run for the tested scenarios only ([record](../development/local-validation-record.md)); not connected to any workflow |
+| AI gateway, adapters | Not started |
 | Frontend | Not started |
 | Installer, backup/restore tooling | Not started |
 | PostgreSQL 18 | Selected; installed on the owner's **local** computer (reported 18.6), never in the development VM. Validated for the tested scenarios; the reported `listen_addresses='*'` is an unresolved hardening item |

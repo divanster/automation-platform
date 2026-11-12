@@ -2,9 +2,10 @@
 
 > **Status: Architecture is planned, not implemented, except for a minimal
 > backend skeleton** (Django project, `accounts.User`, health endpoints; see the
-> [development runbook](../development/runbook.md)). The business workflow,
-> worker, AI gateway, frontend, installer, and a provisioned PostgreSQL do not
-> exist. Everything below is a design unless an Accepted ADR says otherwise.
+> [development runbook](../development/runbook.md)) and early slices listed in
+> [overview.md](overview.md) (including a generic queue with a test handler whose
+> PostgreSQL tests have **not been run**). The business workflow, any real
+> background work, AI gateway, frontend, and installer do not exist. Everything below is a design unless an Accepted ADR says otherwise.
 
 This directory contains the initial architecture specification and
 implementation plan for the Automation Platform.

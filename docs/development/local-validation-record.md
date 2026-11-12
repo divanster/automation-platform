@@ -172,10 +172,53 @@ connections only in standalone mode).
   hub, or production use. The validation above used a dedicated development server and a
   throwaway test database only.
 
+## Persistent-worker slice (`apps/tasks`)
+
+Supplied by the owner after running the steps of
+[persistent-worker-slice.md](persistent-worker-slice.md), section 9.3, on the local Windows
+computer. **These are owner-supplied local results.** The VM did not run or observe any of them, and
+the report did not restate the environment (the one above is the previously reported one).
+
+| Step | Reported result |
+| --- | --- |
+| `migrate` applying `tasks.0001_initial` | OK, exit code 0 |
+| Worker PostgreSQL tests (`tests.test_tasks_postgres`) | 95 passed, exit code 0 |
+| All PostgreSQL-required tests (`--tag requires_postgres`) | 130 passed, exit code 0 (35 earlier plus 95) |
+| Test database | Destroyed afterwards |
+| Smoke test: one `test.add_numbers` task with values `[1, 2, 3]`, processed by `runworker --once` | Processed successfully; task state `succeeded`; persisted result `count=3`, `sum=6`; attempt count 1 |
+| `runworker --once` on an empty queue | `No task available.` |
+| Continuous `runworker --poll-seconds 2`, then Ctrl+C pressed once | Graceful shutdown: `Worker stopped after processing 0 task(s).`; exit code 0 |
+
+The count of 95 equals the number of tests collected in the VM, so no test appears to have been
+skipped. Because Django builds the test database by applying
+every migration, the pass also exercises `tasks.0001_initial` on PostgreSQL in the throwaway test
+database.
+
+**What this supports.** For the scenarios written in `backend/tests/test_tasks_postgres.py`: the
+database constraints, enqueue and idempotency (including conflicting reuse and concurrent enqueues of
+one key), a single claim among competing threads, row skipping with `SKIP LOCKED`, eligible-task
+ordering, lease renewal, recovery of expired leases, fencing of expired and superseded tokens,
+bounded retries with backoff, atomic task-and-attempt updates, queued-task cancellation (including
+cancel versus claim), terminal-state protection, and the worker running a handler with no open
+transaction. Plus one real end-to-end task through the `runworker` command.
+
+**What it does not show.**
+
+- No test kills a real worker **process**: a crash is simulated by claiming a task and never
+  finishing it, and the concurrency tests use threads, not separate worker processes.
+- The Ctrl+C check ran against an idle worker (0 tasks); finishing a task in progress on shutdown
+  is covered only by DB-free tests with mocks.
+- Not tested: a heartbeat (none exists), restart or sleep on Windows, several hosts or clock skew,
+  load or throughput, and measured lease, retry, or polling values (the defaults are provisional).
+- Passing tests do not prove that no other race exists. This is a development database; it is not
+  production readiness, and `listen_addresses` (above) is still unresolved.
+- The queue is not connected to any workflow, and no endpoint or UI exists.
+
 ## Still deferred
 
 Authentication and authorization (including linking approvals to authenticated users, required
-before any API exposes approval operations), the background worker, an API, a UI, audit
+before any API exposes approval operations), connecting the queue to any workflow, a worker
+heartbeat, concurrency limits, cooperative cancellation of running tasks, an API, a UI, audit
 events, race-safe export (the atomic re-check at export commit), database-level immutability,
 document storage, the state machine, and real AI adapters. The open questions that cover them
 are in [open-questions.md](../architecture/open-questions.md).
@@ -185,4 +228,5 @@ are in [open-questions.md](../architecture/open-questions.md).
 Two status comments written before the local run were updated to point at this record: the
 `STATUS` paragraph in `backend/tests/test_cases_persistence_postgres.py` and the locking note
 in `backend/apps/cases/services.py`. Both keep the fact that database tests are not run in
-the development VM. Only comments changed; no executable code.
+the development VM. Only comments changed; no executable code. The `STATUS` paragraph in
+`backend/tests/test_tasks_postgres.py` was likewise updated to point here after the worker run.
