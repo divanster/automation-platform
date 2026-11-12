@@ -9,8 +9,10 @@ skeleton (settings, `accounts.User`, health endpoints; see
 `docs/development/runbook.md`) and a database-independent request-intake
 preparation slice (plain-Python schema, validation, deterministic test extractor,
 canonical serialization and content hashing, and pure revision, approval, and export-eligibility rules;
-see `docs/development/request-intake-slice.md`). Approvals, exports, background
-execution, persistence, and real AI adapters are not implemented. See `README.md` and
+see `docs/development/request-intake-slice.md`), plus persistence for cases, runs, result
+revisions, and approvals (`apps/cases`; see `docs/development/revision-approval-policy.md`;
+PostgreSQL behavior not yet run). Authentication, exports, background
+execution, and real AI adapters are not implemented. See `README.md` and
 `docs/architecture/README.md`. Do not describe planned components as existing.
 
 ## Working rules

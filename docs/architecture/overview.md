@@ -238,7 +238,8 @@ Rules:
 | `accounts.User` model and its initial migration | Implemented; migration not yet applied to any database |
 | Request-intake preparation slice (`workflows/request_intake`: result schema, pure validation, deterministic test extractor, canonical serialization and content hashing; plain Python, DB-free tests) | Implemented as preparation only; no persistence, stored revisions, approvals, export, or state machine |
 | Revision identity and run scope (UUID identifiers), approval bound to a revision and content hash, and export eligibility (`workflows/revision_approval`: pure rules; plain Python, DB-free tests) | Implemented as pure policy only; no persistence, stored approvals, authentication or authorization, export, or state machine |
-| Domain models (cases, documents, revisions, approvals, exports) and other migrations | Not started |
+| Persistence of cases, workflow runs, result revisions, and approvals (`apps/cases`: minimal `Case` and `WorkflowRun`, immutable `ResultRevision` and `Approval`, unique revision numbers per run, a stored current-revision pointer, transactional services) | Implemented; ORM/service-level immutability only; PostgreSQL behavior (constraints, locking) written as tests but **not run**; migration not applied anywhere |
+| Other domain models (documents, exports, audit events, configuration, roles) and their migrations | Not started |
 | Worker, queue, AI gateway, adapters | Not started |
 | Frontend | Not started |
 | Installer, backup/restore tooling | Not started |

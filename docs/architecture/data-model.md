@@ -1,7 +1,10 @@
 # Data Model
 
-> **Status: Proposed. No domain models exist** (only the `accounts.User`
-> skeleton model, which adds no fields to Django's default user). This document defines
+> **Status: Proposed.** Only a minimal subset exists as Django models:
+> `Case`, `WorkflowRun` (identity, case link, current-revision pointer), `ResultRevision`,
+> and `Approval` (approved decisions only), in `apps/cases`, plus the `accounts.User`
+> skeleton model; their PostgreSQL behavior has not been run. Everything else here is
+> not built. This document defines
 > entity responsibilities and relationships. Field lists are illustrative and
 > will be refined when the backend is built (Phase 3). Confirmed product
 > directions (one company per installation, UUID public identifiers) are
@@ -239,9 +242,11 @@ AuditEvent * --- 0..1 Case / WorkflowRun / other subject
   database-independent Python (UUID identifiers; each revision and approval is bound to its
   case, workflow run, revision, and content hash, and an approval from another run never
   authorizes an export), with no persistence or authentication (see
-  [revision-approval-policy.md](../development/revision-approval-policy.md)). Persisting
-  approvals, enforcing uniqueness and immutability, and the atomic re-check at commit time
-  remain this layer's future work.
+  [revision-approval-policy.md](../development/revision-approval-policy.md)). Approvals
+  and revisions are now persisted (`apps/cases`): unique `(run, revision number)` in the
+  database, a stored current-revision pointer, ORM- and service-level immutability (not
+  database-level), and approver identity stored as data. Rejections, the `needs_review`
+  state guard, authentication, and the atomic re-check at export commit remain future work.
 - **Creation guard:** an `approved` decision can be created only for the
   run's current revision, only while the run is in `needs_review`, and only if
   the revision is valid.

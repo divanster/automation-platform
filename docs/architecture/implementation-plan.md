@@ -240,8 +240,12 @@ and are recorded.
 > completes or starts Phase 5: there is no persistence, no stored revision or approval,
 > no authentication or authorization, no export, no state machine, no tasks or worker, no
 > storage, and no API. Phase 2 database acceptance is still pending the owner's local
-> PostgreSQL validation. Some specification questions they surfaced are open
-> (open-questions.md items 2.6 to 2.16).
+> PostgreSQL validation. A third, persistence slice (`apps/cases`) then stored cases,
+> runs, result revisions, and approvals with database-unique revision numbers per run, a
+> current-revision pointer, and transactional services; it is early Phase 3 work done ahead
+> of order, its PostgreSQL tests are written but **not run**, and it adds no authentication,
+> export, or state machine. Some specification questions they surfaced are open
+> (open-questions.md items 2.6 to 2.19).
 
 - **Goal:** the full first vertical slice working end to end without any real AI.
 - **Deliverables:** the request-document workflow package (schema, validation

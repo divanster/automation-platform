@@ -4,9 +4,10 @@ A local-first business process automation platform.
 
 > **Status: implementation of the product has not started.** The repository
 > contains documentation, repository configuration, and a minimal Django backend
-> skeleton (project settings, a user model, and health endpoints). The business
-> workflow, background worker, AI adapters, frontend, and installer are **not**
-> built. Everything else described below is planned, not built. See the
+> skeleton (project settings, a user model, and health endpoints), database-independent
+> workflow rules, and minimal persistence for cases, runs, revisions, and approvals (its
+> PostgreSQL tests have **not** been run). The business workflow, authentication,
+> background worker, AI adapters, frontend, and installer are **not** built. Everything else described below is planned, not built. See the
 > [development runbook](docs/development/runbook.md) for exactly what exists.
 
 ## Purpose
@@ -52,7 +53,7 @@ Exact versions in use are recorded in the
 - [Request-intake preparation slice](docs/development/request-intake-slice.md):
   the database-independent schema, validation, test extractor, and canonical content hashing
 - [Revision, approval, and export-eligibility policy](docs/development/revision-approval-policy.md):
-  pure rules only; no persistence, authentication, or export
+  pure rules plus their persistence; no authentication or export
 
 ## Repository conventions
 

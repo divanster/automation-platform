@@ -241,9 +241,19 @@ configured, and this project configures none), so the role needs `CREATEDB`.
 `--keepdb` and `--noinput` are deliberately not used, and no cleanup of an existing
 database is part of the plan.
 
-The PostgreSQL-backed tests are in `backend/tests/test_postgres_required.py`:
-classes `PostgresUserTests` (2 tests) and `PostgresReadinessTests` (1 test), both
-tagged `requires_postgres` and guarded by `AP_RUN_DB_TESTS=1`.
+The PostgreSQL-backed tests are in `backend/tests/test_postgres_required.py`
+(`PostgresUserTests`, `PostgresReadinessTests`) and in
+`backend/tests/test_cases_persistence_postgres.py` (schema constraints, revision and
+approval persistence, persisted export eligibility, and competing writers on one run).
+All are tagged `requires_postgres` and guarded by `AP_RUN_DB_TESTS=1`. **None of them has
+been run yet**; the second file in particular was written without a database, so its
+constraint, rollback, and locking checks are unverified until you run them.
+
+Expected collection at the commit that added the persistence slice (re-check it, counts
+change as tests are added): **3** skeleton tests (`PostgresUserTests` 2, `PostgresReadinessTests` 1)
+plus **32** persistence tests (`SchemaTests` 5, `RevisionPersistenceTests` 12,
+`ApprovalPersistenceTests` 9, `PersistedEligibilityTests` 3, `WriterSerializationTests` 3) =
+**35** tests for `--tag requires_postgres`. The 32 are not the whole repository's total.
 
 `python manage.py makemigrations --check --dry-run` also tries to read the
 migration history from the database. Without a reachable database it prints a
@@ -595,7 +605,7 @@ if ($env:AP_RUN_DB_TESTS) { throw "AP_RUN_DB_TESTS is already set in this window
 # F2. Migrations: inspect, apply to the development database, re-inspect.
 & $Py manage.py showmigrations
 & $Py manage.py migrate
-& $Py manage.py showmigrations                     # expect every line marked [X], including accounts 0001_initial
+& $Py manage.py showmigrations                     # expect every line marked [X], including accounts 0001_initial and cases 0001_initial
 
 # F3. Migration consistency with a reachable database (no RuntimeWarning expected now).
 & $Py manage.py makemigrations --check --dry-run   # expect: No changes detected
@@ -615,14 +625,15 @@ try {
 } finally {
     Remove-Item Env:AP_RUN_DB_TESTS -ErrorAction SilentlyContinue
 }
-#     expect: creates 'test_automation_dev', Ran 3 tests ... OK, then destroys it.
+#     expect: creates 'test_automation_dev', every test from both PostgreSQL test files runs (none skipped), OK, then destroys it.
+#     Report the exact 'Ran N tests' line and any failure; the concurrency tests (WriterSerializationTests) are the ones that matter most.
 #     If Django asks whether to delete an existing test database, answer 'no' and report it.
 if ($env:AP_RUN_DB_TESTS) { "WARNING: AP_RUN_DB_TESTS is still set" } else { "AP_RUN_DB_TESTS is unset again" }
 
-# F6. Optional: the whole suite in one run (all DB-free tests plus the 3 PostgreSQL tests; the PostgreSQL tests have not been run). Same try/finally rule.
+# F6. Optional: the whole suite in one run (all DB-free tests plus the PostgreSQL tests; the PostgreSQL tests have not been run). Same try/finally rule.
 try {
     $env:AP_RUN_DB_TESTS = "1"
-    & $Py manage.py test                           # expect: OK with no failures or errors, including the 3 PostgreSQL tests in the total
+    & $Py manage.py test                           # expect: OK with no failures or errors, including the PostgreSQL tests in the total
     "exit code: $LASTEXITCODE"
 } finally {
     Remove-Item Env:AP_RUN_DB_TESTS -ErrorAction SilentlyContinue
@@ -695,10 +706,11 @@ be updated when that is done and confirmed.
 | `accounts.User` (extends `AbstractUser`, no added fields) and its initial migration | **Implemented**; migration **not applied** anywhere |
 | PostgreSQL 18 | **Not installed anywhere yet.** To be installed on the owner's local computer; never on the VM |
 | Local clone, local `.venv`, hash-locked install on the local computer | **Pending** (owner) |
-| Migrations, the 3 PostgreSQL-required tests, real readiness 200, localhost smoke test | **Pending** (owner runs locally and reports); **no acceptance claim** |
+| Migrations (`accounts` and `cases`), the PostgreSQL-required tests, real readiness 200, localhost smoke test | **Pending** (owner runs locally and reports); **no acceptance claim** |
 | PyCharm project and interpreter | Not confirmed as configured |
 | Request-intake preparation slice: plain-Python schema, pure validation, deterministic test fixture parser, canonical serialization and content hashing, DB-free tests ([details](request-intake-slice.md)) | **Implemented**; DB-free only; passing on the VM |
-| Business workflow: cases, documents, revisions, approvals, exports (and persistence of the above) | Not implemented |
+| Persistence of cases, runs, result revisions, and approvals (`apps/cases`; minimal models, migration, services; [details](revision-approval-policy.md)) | **Implemented**; DB-free tests pass on the VM; the PostgreSQL tests are **written but NOT RUN**; migration not applied anywhere |
+| Business workflow beyond that: documents, authentication and authorization, exports, state machine | Not implemented |
 | Task queue and background worker | Not implemented |
 | AI gateway and any AI adapter | Not implemented |
 | Frontend | Not implemented |
