@@ -30,7 +30,7 @@
 | 1 | Architecture specification | Reviewed and revised; decisions recorded |
 | 2 | Backend skeleton | **Implemented; database-backed acceptance criteria supported by local evidence** (PostgreSQL 18.6, 35 PostgreSQL-required tests OK, health endpoints `ok`); open: a clean-checkout reproduction (not yet reported) and the `listen_addresses='*'` hardening item; closure is the owner's decision (see "Phase 2 status" below and the [local validation record](../development/local-validation-record.md)) |
 | 3 | Data, documents, and basic authorization | Not started |
-| 4 | Persistent worker | **First slice implemented; phase not complete** (generic queue, `runworker`, one test handler; DB-free tests pass; the 95 PostgreSQL tests and a manual smoke test passed in the owner's local run for the tested scenarios only; see [persistent-worker-slice.md](../development/persistent-worker-slice.md) and the [local validation record](../development/local-validation-record.md)) |
+| 4 | Persistent worker | **First slice implemented; phase not complete** (generic queue, `runworker`, one test handler; DB-free tests pass; the 95 PostgreSQL tests, a manual smoke test, and 15 process-level recovery tests (real worker processes, a forced kill) passed in the owner's local run for the tested scenarios only; see [persistent-worker-slice.md](../development/persistent-worker-slice.md) and the [local validation record](../development/local-validation-record.md)) |
 | (checkpoint) | Installation feasibility experiment | Not started |
 | 5 | End-to-end workflow with deterministic test adapter | Not started |
 | 6 | Real AI adapters and policy enforcement | Not started |
@@ -224,9 +224,12 @@ Later phases are not marked complete by this validation.
 - **Status of the first slice (not the whole phase):** a generic queue and one deterministic test
   handler are implemented ([persistent-worker-slice.md](../development/persistent-worker-slice.md)).
   Its 95 PostgreSQL tests and a manual smoke test passed in the owner's local run, for the tested
-  scenarios only ([record](../development/local-validation-record.md)). Still open for this phase:
-  killing a real worker process mid-task, heartbeat, concurrency limits, behavior across restart and
-  sleep on Windows, and measured lease and retry values.
+  scenarios only ([record](../development/local-validation-record.md)). A test-only follow-up added
+  15 process-level recovery tests (two real worker processes, a forcibly killed worker recovered after
+  its lease, shutdown with a task in progress, races against recovery); they passed in the owner's
+  local run, again for the tested scenarios only. Still open for this phase: heartbeat, a supervisor
+  or Windows service, concurrency limits, behavior across restart and sleep on Windows, measured
+  lease and retry values, and the hardening items listed in the record. Not production ready.
 
 ## Checkpoint: Installation feasibility experiment (after Phase 4)
 

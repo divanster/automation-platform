@@ -9,8 +9,8 @@
 > Statements such as "two workers cannot hold the same task" or "recovery is bounded by the
 > lease" describe the *intended* behavior of a design. The first slice's PostgreSQL tests passed
 > in the owner's local run, which supports them for the tested scenarios; it does not support them
-> beyond those (no real worker process was killed, restart and sleep on Windows were not tested,
-> and nothing was measured). What is otherwise confirmed is the *direction*: a separate persistent
+> beyond those (there is no heartbeat, restart and sleep on Windows were not tested, and nothing was
+> measured; a later test-only slice did kill real worker processes, see the table in section 15). What is otherwise confirmed is the *direction*: a separate persistent
 > worker sharing the backend domain code ([ADR 0003](../decisions/0003-persistent-background-worker.md)).
 > ADR 0003 still records the queue mechanism as Proposed; this document does not change an ADR's status.
 >
@@ -19,7 +19,9 @@
 > PostgreSQL tests (including concurrency, lease, and recovery tests) and a manual smoke test passed
 > in the owner's local run ([record](../development/local-validation-record.md)). That is evidence
 > for the tested scenarios only; see "Evidence status" after the table in section 15 for what
-> remains unproven.
+> remains unproven. A follow-up test-only slice added process-level recovery tests (real worker
+> processes, a forced kill, shutdown with a task in progress, and races against recovery); its 15
+> PostgreSQL tests passed in the owner's local run (same record).
 
 ## Implementation status of the first slice (differences from this proposal)
 
@@ -293,16 +295,19 @@ queue design stays **unproven**.
 | Manual retry creates a new task and keeps history | Test following the retry-generation rule |
 | Behavior across restart and sleep on Windows | Part of the installation feasibility experiment, not only unit tests |
 
-**Evidence status after the first slice** (owner-reported local run; the tests are in
-`backend/tests/test_tasks_postgres.py`):
+**Evidence status after the first slice and the process-level recovery tests** (owner-reported local
+runs; the tests are in `backend/tests/test_tasks_postgres.py` and
+`backend/tests/test_tasks_recovery_postgres.py`):
 
 | Claim | Status |
 | --- | --- |
-| Two workers never run the same task at the same time | Supported for the tested scenarios: competing **threads**, each on its own connection. Not tested with separate worker processes |
-| A crashed worker's task is recovered after lease expiry | Supported only by a **simulated** crash (a claim that is never finished). No test kills a real worker process |
-| A stale worker cannot commit | Supported: tested before recovery, after recovery, and after reclaim |
+| Two workers never run the same task at the same time | Supported for the tested scenarios: competing **threads**, each on its own connection, and two real worker **processes** (two tasks held at once; one task raced for by two processes ran once). Not tested: more than two processes, several hosts, load |
+| A crashed worker's task is recovered after lease expiry | Supported for the tested scenarios: a worker **process was killed** mid-task, the task stayed `running` until its lease expired, a later worker process recovered it, and it completed once; repeated kills ended at the attempt limit. Lease expiry was simulated with a clock offset, not waited out. Not tested: power loss, restart or sleep on Windows; nothing restarts a dead worker (no supervisor) |
+| A stale worker cannot commit | Supported: tested before recovery, after recovery, after reclaim, and after a real kill |
 | Retries are bounded and backed off | Supported for the tested limits and values (provisional, not measured) |
 | No transaction is held open during task work | Supported by an in-handler check and a read from a second connection |
 | Cancellation behaves as specified, including races | Supported for queued tasks and for cancel versus claim; running-task cancellation is deliberately unsupported |
 | Manual retry creates a new task and keeps history | Not built |
+| Graceful shutdown with a task in progress | Supported for the tested scenarios: the first signal (`CTRL_BREAK_EVENT` on Windows, `SIGINT` elsewhere) lets the active task finish and the worker exits 0; a second signal exits 130 and the task is recovered after its lease. `SIGTERM`, `taskkill` without `/F`, and a service stop are not tested |
+| Completion, failure, and renewal against lease recovery | Supported for the tested scenarios: both forced orders and unordered races on separate connections ended in one consistent state. Not every interleaving is covered |
 | Behavior across restart and sleep on Windows | Not tested |

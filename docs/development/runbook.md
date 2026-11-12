@@ -270,6 +270,13 @@ commands are in [persistent-worker-slice.md](persistent-worker-slice.md), sectio
 the 35 above, `--tag requires_postgres` collects **130** tests; re-check the number, it changes as
 tests are added.
 
+A test-only follow-up adds `backend/tests/test_tasks_recovery_postgres.py` (**15** tests, tagged
+`requires_postgres`; real worker processes, a forced kill, shutdown with a task in progress, and
+races against recovery). The VM cannot run them. **The owner ran that module locally: 15 passed,
+exit code 0** (owner-supplied local results; see the [local validation record](local-validation-record.md)).
+A combined run of all PostgreSQL-required tests (now **145** collected: 130 plus 15) was not
+reported. Command: [persistent-worker-slice.md](persistent-worker-slice.md), section 9.4.
+
 Expected collection at the commit that added the persistence slice (re-check it, counts
 change as tests are added): **3** skeleton tests (`PostgresUserTests` 2, `PostgresReadinessTests` 1)
 plus **32** persistence tests (`SchemaTests` 5, `RevisionPersistenceTests` 12,
