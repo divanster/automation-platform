@@ -11,8 +11,9 @@ preparation slice (plain-Python schema, validation, deterministic test extractor
 canonical serialization and content hashing, and pure revision, approval, and export-eligibility rules;
 see `docs/development/request-intake-slice.md`), plus persistence for cases, runs, result
 revisions, and approvals (`apps/cases`; see `docs/development/revision-approval-policy.md`;
-PostgreSQL behavior not yet run). Authentication, exports, background
-execution, and real AI adapters are not implemented. See `README.md` and
+its PostgreSQL tests passed in the owner's local run, see
+`docs/development/local-validation-record.md`). Authentication and authorization, exports,
+background execution, an API, a UI, audit events, and real AI adapters are not implemented. See `README.md` and
 `docs/architecture/README.md`. Do not describe planned components as existing.
 
 ## Working rules

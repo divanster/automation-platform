@@ -1,11 +1,12 @@
 # Revision, approval, and export-eligibility policy, and its persistence
 
 > **Status.** The policy rules (`workflows/revision_approval`) are pure Python and fully
-> DB-free. Their persistence (`apps/cases`, described in "Persistence" below) is implemented
-> but **its PostgreSQL behavior has not been run**: only DB-free tests ran, in the development
-> VM. There is no endpoint, worker, file export, authentication, authorization, audit trail,
-> or workflow state machine, and nothing here is a completed approval phase. Phase 2 database
-> acceptance is still pending the owner's local PostgreSQL validation.
+> DB-free. Their persistence (`apps/cases`, described in "Persistence" below) is implemented;
+> its PostgreSQL tests (35 PostgreSQL-required tests including the persistence ones) **passed
+> in the owner's local run** on PostgreSQL 18.6, for the tested scenarios only (see the
+> [local validation record](local-validation-record.md)). There is no endpoint, worker,
+> file export, authentication, authorization, audit trail, or workflow state machine, and
+> nothing here is a completed approval phase.
 
 ## What exists
 
@@ -274,10 +275,13 @@ Every class refuses to run unless the connection's database name starts with `te
 dedicated test database). The writer tests bound every wait: a barrier timeout, a per-connection
 `lock_timeout`, daemon threads with join timeouts, and a check that no thread is still alive,
 so wrong locking surfaces as a failure instead of a hang; they assert the final stored rows and
-the current-revision pointer. **NOT RUN:** there is no PostgreSQL on the development VM, so
-database uniqueness, rollback, and the locking behavior are **unverified** until the owner runs
-`python manage.py test --tag requires_postgres` locally with `AP_RUN_DB_TESTS=1`
-(runbook, section 6, part F).
+the current-revision pointer. **Not run in the VM** (no PostgreSQL there). **Run locally by the
+owner:** all 35 PostgreSQL-required tests (these 32 plus the 3 skeleton tests) passed on
+PostgreSQL 18.6 (`Ran 35 tests`, `OK`, exit code 0; pasted output, see the
+[local validation record](local-validation-record.md)). That supports database uniqueness,
+rollback, and the writer-serialization behavior **for the tested scenarios and environment
+only**: it does not prove that no other race exists, it does not make exports race-safe, and
+the ORM/service-level immutability above is still not database tamper protection.
 
 ## Caller responsibilities (future application service)
 

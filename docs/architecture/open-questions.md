@@ -22,7 +22,7 @@
 | First export format | JSON. CSV export deferred. | first-workflow.md |
 | First AI adapter | Deterministic test adapter before real providers. | [ai-policy.md](ai-policy.md), [ADR 0004](../decisions/0004-provider-neutral-ai-gateway.md) |
 | External actions | No automatic email sending and no ERP writes. | overview.md, first-workflow.md |
-| PostgreSQL | **Version 18**, native Windows install (not Docker, not WSL), on the owner's **local** computer, not in the development VM. Selected by the owner; **not yet installed or provisioned**. | [runbook](../development/runbook.md) |
+| PostgreSQL | **Version 18**, native Windows install (not Docker, not WSL), on the owner's **local** computer, not in the development VM. Selected by the owner; installed locally (reported as 18.6) and used for the validation in the [local validation record](../development/local-validation-record.md). Its reported `listen_addresses='*'` setting is open (item 1.5). | [runbook](../development/runbook.md) |
 | Django user model | `accounts.User` extending `AbstractUser`, no added fields, no custom authentication backend. Implemented; its migration is not yet applied. | ADR 0007, runbook |
 | PostgreSQL driver | Psycopg 3 as `psycopg[binary]` 3.3.8 (wheel for CPython 3.14 on Windows AMD64). Python 3.14 compatibility confirmed by a wheels-only install. | ADR 0007, runbook |
 | Exact versions and lock | Python 3.14.4, Django 5.2.19, DRF 3.18.3, psycopg 3.3.8, hash-locked. | runbook, `requirements/` |
@@ -39,16 +39,18 @@
 
 ## 1. Phase 2 follow-ups
 
-No decision is blocking Phase 2 implementation any more. What remains is
-verification that needs a database:
+No decision is blocking Phase 2 implementation any more. The database verification
+was run locally by the owner (see the
+[local validation record](../development/local-validation-record.md)); what remains is below:
 
 | # | Item | Status |
 | --- | --- | --- |
-| 1.1 | **Install PostgreSQL 18 natively on the owner's local Windows computer** and run the PostgreSQL-backed checks there. | Pending the owner; steps in the [runbook](../development/runbook.md), section 6. Local validation is not done until the owner runs them and provides the results |
-| 1.1a | **Local computer prerequisites** (Git access, CPython 3.14 64-bit AMD64, package index access, and administrator rights if the EDB installer is used) and the PyCharm project. | Unknown / not confirmed; the runbook checks each |
-| 1.2 | **Confirm Django 5.2 works with PostgreSQL 18 in practice.** Django 5.2 documents "PostgreSQL 14 and higher" and does not name 18. | Pending the item above |
+| 1.1 | **Install PostgreSQL 18 natively on the owner's local Windows computer** and run the PostgreSQL-backed checks there. | **Done by the owner** (PostgreSQL 18.6): 35 PostgreSQL-required tests OK and both health endpoints `ok` on port 8010 (pasted output); `showmigrations`, `makemigrations --check --dry-run`, and the local DB-free suite owner-confirmed without logs. See the [local validation record](../development/local-validation-record.md) |
+| 1.1a | **Local computer prerequisites** (Git access, CPython 3.14 64-bit AMD64, package index access, and administrator rights if the EDB installer is used) and the PyCharm project. | CPython 3.14.10 on Windows AMD64 reported. Not reported: the hash-locked install on the local computer, administrator rights, and the PyCharm project (open) |
+| 1.2 | **Confirm Django 5.2 works with PostgreSQL 18 in practice.** Django 5.2 documents "PostgreSQL 14 and higher" and does not name 18. | **Confirmed for the tested environment** (PostgreSQL 18.6; test suite and smoke test). Other 18.x releases and configurations are not covered |
 | 1.3 | **Binary versus source-built Psycopg for production.** Psycopg describes binary packages as best-effort. | Deferred to Phase 8 packaging |
 | 1.4 | **Network exposure of the public health endpoints and the Django admin route** for a future company hub. Local development use is accepted (see section 0); a hub may need these restricted to local or monitoring networks, or `/admin/` disabled or moved. | Deferred to the hub deployment decision ([deployment.md](deployment.md)) |
+| 1.5 | **PostgreSQL `listen_addresses='*'`.** The owner reported this setting on the local development server. It listens on every interface and conflicts with the runbook's loopback-only rule and with [deployment.md](deployment.md) (local connections only). Not known: `pg_hba.conf` address rules, the Windows firewall state, or whether the computer is reachable from other machines. The database **must not be described as loopback-only**. | **Unresolved deployment-hardening item.** Resolve (limit to loopback, or document and justify restricted exposure) before any shared, hub, or production use |
 
 ## 2. Decisions needed before Phase 3 (data, documents, authorization)
 

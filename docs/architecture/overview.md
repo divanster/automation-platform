@@ -234,16 +234,16 @@ Rules:
 | --- | --- |
 | Repository, README, CLAUDE.md, `.gitignore`, `.gitattributes` | Implemented (documentation and configuration only) |
 | These architecture documents and ADRs | Reviewed and revised in the Phase 1 review; accepted decisions are marked in the [decision index](../decisions/README.md); everything else is proposed |
-| Django project skeleton (settings, `accounts`, `health`) | Implemented in Phase 2; DB-free tests pass; PostgreSQL-backed checks pending |
+| Django project skeleton (settings, `accounts`, `health`) | Implemented in Phase 2; DB-free tests pass; PostgreSQL-backed tests and health endpoints passed in the owner's local run ([record](../development/local-validation-record.md)) |
 | `accounts.User` model and its initial migration | Implemented; migration not yet applied to any database |
 | Request-intake preparation slice (`workflows/request_intake`: result schema, pure validation, deterministic test extractor, canonical serialization and content hashing; plain Python, DB-free tests) | Implemented as preparation only; no persistence, stored revisions, approvals, export, or state machine |
 | Revision identity and run scope (UUID identifiers), approval bound to a revision and content hash, and export eligibility (`workflows/revision_approval`: pure rules; plain Python, DB-free tests) | Implemented as pure policy only; no persistence, stored approvals, authentication or authorization, export, or state machine |
-| Persistence of cases, workflow runs, result revisions, and approvals (`apps/cases`: minimal `Case` and `WorkflowRun`, immutable `ResultRevision` and `Approval`, unique revision numbers per run, a stored current-revision pointer, transactional services) | Implemented; ORM/service-level immutability only; PostgreSQL behavior (constraints, locking) written as tests but **not run**; migration not applied anywhere |
+| Persistence of cases, workflow runs, result revisions, and approvals (`apps/cases`: minimal `Case` and `WorkflowRun`, immutable `ResultRevision` and `Approval`, unique revision numbers per run, a stored current-revision pointer, transactional services) | Implemented; ORM/service-level immutability only; PostgreSQL tests passed in the owner's local run for the tested scenarios only ([record](../development/local-validation-record.md)); not database tamper protection |
 | Other domain models (documents, exports, audit events, configuration, roles) and their migrations | Not started |
 | Worker, queue, AI gateway, adapters | Not started |
 | Frontend | Not started |
 | Installer, backup/restore tooling | Not started |
-| PostgreSQL 18 | Selected; to be installed on the owner's **local** computer, never in the development VM. **Not installed or contacted yet**; local validation is pending the owner |
+| PostgreSQL 18 | Selected; installed on the owner's **local** computer (reported 18.6), never in the development VM. Validated for the tested scenarios; the reported `listen_addresses='*'` is an unresolved hardening item |
 | CI | None |
 
 This table must be updated whenever a component is actually built.

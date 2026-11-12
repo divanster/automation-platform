@@ -8,6 +8,10 @@ major version selected by the owner (18). PostgreSQL 18 is to be installed on
 the owner's local Windows computer (not in the development VM) and is not yet
 provisioned; local validation is pending the owner.
 
+> **Update (local validation):** the owner has since run PostgreSQL 18.6 locally; see
+> the [local validation record](../development/local-validation-record.md). The paragraphs
+> below are the record as written at the time and are not rewritten.
+
 Verification date: **2026-11-10**.
 
 ## Context
@@ -113,7 +117,7 @@ decision above.
 
 | Item | Outcome |
 | --- | --- |
-| PostgreSQL | **Version 18**, native Windows install; not Docker or WSL. To be installed on the owner's **local** computer, never in the development VM. **Not installed or provisioned yet.** |
+| PostgreSQL | **Version 18**, native Windows install; not Docker or WSL. To be installed on the owner's **local** computer, never in the development VM. **Not installed or provisioned yet** (as written at the time; since installed locally, see the update note above). |
 | Django user model | **`accounts.User` extending `AbstractUser`**, no added fields, no custom authentication backend. `AUTH_USER_MODEL` was set before the first migration was generated. |
 | PostgreSQL driver | **Psycopg 3**, installed as `psycopg[binary]`. A wheels-only install succeeded for CPython 3.14 on Windows AMD64, so the 3.13 fallback was not needed. |
 | Pinned versions | Python 3.14.4, Django 5.2.19, DRF 3.18.3, psycopg 3.3.8, psycopg-binary 3.3.8, asgiref 3.13.0, sqlparse 0.6.1, tzdata 2026.6 |

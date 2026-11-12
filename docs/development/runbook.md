@@ -5,15 +5,18 @@
 >
 > **Two machines are involved, with different jobs** (section 0). Claude Code
 > develops code in a Windows **VM** and runs only database-free checks there.
-> **PostgreSQL 18 is to be installed on the owner's LOCAL Windows computer (it is
-> not installed yet)**, and every real-database check and application smoke test is
-> to run there.
+> **PostgreSQL 18 runs on the owner's LOCAL Windows computer (reported as 18.6;
+> never in the VM)**, and every real-database check and application smoke test runs
+> there.
 >
-> **Local validation is pending.** It is not done until the owner runs the
-> commands in section 6 on the local computer and provides the results. Nothing in
-> this document records a local installation or a PostgreSQL-backed test as
-> completed. The production settings are a baseline only; the production server
-> and service packaging are not built.
+> **Local validation has been performed by the owner** and is recorded in the
+> [local validation record](local-validation-record.md), which separates pasted output
+> (35 PostgreSQL-required tests OK, health endpoints `ok` on port 8010) from results the
+> owner confirmed without logs. The procedure in section 6 below is kept as the
+> reference; it is **not** a record that every step was run as written. The production
+> settings are a baseline only; the production server and service packaging are not built.
+> One reported deviation is unresolved: the local server was configured with
+> `listen_addresses='*'`, which conflicts with the loopback-only rule below.
 
 Commands are for **Windows PowerShell**. Section 6 is for the **local computer**;
 sections 2 to 5 describe the VM's checks and the shared project conventions.
@@ -28,8 +31,8 @@ permissions, Python installation, drive letters, or paths.
 | Moving code between machines | Owner pushes from the VM with their normal Git authentication | Clone or fast-forward update from GitHub |
 | Python virtual environment | Its own `.venv` (git-ignored), used for DB-free checks | Creates its **own** `.venv` from the committed locks; **never copies the VM's** |
 | DB-free checks (`check`, compile, all DB-free tests) | **Yes** | Yes, as the first environment check |
-| PostgreSQL 18 | **None. Never installed in the VM.** | To be installed and configured by the owner (not done yet) |
-| Migrations, PostgreSQL-backed tests, real readiness, application smoke test | **Not performed. No acceptance claims.** | **Owner runs these and reports the results** |
+| PostgreSQL 18 | **None. Never installed in the VM.** | Installed and configured by the owner (reported as 18.6) |
+| Migrations, PostgreSQL-backed tests, real readiness, application smoke test | **Not performed** | **Performed by the owner** and reported ([record](local-validation-record.md)) |
 | PyCharm | Not used | **Not confirmed as configured**; set up later (section 6.9) |
 
 Rules that apply to both machines:
@@ -39,7 +42,10 @@ Rules that apply to both machines:
 2. **The VM never connects to the local computer's database.** No VM setting may
    point `AP_DB_HOST` at another machine, and no tunnel or port forwarding is set up.
 3. **PostgreSQL is not exposed over the network.** It listens on loopback only
-   and no inbound firewall rule is created for it.
+   and no inbound firewall rule is created for it. *(This is the rule. The owner
+   reported `listen_addresses='*'` on the local server, so the rule is **not met as
+   reported**; see [open-questions.md](../architecture/open-questions.md), item 1.5.
+   Do not describe that database as loopback-only.)*
 4. **Passwords are typed interactively on the local computer.** They never appear
    in commands, files, this repository, or the conversation. Do not use
    `PGPASSWORD` and do not read or print existing secret values.
@@ -58,7 +64,7 @@ Recorded 2026-11-10. Rationale and sources: [ADR 0007](../decisions/0007-technol
 | Psycopg 3 | **3.3.8**, installed as `psycopg[binary]` | `requirements/runtime.in` |
 | `psycopg-binary` (transitive) | 3.3.8, wheel `cp314-cp314-win_amd64`, bundled libpq reported as 18.4 | Resolved |
 | asgiref, sqlparse, tzdata (transitive) | 3.13.0, 0.6.1, 2026.6 | Resolved |
-| PostgreSQL server | **18**, native Windows install (not Docker, not WSL), on the owner's **local** computer | Owner decision; **not installed or validated yet** |
+| PostgreSQL server | **18**, native Windows install (not Docker, not WSL), on the owner's **local** computer | Owner decision; reported as 18.6 and validated for the tested scenarios ([record](local-validation-record.md)) |
 
 Why `psycopg[binary]`: its wheel bundles libpq, so no PostgreSQL client install and
 no compiler is needed. Psycopg describes the binary packages as produced on a
@@ -69,8 +75,9 @@ Compatibility notes:
 
 - Django 5.2.8 and later support Python 3.14.
 - Django 5.2 documents "PostgreSQL 14 and higher" and does not name 18
-  explicitly, so Django 5.2 with PostgreSQL 18 is **unverified until the
-  PostgreSQL-backed tests have been run on the local computer**.
+  explicitly. Django 5.2 with PostgreSQL 18.6 was **validated by the owner's local
+  test run and smoke test** for the tested scenarios ([record](local-validation-record.md));
+  other 18.x releases are not covered.
 - **What the lock actually constrains.** The lock records exactly one sha256 hash
   per package. Six of the seven locked packages are **pure-Python universal
   wheels** (`py3-none-any`; `py2.py3-none-any` for tzdata) whose declared
@@ -115,8 +122,9 @@ possible later improvement.
 Verified on the VM on 2026-11-10: a fresh environment built only from
 `requirements/development.txt` produced an installed set identical to the VM's
 `.venv`, a file with a deliberately altered hash was rejected, and the DB-free
-tests passed in the fresh environment. **This has not been verified on the local
-computer.**
+tests passed in the fresh environment. **Whether the local computer's environment was
+built from the locks was not reported** (the owner reported CPython 3.14.10, a later patch
+release than the VM's 3.14.4).
 
 ### VM environment (code development and DB-free checks)
 
@@ -231,7 +239,7 @@ Expected at this stage: only the HSTS and SSL-redirect warnings
 (`security.W004`, `security.W008`). They are pending TLS and reverse-proxy
 decisions, not oversights.
 
-### Checks that need PostgreSQL (LOCAL COMPUTER ONLY; pending)
+### Checks that need PostgreSQL (LOCAL COMPUTER ONLY; run by the owner)
 
 The exact, ordered commands are in **section 6, part F**. They are run only
 against the **dedicated development server on the local computer** created in
@@ -245,9 +253,10 @@ The PostgreSQL-backed tests are in `backend/tests/test_postgres_required.py`
 (`PostgresUserTests`, `PostgresReadinessTests`) and in
 `backend/tests/test_cases_persistence_postgres.py` (schema constraints, revision and
 approval persistence, persisted export eligibility, and competing writers on one run).
-All are tagged `requires_postgres` and guarded by `AP_RUN_DB_TESTS=1`. **None of them has
-been run yet**; the second file in particular was written without a database, so its
-constraint, rollback, and locking checks are unverified until you run them.
+All are tagged `requires_postgres` and guarded by `AP_RUN_DB_TESTS=1`. They cannot run in
+the VM. **The owner ran them locally: `Ran 35 tests`, `OK`, exit code 0** (pasted output; see
+the [local validation record](local-validation-record.md)). That result covers the tested
+scenarios only and does not prove that no other race exists.
 
 Expected collection at the commit that added the persistence slice (re-check it, counts
 change as tests are added): **3** skeleton tests (`PostgresUserTests` 2, `PostgresReadinessTests` 1)
@@ -261,7 +270,7 @@ migration history from the database. Without a reachable database it prints a
 a DB-free equivalent is part of the test suite
 (`tests/test_user_model.py`, `MigrationStateTests`).
 
-## 6. Local Windows computer: setup and validation (PENDING, owner-operated)
+## 6. Local Windows computer: setup and validation (reference procedure; owner-operated)
 
 > **Nothing in this section has been run.** No local repository, Python
 > environment, PostgreSQL installation, migration, or test has been completed or
@@ -687,13 +696,15 @@ be updated when that is done and confirmed.
 
 | Item | Status |
 | --- | --- |
-| Django 5.2 with PostgreSQL 18 | Unverified; F1 to F6 are the first real test |
+| Django 5.2 with PostgreSQL 18 | **Validated for the tested environment** (PostgreSQL 18.6; [record](local-validation-record.md)) |
 | The lock on any environment other than CPython 3.14 on Windows AMD64 | Untested; only the `psycopg-binary` entry is interpreter- and platform-specific (section 1) |
 | Whether the documentation commit is on GitHub | Unverified; step A7 checks it from the local side |
-| `psycopg[binary]` bundled libpq (18.4) against a real 18.x server | Unverified until F1 |
-| The local computer's Python, Git, permissions, and network access | **Unknown**; checked by 6.1, A and B |
+| `psycopg[binary]` bundled libpq (18.4) against a real 18.x server | **Worked** against PostgreSQL 18.6 in the owner's local run |
+| The local computer's Python, Git, permissions, and network access | Python reported (CPython 3.14.10, Windows AMD64); the rest was not reported |
 | Installing with the EDB installer needs administrator rights on the local computer | Not assumed; unconfirmed |
-| Hash-locked install on the local computer | Unverified; verified only on the VM |
+| Hash-locked install on the local computer | **Open:** verified only on the VM; the local install method was not reported |
+| PostgreSQL `listen_addresses` | **Reported as `'*'`**: conflicts with the loopback-only rule; unresolved (open-questions.md, item 1.5) |
+| Application smoke test port | Run on **8010** locally (the runbook's example uses 8000) |
 | Server encoding of an installer-created cluster | Must be confirmed `UTF8` at D1 |
 | Installer and service-registration choices for client machines | Separate, later decision (Phase 8) |
 
@@ -703,13 +714,13 @@ be updated when that is done and confirmed.
 | --- | --- |
 | Backend skeleton (`config`, `accounts`, `health`, tests) | **Implemented** (Phase 2) |
 | The DB-free tests, `manage.py check`, compile checks | **Passing on the VM** (this is all the VM can verify) |
-| `accounts.User` (extends `AbstractUser`, no added fields) and its initial migration | **Implemented**; migration **not applied** anywhere |
-| PostgreSQL 18 | **Not installed anywhere yet.** To be installed on the owner's local computer; never on the VM |
-| Local clone, local `.venv`, hash-locked install on the local computer | **Pending** (owner) |
-| Migrations (`accounts` and `cases`), the PostgreSQL-required tests, real readiness 200, localhost smoke test | **Pending** (owner runs locally and reports); **no acceptance claim** |
+| `accounts.User` (extends `AbstractUser`, no added fields) and its initial migration | **Implemented**; applied to the throwaway test database in the owner's local run; the development database's state is owner-confirmed (`showmigrations`), no log |
+| PostgreSQL 18 | **Installed on the owner's local computer** (reported 18.6); never on the VM. Reported `listen_addresses='*'` is unresolved |
+| Local clone and local environment | **Exist** (`C:\Projects\newnew\automation-platform`, CPython 3.14.10); the hash-locked install was **not reported** (open) |
+| Migrations (`accounts` and `cases`), the PostgreSQL-required tests, real readiness, localhost smoke test | **Run locally by the owner**: 35 tests OK, liveness and readiness `ok` on port 8010 (pasted); `showmigrations` and `makemigrations --check --dry-run` confirmed without logs ([record](local-validation-record.md)) |
 | PyCharm project and interpreter | Not confirmed as configured |
 | Request-intake preparation slice: plain-Python schema, pure validation, deterministic test fixture parser, canonical serialization and content hashing, DB-free tests ([details](request-intake-slice.md)) | **Implemented**; DB-free only; passing on the VM |
-| Persistence of cases, runs, result revisions, and approvals (`apps/cases`; minimal models, migration, services; [details](revision-approval-policy.md)) | **Implemented**; DB-free tests pass on the VM; the PostgreSQL tests are **written but NOT RUN**; migration not applied anywhere |
+| Persistence of cases, runs, result revisions, and approvals (`apps/cases`; minimal models, migration, services; [details](revision-approval-policy.md)) | **Implemented**; DB-free tests pass on the VM; the PostgreSQL tests **passed in the owner's local run** (tested scenarios only); ORM/service-level immutability, not database tamper protection |
 | Business workflow beyond that: documents, authentication and authorization, exports, state machine | Not implemented |
 | Task queue and background worker | Not implemented |
 | AI gateway and any AI adapter | Not implemented |

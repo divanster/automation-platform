@@ -4,7 +4,8 @@
 > Python with DB-free tests. There are no Django models, migrations, endpoints,
 > storage, persistence, approvals, exports, or background execution, and no real
 > AI provider. It does **not** complete Phase 5 or start Phase 3. Phase 2 database
-> acceptance is still pending the owner's local PostgreSQL validation. Nothing
+> acceptance is covered by the owner's later local validation (see the
+> [local validation record](local-validation-record.md)); at the time of writing it was pending. Nothing
 > here touched a database or an AI provider, and everything described below as
 > implemented was run only in the development VM, DB-free.
 
@@ -429,7 +430,9 @@ Those pre-existing tests need Django settings and so are not part of the standal
 command. The earlier figures (181 and 242) belong to the committed request-intake
 revision, before the canonical module added 101 tests. Counts are only valid for the
 commit they were run on, so re-run before quoting them. The 3 PostgreSQL-required tests are **not**
-counted anywhere above and **have not been run**.
+counted anywhere above; they were not run in the VM and were later run locally by the owner
+as part of 35 PostgreSQL-required tests that passed (see the
+[local validation record](local-validation-record.md)).
 
 ## Deferred (not implemented)
 
