@@ -128,6 +128,42 @@ def registry() -> dict:
     return {**handlers.HANDLERS, **extra}
 
 
+# --- observing a blocked session ---------------------------------------------------------------------------
+
+# Live lock-manager state, not a statistics snapshot: ``pg_stat_activity`` is cached for the rest of
+# the transaction that first reads it, so polling it from inside the transaction that holds the lock
+# never shows a session that blocks later. ``pg_locks`` and ``pg_blocking_pids`` read the lock manager
+# at call time. This matches one backend (``pid = %s``) that has an ungranted lock request and is blocked
+# by THIS connection's backend, so a lock wait of any other session cannot satisfy it.
+BLOCKED_BY_THIS_CONNECTION_SQL = (
+    "SELECT count(*) FROM pg_locks WHERE NOT granted AND pid = %s AND pg_backend_pid() = ANY(pg_blocking_pids(pid))"
+)
+
+
+def wait_until_blocked_by_this_connection(connection, session, timeout, *, clock=time.monotonic, sleep=time.sleep) -> None:
+    """Return once ``session``'s backend is blocked by a lock held by ``connection``; raise ``AssertionError`` otherwise.
+
+    ``session`` needs ``backend_pid`` (None until it has connected), ``connected`` (an event set once
+    it has connected or failed to) and ``outcome`` (None until its operation has finished). One
+    ``timeout`` bounds the whole wait. It fails at once, instead of waiting out the bound, when the
+    session never connected or has already finished (a finished session is not blocked).
+    """
+    deadline = clock() + timeout
+    session.connected.wait(timeout=max(0.0, deadline - clock()))
+    if session.backend_pid is None:
+        raise AssertionError(f"the background session never connected (outcome: {session.outcome!r})")
+    while True:
+        with connection.cursor() as cursor:
+            cursor.execute(BLOCKED_BY_THIS_CONNECTION_SQL, [session.backend_pid])
+            if cursor.fetchone()[0] >= 1:
+                return
+        if session.outcome is not None:
+            raise AssertionError(f"the background session finished without waiting for the lock (outcome: {session.outcome!r})")
+        if clock() >= deadline:
+            raise AssertionError("no session ever waited for the row lock")
+        sleep(POLL_SECONDS)
+
+
 # --- child processes ------------------------------------------------------------------------------------
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent

@@ -289,3 +289,129 @@ class WorkerProcessesTests(SimpleTestCase):
         child = self.workers.start_command("s8", [sys.executable, "-c", "pass"])
         self.workers.wait(child)
         self.assertFalse(support.process_exists(child.pid))
+
+
+class FakeCursor:
+    def __init__(self, connection):
+        self.connection = connection
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def execute(self, sql, params=None):
+        self.connection.executed.append((sql, params))
+
+    def fetchone(self):
+        return (self.connection.counts.pop(0) if len(self.connection.counts) > 1 else self.connection.counts[0],)
+
+
+class FakeConnection:
+    """Answers each count query from a script (the last answer repeats); records every statement."""
+
+    def __init__(self, counts):
+        self.counts = list(counts)
+        self.executed = []
+
+    def cursor(self):
+        return FakeCursor(self)
+
+
+class FakeSession:
+    def __init__(self, backend_pid=4242, outcome=None, connected=True):
+        self.backend_pid = backend_pid
+        self.outcome = outcome
+        self.connected = threading.Event()
+        if connected:
+            self.connected.set()
+
+
+class FakeTime:
+    """A clock that only moves when ``sleep`` is called, so no test really waits."""
+
+    def __init__(self):
+        self.now = 0.0
+        self.sleeps = 0
+
+    def clock(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
+        self.sleeps += 1
+
+
+class BlockedSessionObservationTests(SimpleTestCase):
+    """The lock-wait observation used by the ordered recovery races (see test_tasks_recovery_postgres.py)."""
+
+    def wait(self, connection, session, timeout=10, fake_time=None):
+        fake_time = fake_time or FakeTime()
+        support.wait_until_blocked_by_this_connection(connection, session, timeout, clock=fake_time.clock, sleep=fake_time.sleep)
+        return fake_time
+
+    def test_the_query_reads_the_live_lock_manager_for_one_backend_blocked_by_this_connection(self):
+        sql = support.BLOCKED_BY_THIS_CONNECTION_SQL
+        self.assertIn("pg_locks", sql)
+        self.assertIn("pg_blocking_pids(pid)", sql)
+        self.assertIn("pg_backend_pid() = ANY(", sql)  # blocked BY this connection's backend
+        self.assertIn("NOT granted", sql)  # a pending request, not a held lock
+        self.assertIn("pid = %s", sql)  # the one competing backend, not any session
+        self.assertNotIn("pg_stat_activity", sql)  # a statistics snapshot, cached for the rest of a transaction
+        self.assertNotIn("wait_event", sql)
+
+    def test_it_returns_as_soon_as_the_session_is_seen_blocked(self):
+        connection = FakeConnection([1])
+        fake_time = self.wait(connection, FakeSession(backend_pid=777))
+        self.assertEqual(connection.executed, [(support.BLOCKED_BY_THIS_CONNECTION_SQL, [777])])  # the session's own backend id
+        self.assertEqual(fake_time.sleeps, 0)
+
+    def test_it_polls_until_the_session_becomes_blocked(self):
+        connection = FakeConnection([0, 0, 0, 1])
+        fake_time = self.wait(connection, FakeSession())
+        self.assertEqual(len(connection.executed), 4)
+        self.assertEqual(fake_time.sleeps, 3)
+        self.assertTrue(all(sql == support.BLOCKED_BY_THIS_CONNECTION_SQL for sql, _ in connection.executed))  # no other statement
+
+    def test_it_gives_up_at_the_timeout_and_does_not_busy_loop(self):
+        connection = FakeConnection([0])
+        fake_time = FakeTime()
+        with self.assertRaises(AssertionError) as caught:
+            self.wait(connection, FakeSession(), timeout=1, fake_time=fake_time)
+        self.assertIn("no session ever waited", str(caught.exception))
+        self.assertGreaterEqual(fake_time.now, 1)
+        self.assertLessEqual(len(connection.executed), 1 / support.POLL_SECONDS + 2)  # polled at the poll interval
+
+    def test_a_session_that_has_already_finished_is_not_waited_for(self):
+        connection = FakeConnection([0])
+        fake_time = FakeTime()
+        with self.assertRaises(AssertionError) as caught:
+            self.wait(connection, FakeSession(outcome=("ok", None)), fake_time=fake_time)
+        self.assertIn("finished without waiting", str(caught.exception))
+        self.assertEqual((len(connection.executed), fake_time.sleeps), (1, 0))  # fails at once, not after the bound
+
+    def test_a_session_that_never_connected_fails_at_once_with_its_outcome(self):
+        connection = FakeConnection([0])
+        with self.assertRaises(AssertionError) as caught:
+            self.wait(connection, FakeSession(backend_pid=None, outcome=("error", RuntimeError("x"))))
+        self.assertIn("never connected", str(caught.exception))
+        self.assertEqual(connection.executed, [])  # nothing was queried without a backend id
+
+    def test_a_session_that_is_slow_to_connect_is_waited_for_within_the_bound(self):
+        session = FakeSession(backend_pid=None, connected=False)
+        connection = FakeConnection([1])
+
+        def connect():
+            session.backend_pid = 99
+            session.connected.set()
+
+        threading.Timer(0.1, connect).start()
+        self.wait(connection, session, timeout=10, fake_time=None)
+        self.assertEqual(connection.executed[0][1], [99])
+
+    def test_a_session_that_never_connects_within_the_bound_fails(self):
+        session = FakeSession(backend_pid=None, connected=False)
+        with self.assertRaises(AssertionError) as caught:
+            support.wait_until_blocked_by_this_connection(FakeConnection([1]), session, 0.05)
+        self.assertIn("never connected", str(caught.exception))

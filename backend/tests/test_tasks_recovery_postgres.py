@@ -295,10 +295,17 @@ class GracefulShutdownWithActiveTaskTests(WorkerProcessTestCase):
 
 
 class Background:
-    """Run a callable on its own thread and connection with a lock timeout; collect ``("ok", value)`` or ``("error", error)``."""
+    """Run a callable on its own thread and connection with a lock timeout; collect ``("ok", value)`` or ``("error", error)``.
+
+    ``backend_pid`` is the PostgreSQL backend id of the thread's own connection (None until it has
+    connected); ``connected`` is set once it has connected or failed to. A test uses them to observe
+    that this very session is blocked.
+    """
 
     def __init__(self, target):
         self.outcome = None
+        self.backend_pid = None
+        self.connected = threading.Event()
         self._thread = threading.Thread(target=self._run, args=(target,), daemon=True)
         self._thread.start()
 
@@ -306,10 +313,14 @@ class Background:
         try:
             with connection.cursor() as cursor:  # this thread's own connection
                 cursor.execute(f"SET lock_timeout = '{base.LOCK_TIMEOUT_SECONDS}s'")
+                cursor.execute("SELECT pg_backend_pid()")
+                self.backend_pid = cursor.fetchone()[0]
+            self.connected.set()
             self.outcome = ("ok", target())
         except Exception as error:  # recorded and asserted on by the test
             self.outcome = ("error", error)
         finally:
+            self.connected.set()  # also when connecting failed, so a waiting test does not wait for nothing
             connection.close()
 
     def result(self):
@@ -356,15 +367,9 @@ class RecoveryRaceTests(base.ThreadedMixin, base.DedicatedTestDatabaseMixin, Tra
     def stored(self):
         return Task.objects.get(pk=self.task.pk)
 
-    def wait_until_a_session_waits_for_a_lock(self):
-        deadline = time.monotonic() + base.LOCK_TIMEOUT_SECONDS
-        while time.monotonic() < deadline:
-            with connection.cursor() as cursor:
-                cursor.execute("SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock'")
-                if cursor.fetchone()[0] >= 1:
-                    return
-            time.sleep(0.05)
-        self.fail("no session ever waited for the row lock")
+    def wait_until_a_session_waits_for_a_lock(self, blocked):
+        """Wait until ``blocked``'s own backend is blocked by a lock this connection holds (live lock-manager check)."""
+        support.wait_until_blocked_by_this_connection(connection, blocked, base.LOCK_TIMEOUT_SECONDS)
 
     def assert_lease_lost(self, outcome, reason="not_running"):
         kind, value = outcome
@@ -385,7 +390,7 @@ class RecoveryRaceTests(base.ThreadedMixin, base.DedicatedTestDatabaseMixin, Tra
         with transaction.atomic():
             self.assertEqual(self.recover(), (1, 0))  # requeued, not yet committed: this connection holds the row lock
             blocked = Background(self.complete)
-            self.wait_until_a_session_waits_for_a_lock()
+            self.wait_until_a_session_waits_for_a_lock(blocked)
         self.assert_lease_lost(blocked.result())
         self.assert_recovered(base.at(66))  # 61 s + 5 s backoff
 
@@ -393,7 +398,7 @@ class RecoveryRaceTests(base.ThreadedMixin, base.DedicatedTestDatabaseMixin, Tra
         with transaction.atomic():
             self.assertEqual(self.recover(), (1, 0))
             blocked = Background(self.fail_with_retry)
-            self.wait_until_a_session_waits_for_a_lock()
+            self.wait_until_a_session_waits_for_a_lock(blocked)
         self.assert_lease_lost(blocked.result())
         self.assert_recovered(base.at(66))  # the failed-attempt path would have given at(64) and a "temporary_failure" attempt
 
@@ -401,7 +406,7 @@ class RecoveryRaceTests(base.ThreadedMixin, base.DedicatedTestDatabaseMixin, Tra
         with transaction.atomic():
             self.assertEqual(self.recover(), (1, 0))
             blocked = Background(self.renew)
-            self.wait_until_a_session_waits_for_a_lock()
+            self.wait_until_a_session_waits_for_a_lock(blocked)
         self.assert_lease_lost(blocked.result())
         self.assert_recovered(base.at(66))
 
