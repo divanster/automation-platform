@@ -6,9 +6,11 @@ later destroys a separate ``test_<AP_DB_NAME>`` database. They exercise what the
 (test_cases_persistence.py) cannot: constraints, transactions, rollback, and the run-row
 locking that serializes competing writers.
 
-STATUS: written on a development VM with no PostgreSQL. They have NOT been run there, so the
-guarantees they check (database uniqueness, rollback, locking) are not verified until the owner
-runs them against a local test database. This file is ASCII only.
+STATUS: written on a development VM with no PostgreSQL, and never run there. The project owner
+ran them on the local Windows computer against PostgreSQL 18.6 (35 PostgreSQL-required tests in
+total, OK; see docs/development/local-validation-record.md). That covers the tested scenarios
+and environment only; passing concurrency tests do not prove that no other race exists. This
+file is ASCII only.
 
 Run (from backend\\, after the runbook's database setup):
     python manage.py test tests.test_cases_persistence_postgres --tag requires_postgres

@@ -19,12 +19,34 @@
 
 Observation: the VM's recorded interpreter is CPython 3.14.4 and the runbook's version table
 names it. The local run used 3.14.10, a later patch release of the same series. The
-hash-locked package set is separate from the interpreter patch version; whether the local
-environment was built from `requirements/*.txt` was **not reported**.
+hash-locked package set is separate from the interpreter patch version. The local
+installation from the hash-locked file is described in the next subsection.
 
-The local package versions (Django, DRF, psycopg) were not reported, so none is recorded
-here as locally observed. The pinned versions in the [runbook](runbook.md) are what the
-repository specifies.
+The local package versions (Django, DRF, psycopg) are not recorded here as locally
+observed. The pinned versions in the [runbook](runbook.md) are what the repository
+specifies.
+
+### Local dependency installation (command and output supplied by the owner)
+
+The owner ran this on the local computer, in the local project directory:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install --require-hashes --only-binary=:all: -r requirements\development.txt
+```
+
+The owner supplied the successful package-installation output, followed by `pip check`
+reporting `No broken requirements found.` This is the runbook's hash-locked installation
+method (`--require-hashes` with `--only-binary=:all:` against the committed development
+lock). Recorded accurately:
+
+- The command was provided to Claude in the conversation, and the successful installation
+  and `pip check` output were supplied. The output itself is not reproduced in this
+  repository.
+- **Claude did not independently reproduce this installation.** The VM's own fresh-environment
+  reproduction (2026-11-10) is a separate, earlier check.
+- **No clean-checkout reproduction is claimed.** It was not reported whether the local
+  checkout was freshly cloned or whether the installed package set was compared with the
+  VM's; the installed versions are not recorded here.
 
 ## Evidence
 
@@ -96,8 +118,8 @@ marked closed.
 
 | Criterion | Status | Basis |
 | --- | --- | --- |
-| The test suite runs and passes from a clean checkout following written instructions | **Partly closed.** DB-free suite passed locally (owner-confirmed, no count). Not established: that the checkout was clean and the written steps were followed as written | Owner confirmation only |
-| A fresh virtual environment built from the recorded pins reproduces the same package set | **Closed on the VM** (2026-11-10). **Open locally:** whether the local environment was built from the locks was not reported | VM record; no local report |
+| The test suite runs and passes from a clean checkout following written instructions | **Partly closed.** DB-free suite passed locally (owner-confirmed, no count). **A clean-checkout reproduction has not been reported**: it is not established that the checkout was freshly cloned or that the written steps were followed as written | Owner confirmation only |
+| A fresh virtual environment built from the recorded pins reproduces the same package set | **Closed on the VM** (2026-11-10). **Locally:** the hash-locked install succeeded and `pip check` reported no broken requirements (owner-supplied output, not independently reproduced by Claude). Not established locally: that the installed set equals the VM's | VM record; owner-supplied local output |
 | The health endpoint works | **Closed:** liveness and readiness both `ok` against a real PostgreSQL 18.6 | Pasted output |
 | A connection to a local PostgreSQL development database | **Closed** for the tested environment | Pasted output (readiness) |
 | Migrations apply against PostgreSQL | **Closed for the test database** (Django applies all migrations to build it). **Development database:** `showmigrations` owner-confirmed, no log, so the applied state of each migration there is not shown here | Pasted output and owner confirmation |
@@ -108,14 +130,29 @@ marked closed.
 | `requires_postgres` tests | **Closed:** 35 ran, `OK`, exit code 0, test database destroyed | Pasted output |
 | No secrets in the repository | Checked by secret scans on the VM at each checkpoint (no matches); no local evidence needed or supplied | VM record |
 | Module dependency rules checked by an automated test | **Closed** (VM and, per owner confirmation, local DB-free suite) | Tests in the repository |
-| Hash-locked install on the local computer | **Open** (not reported) | None |
-| PyCharm project and interpreter | **Open / not confirmed** | None |
+| Hash-locked install on the local computer | **Closed** by owner-supplied output (successful install with `--require-hashes --only-binary=:all:`, then `pip check` clean). Not independently reproduced by Claude | Owner-supplied output |
 | CI definition (optional) | **Not requested** | None |
 | PostgreSQL server configuration meets the runbook's loopback-only rule | **Open: not met as reported.** See below | Owner report |
 
 Phase 2's database-backed criteria are supported by the evidence above. Overall Phase 2 closure
-is the project owner's decision at its stop-and-report gate; the open rows above and the
-deployment item below are the remaining gaps. No later phase is marked complete.
+is the project owner's decision at its stop-and-report gate. No later phase is marked
+complete.
+
+### Keeping the categories separate
+
+| Category | Status |
+| --- | --- |
+| **Tested backend and persistence behavior** | Supported by the pasted 35-test run and health checks, for the tested environment and scenarios only (see "What this does not validate") |
+| **Clean-checkout reproduction** | **Not yet reported.** Local install and DB-free results exist, but a fresh clone followed step by step has not been reported |
+| **Production driver and packaging decisions** | Open and separate: binary versus source-built `psycopg` (open question 1.3), the application server, service packaging, installer, TLS, and backups. Nothing here validates them |
+| **Network hardening** | Open: `listen_addresses='*'` (below). Not a backend-behavior result either way |
+
+**PyCharm** is optional developer tooling. Its setup is not a Phase 2 backend or database
+acceptance criterion and is not a blocker; it is not configured or confirmed, and nothing
+in this record depends on it.
+
+**This is not production readiness.** No production server, service, hardening, or
+operations work has been done or validated.
 
 ## Unresolved deployment-hardening item: `listen_addresses`
 
@@ -143,11 +180,9 @@ events, race-safe export (the atomic re-check at export commit), database-level 
 document storage, the state machine, and real AI adapters. The open questions that cover them
 are in [open-questions.md](../architecture/open-questions.md).
 
-## Stale code comments (not changed by this record)
+## Code comments
 
-The `STATUS` paragraph at the top of `backend/tests/test_cases_persistence_postgres.py` still
-says those tests were not run and their guarantees are unverified; that was true when it was
-written and is now out of date. The note in `backend/apps/cases/services.py` that the locking
-was not exercised by a database test refers to the development VM and is still accurate
-there, but it does not mention the local run. This record is documentation-only, so code was
-deliberately not modified; correct both comments in the next code change.
+Two status comments written before the local run were updated to point at this record: the
+`STATUS` paragraph in `backend/tests/test_cases_persistence_postgres.py` and the locking note
+in `backend/apps/cases/services.py`. Both keep the fact that database tests are not run in
+the development VM. Only comments changed; no executable code.

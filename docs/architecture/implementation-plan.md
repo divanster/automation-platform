@@ -26,7 +26,7 @@
 | --- | --- | --- |
 | 0 | Repository preflight | Performed (read-only checks) |
 | 1 | Architecture specification | Reviewed and revised; decisions recorded |
-| 2 | Backend skeleton | **Implemented; database-backed acceptance criteria supported by local evidence** (PostgreSQL 18.6, 35 PostgreSQL-required tests OK, health endpoints `ok`); open: local hash-locked install, PyCharm, and the `listen_addresses='*'` hardening item; closure is the owner's decision (see "Phase 2 status" below and the [local validation record](../development/local-validation-record.md)) |
+| 2 | Backend skeleton | **Implemented; database-backed acceptance criteria supported by local evidence** (PostgreSQL 18.6, 35 PostgreSQL-required tests OK, health endpoints `ok`); open: a clean-checkout reproduction (not yet reported) and the `listen_addresses='*'` hardening item; closure is the owner's decision (see "Phase 2 status" below and the [local validation record](../development/local-validation-record.md)) |
 | 3 | Data, documents, and basic authorization | Not started |
 | 4 | Persistent worker | Not started |
 | (checkpoint) | Installation feasibility experiment | Not started |
@@ -159,9 +159,9 @@ Gaps:
 | The `requires_postgres` tests | **Closed:** 35 ran, OK (pasted output) |
 | Compatibility of Django 5.2 with PostgreSQL 18 in practice | **Closed for the tested environment** (PostgreSQL 18.6) |
 | `runserver` end to end and the application smoke test | **Closed for the smoke test that was run** (both health endpoints `ok` on port 8010); the admin-page and listening-address checks were not reported |
-| Hash-locked dependency install on the local computer | **Open:** verified only on the VM; the local install method was not reported |
-| Clean-checkout test run following the written instructions | **Partly closed:** DB-free suite passed locally (owner-confirmed); the clean checkout and the instructions followed were not reported |
-| PyCharm project and interpreter | **Open** (not confirmed) |
+| Hash-locked dependency install on the local computer | **Closed by owner-supplied output** (`pip install --require-hashes --only-binary=:all: -r requirements/development.txt` succeeded, then `pip check` reported no broken requirements); not independently reproduced by Claude |
+| Clean-checkout test run following the written instructions | **Partly closed:** DB-free suite passed locally (owner-confirmed, no count); a clean-checkout reproduction has **not** been reported |
+| PyCharm project and interpreter | Optional developer tooling; **not a backend or database acceptance criterion** and not a blocker; not configured or confirmed |
 | PostgreSQL `listen_addresses='*'` reported on the local server | **Open deployment-hardening item.** It conflicts with the runbook's loopback-only rule; the database must not be described as loopback-only. See [open-questions.md](open-questions.md), item 1.5 |
 | CI definition (optional in the plan) | Not requested |
 

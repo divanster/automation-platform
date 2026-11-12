@@ -7,9 +7,11 @@ supported way to change a run's current revision. Reads return the pure domain o
 WRITES ARE SERIALIZED PER RUN. Both write operations open ``transaction.atomic()`` and lock the
 run's row with ``SELECT ... FOR UPDATE`` before reading or writing anything else for that run, so
 two competing writers for the same run run one after the other, and the second one sees the
-first one's result. This relies on PostgreSQL row locking and was written against it; it has
-NOT been exercised by a database test on the development VM (see
-docs/development/revision-approval-policy.md for the tests that exercise it).
+first one's result. This relies on PostgreSQL row locking and was written against it. Database
+tests are not run in the development VM; the project owner ran them locally against
+PostgreSQL 18.6 and they passed for the tested scenarios only (see
+docs/development/local-validation-record.md and docs/development/revision-approval-policy.md).
+That does not prove that no other race exists.
 
 WHAT THIS DOES NOT PROVIDE. Persistence alone does not make an export race-safe.
 ``check_persisted_export_eligibility`` is a plain read: it takes no lock and does not hold a

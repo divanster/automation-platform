@@ -122,9 +122,11 @@ possible later improvement.
 Verified on the VM on 2026-11-10: a fresh environment built only from
 `requirements/development.txt` produced an installed set identical to the VM's
 `.venv`, a file with a deliberately altered hash was rejected, and the DB-free
-tests passed in the fresh environment. **Whether the local computer's environment was
-built from the locks was not reported** (the owner reported CPython 3.14.10, a later patch
-release than the VM's 3.14.4).
+tests passed in the fresh environment. **Locally,** the owner installed from the lock with
+`--require-hashes --only-binary=:all:` and reported success with `pip check` clean (output
+supplied by the owner; not independently reproduced by Claude; no clean-checkout
+reproduction reported; CPython 3.14.10 locally versus the VM's 3.14.4). See the
+[local validation record](local-validation-record.md).
 
 ### VM environment (code development and DB-free checks)
 
@@ -686,8 +688,9 @@ of any error. **Never include passwords, tokens, or other secret values.**
 
 ### 6.9 PyCharm (later; not confirmed as configured)
 
-The local PyCharm project and interpreter are **not confirmed to exist** and are
-not part of this validation. Once the checks above pass, PyCharm can be configured
+PyCharm is optional developer tooling. The local PyCharm project and interpreter are
+**not confirmed to exist**, are not part of this validation, and are not a blocker for
+backend or database acceptance. Once the checks above pass, PyCharm can be configured
 later to use the local `.venv` and per-run-configuration environment variables
 (typed locally, never committed). `.idea/` is already git-ignored. This runbook will
 be updated when that is done and confirmed.
@@ -702,7 +705,7 @@ be updated when that is done and confirmed.
 | `psycopg[binary]` bundled libpq (18.4) against a real 18.x server | **Worked** against PostgreSQL 18.6 in the owner's local run |
 | The local computer's Python, Git, permissions, and network access | Python reported (CPython 3.14.10, Windows AMD64); the rest was not reported |
 | Installing with the EDB installer needs administrator rights on the local computer | Not assumed; unconfirmed |
-| Hash-locked install on the local computer | **Open:** verified only on the VM; the local install method was not reported |
+| Hash-locked install on the local computer | **Succeeded** per owner-supplied output (`--require-hashes --only-binary=:all:`, then `pip check` clean); not independently reproduced by Claude; no clean-checkout reproduction reported |
 | PostgreSQL `listen_addresses` | **Reported as `'*'`**: conflicts with the loopback-only rule; unresolved (open-questions.md, item 1.5) |
 | Application smoke test port | Run on **8010** locally (the runbook's example uses 8000) |
 | Server encoding of an installer-created cluster | Must be confirmed `UTF8` at D1 |
@@ -716,9 +719,9 @@ be updated when that is done and confirmed.
 | The DB-free tests, `manage.py check`, compile checks | **Passing on the VM** (this is all the VM can verify) |
 | `accounts.User` (extends `AbstractUser`, no added fields) and its initial migration | **Implemented**; applied to the throwaway test database in the owner's local run; the development database's state is owner-confirmed (`showmigrations`), no log |
 | PostgreSQL 18 | **Installed on the owner's local computer** (reported 18.6); never on the VM. Reported `listen_addresses='*'` is unresolved |
-| Local clone and local environment | **Exist** (`C:\Projects\newnew\automation-platform`, CPython 3.14.10); the hash-locked install was **not reported** (open) |
+| Local clone and local environment | **Exist** (`C:\Projects\newnew\automation-platform`, CPython 3.14.10); hash-locked install succeeded and `pip check` was clean (owner-supplied output); a clean-checkout reproduction is not reported |
 | Migrations (`accounts` and `cases`), the PostgreSQL-required tests, real readiness, localhost smoke test | **Run locally by the owner**: 35 tests OK, liveness and readiness `ok` on port 8010 (pasted); `showmigrations` and `makemigrations --check --dry-run` confirmed without logs ([record](local-validation-record.md)) |
-| PyCharm project and interpreter | Not confirmed as configured |
+| PyCharm project and interpreter | Optional developer tooling; not configured or confirmed; not a backend or database acceptance criterion |
 | Request-intake preparation slice: plain-Python schema, pure validation, deterministic test fixture parser, canonical serialization and content hashing, DB-free tests ([details](request-intake-slice.md)) | **Implemented**; DB-free only; passing on the VM |
 | Persistence of cases, runs, result revisions, and approvals (`apps/cases`; minimal models, migration, services; [details](revision-approval-policy.md)) | **Implemented**; DB-free tests pass on the VM; the PostgreSQL tests **passed in the owner's local run** (tested scenarios only); ORM/service-level immutability, not database tamper protection |
 | Business workflow beyond that: documents, authentication and authorization, exports, state machine | Not implemented |
