@@ -4,7 +4,8 @@
 > work. It contains **no delivery dates** and no effort estimates; those require
 > decisions and measurements that do not exist yet. Phases 0 and 1 produced
 > documentation only. Phase 2 has produced a backend skeleton (see "Phase 2
-> status"); no business workflow, worker, AI, frontend, or installer code exists.
+> status") and early persistence for revisions and approvals; no business workflow, worker,
+> AI, frontend, or installer code exists.
 
 ## How to use this plan
 
@@ -25,7 +26,7 @@
 | --- | --- | --- |
 | 0 | Repository preflight | Performed (read-only checks) |
 | 1 | Architecture specification | Reviewed and revised; decisions recorded |
-| 2 | Backend skeleton | **Implemented, acceptance incomplete**: DB-free checks pass; PostgreSQL-backed checks are **pending the owner running them on the local Windows computer**, where PostgreSQL 18 is to be installed (see "Phase 2 status" below) |
+| 2 | Backend skeleton | **Implemented; database-backed acceptance criteria supported by local evidence** (PostgreSQL 18.6, 35 PostgreSQL-required tests OK, health endpoints `ok`); open: a clean-checkout reproduction (not yet reported) and the `listen_addresses='*'` hardening item; closure is the owner's decision (see "Phase 2 status" below and the [local validation record](../development/local-validation-record.md)) |
 | 3 | Data, documents, and basic authorization | Not started |
 | 4 | Persistent worker | Not started |
 | (checkpoint) | Installation feasibility experiment | Not started |
@@ -111,47 +112,60 @@
 
 ### Phase 2 status
 
-Recorded after the implementation pass. **Phase 2 is not complete.**
+Updated after the owner's local validation (see the
+[local validation record](../development/local-validation-record.md), which separates pasted
+output from owner confirmations without logs). **The database-backed Phase 2 criteria are
+supported by evidence for the tested environment; overall Phase 2 closure remains the owner's
+decision at the stop-and-report gate, and the gaps below are still open.**
 
-**Division of work.** The Claude Code development VM is used for code
-development and database-free checks only; PostgreSQL is **not** installed there
-and the VM never connects to a database on another machine. PostgreSQL 18 is
-**to be installed** on the owner's **local** Windows computer (it is not installed
-yet), and migrations, the PostgreSQL-backed tests, the real readiness probe, and
-the application smoke test are to run there. The local PyCharm project and environment are not confirmed as
-configured. Local validation stays **pending until the owner runs the
-[runbook](../development/runbook.md) section 6 commands locally and provides the
-results**; nothing local has been done or observed.
+**Division of work.** The Claude Code development VM is used for code development and
+database-free checks only; PostgreSQL is **not** installed there and the VM never connects to
+a database on another machine. PostgreSQL 18.6 runs on the owner's **local** Windows computer
+(CPython 3.14.10, project at `C:\Projects\newnew\automation-platform`), where the
+migrations, the PostgreSQL-backed tests, the real readiness probe, and the application smoke
+test were run. The VM did not run or observe them.
 
 Done and verified on the VM (DB-free; PostgreSQL was not contacted):
 
 - Backend skeleton: `backend/config` (split base/development/production
   settings), `accounts` (`accounts.User`, no added fields, standard `UserAdmin`,
-  initial migration generated) and `health` (liveness and readiness).
+  initial migration) and `health` (liveness and readiness).
 - Exact versions and a hash-locked, runtime/development-separated dependency set
   ([runbook](../development/runbook.md)); a fresh environment built from the lock
   matched `.venv`, and an altered hash was rejected.
-- The DB-free tests pass (the skeleton plus the request-intake preparation slice
-  described below), including settings parsing, the production
-  secret and host requirements, and tests that fail if any API view other than the
-  two health views becomes public. `manage.py check`, compile checks, and a DB-free
-  migration-state test pass. A live development server answered both health
-  endpoints (readiness 503 with no database configured).
+- The DB-free tests pass (the skeleton, the request-intake preparation slice, and the
+  revision/approval policy and persistence preparation), including settings parsing, the
+  production secret and host requirements, and tests that fail if any API view other than
+  the two health views becomes public. `manage.py check`, compile checks, and a DB-free
+  migration-state test pass.
 
-Not done (acceptance gaps):
+Done and observed locally (pasted output from the owner):
 
-| Gap | Blocked by |
+- The PostgreSQL-required tests: `Ran 35 tests`, `OK`, exit code 0; the dedicated
+  `test_automation_dev` database was destroyed afterwards.
+- Liveness and readiness both returned status `ok` on port 8010 (readiness checks a real
+  database connection).
+
+Confirmed by the owner locally, **without pasted output**: `showmigrations`,
+`makemigrations --check --dry-run`, and the local DB-free regression suite all completed
+successfully. No local DB-free test count was supplied.
+
+Gaps:
+
+| Gap | Status |
 | --- | --- |
-| A real PostgreSQL connectivity check (readiness returning 200 against a real server) | PostgreSQL 18 is not yet installed on the owner's local computer. The local setup and validation procedure is prepared in the [runbook](../development/runbook.md), section 6, and has **not been run**. The selected install path is the EDB installer; the binaries archive is only an optional alternative. The local computer's permissions, Python, and paths are unknown. |
-| `migrate` of `accounts.0001_initial` against PostgreSQL | Same (local, pending the owner) |
-| The `requires_postgres` tests (real user creation, uniqueness, real readiness) | Same (local, pending the owner) |
-| Compatibility of Django 5.2 with PostgreSQL 18 in practice | Same (Django 5.2 documents PostgreSQL 14+ and does not name 18) |
-| Confirmation that `runserver` plus `migrate` works end to end, and the localhost application smoke test | Same (local, pending the owner) |
-| Hash-locked dependency install on the local computer | Verified only on the VM; pending locally |
+| A real PostgreSQL connectivity check (readiness returning 200 against a real server) | **Closed** for the tested environment (pasted output) |
+| `migrate` of the migrations against PostgreSQL | **Closed for the test database** (Django applied them to build it; pasted output). The development database's applied state is owner-confirmed via `showmigrations`, no log |
+| The `requires_postgres` tests | **Closed:** 35 ran, OK (pasted output) |
+| Compatibility of Django 5.2 with PostgreSQL 18 in practice | **Closed for the tested environment** (PostgreSQL 18.6) |
+| `runserver` end to end and the application smoke test | **Closed for the smoke test that was run** (both health endpoints `ok` on port 8010); the admin-page and listening-address checks were not reported |
+| Hash-locked dependency install on the local computer | **Closed by owner-supplied output** (`pip install --require-hashes --only-binary=:all: -r requirements/development.txt` succeeded, then `pip check` reported no broken requirements); not independently reproduced by Claude |
+| Clean-checkout test run following the written instructions | **Partly closed:** DB-free suite passed locally (owner-confirmed, no count); a clean-checkout reproduction has **not** been reported |
+| PyCharm project and interpreter | Optional developer tooling; **not a backend or database acceptance criterion** and not a blocker; not configured or confirmed |
+| PostgreSQL `listen_addresses='*'` reported on the local server | **Open deployment-hardening item.** It conflicts with the runbook's loopback-only rule; the database must not be described as loopback-only. See [open-questions.md](open-questions.md), item 1.5 |
 | CI definition (optional in the plan) | Not requested |
 
-Phase 2 should be marked complete only after the PostgreSQL-backed checks pass
-and are recorded.
+Later phases are not marked complete by this validation.
 
 ## Phase 3: Data, documents, and basic authorization
 
@@ -236,12 +250,18 @@ and are recorded.
 > ([request-intake-slice.md](../development/request-intake-slice.md)). A second
 > preparation slice holds the **pure rules** for revision identity, approval bound to a
 > revision and content hash, and export eligibility
-> ([revision-approval-policy.md](../development/revision-approval-policy.md)). Neither
-> completes or starts Phase 5: there is no persistence, no stored revision or approval,
-> no authentication or authorization, no export, no state machine, no tasks or worker, no
-> storage, and no API. Phase 2 database acceptance is still pending the owner's local
-> PostgreSQL validation. Some specification questions they surfaced are open
-> (open-questions.md items 2.6 to 2.16).
+> ([revision-approval-policy.md](../development/revision-approval-policy.md)). A third,
+> persistence slice (`apps/cases`) stores cases, runs, result revisions, and approvals with
+> database-unique revision numbers per run, a current-revision pointer, and transactional
+> services; it is early Phase 3 work done ahead of order. Its PostgreSQL tests passed in the
+> owner's local run (PostgreSQL 18.6, 35 PostgreSQL-required tests) for the tested
+> scenarios only; see the
+> [local validation record](../development/local-validation-record.md). None of these
+> completes or starts Phase 5: there is no authentication or authorization, no export or
+> race-safe export re-check, no state machine, no tasks or worker, no storage, no audit
+> events, no API, and no UI. Immutability of revisions and approvals is ORM and service level,
+> not database tamper protection. Some specification questions they surfaced are open
+> (open-questions.md items 2.6 to 2.19).
 
 - **Goal:** the full first vertical slice working end to end without any real AI.
 - **Deliverables:** the request-document workflow package (schema, validation

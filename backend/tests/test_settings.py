@@ -36,7 +36,7 @@ class ActiveSettingsTests(SimpleTestCase):
 
     def test_only_planned_project_apps_are_installed(self):
         project_apps = [app for app in settings.INSTALLED_APPS if app.startswith("apps.")]
-        self.assertEqual(project_apps, ["apps.accounts", "apps.health"])
+        self.assertEqual(project_apps, ["apps.accounts", "apps.cases", "apps.health"])
 
 
 class DatabaseSettingsParsingTests(SimpleTestCase):
