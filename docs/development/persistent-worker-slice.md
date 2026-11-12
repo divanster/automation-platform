@@ -3,9 +3,10 @@
 > **Status: implemented. DB-free tests pass in the VM; the 95 PostgreSQL tests and a manual smoke
 > test passed in the owner's local run** ([record](local-validation-record.md); owner-supplied local
 > results). That supports claim, lease, recovery, and idempotency behavior **for the tested
-> scenarios only**; it does not prove that no other race exists, and no test kills a real worker
-> process ([background-execution.md](../architecture/background-execution.md), section 15, "Evidence
-> status"). The VM never ran the PostgreSQL tests. This slice does not connect the
+> scenarios only**; it does not prove that no other race exists. Real worker processes were
+> added later by test-only process-level recovery tests (section 9.4), which also passed in the
+> owner's local run ([background-execution.md](../architecture/background-execution.md), section 15,
+> "Evidence status"). The VM never ran the PostgreSQL tests. This slice does not connect the
 > request-intake workflow, performs **no external effect**, authorizes none, and registers no Windows service.
 
 ## 1. Scope
@@ -194,11 +195,34 @@ Report the exact `Ran N tests` lines, any failure, and the output of steps 5 and
 test fails or hangs, report it as it is; do not loosen it. Hangs are bounded by lock and join
 timeouts (10 s and 30 s), so a stuck lock shows up as a failure, not a frozen run.
 
+### 9.4 Real-process recovery tests (test-only follow-up; run locally by the owner)
+
+`backend/tests/test_tasks_recovery_postgres.py`, 15 tests tagged `requires_postgres`
+(`MultiProcessClaimTests` 2, `KilledWorkerTests` 2, `GracefulShutdownWithActiveTaskTests` 2,
+`RecoveryRaceTests` 9), with the test-only support in `tests/recovery_support.py` and
+`tests/recovery_worker_child.py` and DB-free tests in `tests/test_tasks_recovery_support.py`. They start
+real `manage.py runworker` child processes (test handlers are injected through the existing `registry`
+and `clock` parameters of `process_one`; the production allowlist and production code are unchanged),
+kill one forcibly, and race worker mutations against recovery. In the VM they are only collected and
+skipped (15 skipped); the DB-free suite passes. The owner ran them locally: **15 passed, exit code 0,
+37.091 s, test database destroyed** (an earlier local run failed three tests because of a defect in the
+test helper, fixed in test code; see the [record](local-validation-record.md)). Windows signal
+limits and the design are described in the module docstrings. Run from `backend\` with the setup of
+section 9.3 (no `--keepdb`, no `--noinput`, flag removed afterwards):
+
+```powershell
+try {
+    $env:AP_RUN_DB_TESTS = "1"
+    & $Py manage.py test tests.test_tasks_recovery_postgres --tag requires_postgres -v 2
+    "exit code: $LASTEXITCODE"                     # expect: Ran 15 tests, OK, none skipped, exit code 0
+} finally { Remove-Item Env:AP_RUN_DB_TESTS -ErrorAction SilentlyContinue }
+```
+
 ## 10. Remaining limitations
 
-* The database-dependent behavior is supported only for the scenarios in `test_tasks_postgres.py` and the manual smoke test. The tests do not prove the absence of other races, and no test kills a real worker **process**; a crash is simulated by claiming and never finishing. The manual Ctrl+C check ran against an idle worker (0 tasks), so finishing a task in progress on shutdown is covered only by DB-free tests with mocks.
+* The database-dependent behavior is supported only for the scenarios in `test_tasks_postgres.py`, `test_tasks_recovery_postgres.py`, and the manual smoke test. The tests do not prove the absence of other races. The recovery tests kill a real worker process, but lease expiry in them is simulated with a shifted clock, and only one machine and operating system were used. `SIGTERM`, `taskkill` without `/F`, a service stop, restart, and sleep on Windows were not tested.
 * Time comes from the application clock; skewed clocks across hosts are not handled.
-* No heartbeat, no concurrency limits, no cooperative cancellation of running tasks, no cleanup of finished tasks, no monitoring, no Windows service.
+* No heartbeat, no supervisor that restarts a dead worker, no concurrency limits, no cooperative cancellation of running tasks, no cleanup of finished tasks, no monitoring, no Windows service.
 * Lease, retry, and polling values are provisional guesses, not measurements.
 * The queue is not connected to cases, runs, or the request-intake workflow, and no endpoint or UI exists.
 * Task rows hold business payloads in plain JSON in the database; nothing here encrypts or access-controls them, and there is no authorization on enqueueing. Do not enqueue sensitive data until that is designed.

@@ -230,3 +230,54 @@ Two status comments written before the local run were updated to point at this r
 in `backend/apps/cases/services.py`. Both keep the fact that database tests are not run in
 the development VM. Only comments changed; no executable code. The `STATUS` paragraph in
 `backend/tests/test_tasks_postgres.py` was likewise updated to point here after the worker run.
+
+## Worker crash-recovery tests (real worker processes; `apps/tasks`)
+
+Supplied by the owner after running `backend/tests/test_tasks_recovery_postgres.py` on the local
+Windows computer (commands: [persistent-worker-slice.md](persistent-worker-slice.md), section 9.4).
+**These are owner-supplied local results.** The VM never connected to PostgreSQL and did not run or
+observe any of them; in the VM only the database-free tests ran (full suite `Ran 719 tests`, OK, at the
+time of writing). The report did not restate the environment, and no log was pasted.
+
+| Step | Reported result |
+| --- | --- |
+| First local run of the module | 15 tests executed, 12 passed, 3 failed (66.471 s, exit code 1). The three ordered race tests (`test_completion_`, `test_failure_`, `test_renewal_arriving_while_recovery_holds_the_row_is_refused`) failed in the test helper `wait_until_a_session_waits_for_a_lock` with "no session ever waited for the row lock" |
+| Cause and correction | A test-harness defect: the helper polled `pg_stat_activity` from inside the transaction that held the lock, and PostgreSQL keeps that view's snapshot for the rest of the transaction. The helper now observes the competing session through `pg_locks` and `pg_blocking_pids()`. Test code only; no production code was changed |
+| Run after the correction (`tests.test_tasks_recovery_postgres`) | **15 passed**, exit code 0, 37.091 s; the three previously failing lock-wait tests passed |
+| Test database | Destroyed successfully afterwards |
+
+The 15 tests are `MultiProcessClaimTests` 2, `KilledWorkerTests` 2, `GracefulShutdownWithActiveTaskTests` 2,
+and `RecoveryRaceTests` 9. A combined `--tag requires_postgres` run of all PostgreSQL-required tests
+after this module was added (130 earlier plus 15 = 145) was **not reported**.
+
+**What this supports**, for the scenarios written in the module only:
+
+- Two real worker processes held two different tasks at the same moment, and two processes released
+  together raced for one task, which ran once (one attempt, one stored result, handler run once).
+- A worker process that was forcibly killed while running a task left it `running` until its lease
+  expired; a later worker process recovered it (attempt `abandoned`, code `lease_expired`), the retry
+  completed once, a stale lease token could not complete, fail, or renew it, and a task whose worker was
+  killed on every attempt ended `failed` with `lease_expired` at its attempt limit.
+- Graceful shutdown with a task in progress: after the first signal the worker finished the task,
+  persisted the result, and exited with code 0; a second signal exited with code 130 and the task was
+  recovered after its lease. The signal was `CTRL_BREAK_EVENT` to the child's process group on Windows
+  (Ctrl+C cannot be sent to one process there); `SIGINT` elsewhere.
+- Completion, failure, and renewal against lease recovery, in both forced orders and as unordered races
+  on separate connections, ended in exactly one consistent state.
+
+**What it does not show.**
+
+- Lease expiry was simulated by giving the recovering worker process a shifted clock; leases were not
+  waited out in real time. One machine, one operating system, one PostgreSQL server.
+- There is no heartbeat, and no Windows service or supervisor that restarts a dead worker.
+- Not tested: `SIGTERM`, `taskkill` without `/F`, or a service stop (not known to be graceful on
+  Windows); restart or sleep on Windows; power loss; several hosts or clock skew; load or throughput;
+  measured lease, retry, or polling values.
+- Passing tests do not prove that no other race exists. Handlers still run at least once and may run
+  more than once. This is a development database; it is not production readiness.
+- Findings of the read-only audit that this tests-only slice does not address: one inconsistent
+  attempt row would make recovery (and therefore claiming) fail for every worker; a hung handler
+  stops a single worker from recovering anything; a handler that outlives the lease has its result
+  discarded and is run again; a hard interrupt does not release the lease. These are for a later,
+  separately reviewed hardening slice.
+- The queue is not connected to any workflow; there is no real AI, API, or UI.
