@@ -235,6 +235,13 @@ AuditEvent * --- 0..1 Case / WorkflowRun / other subject
 - **Preserved and immutable:** approval rows are never updated or deleted
   through the application. Historical approvals and rejections are kept
   permanently. There is no stored "invalidated" flag to modify.
+- **Pure policy:** the identity, hash-binding, and export-eligibility rules above exist as
+  database-independent Python (UUID identifiers; each revision and approval is bound to its
+  case, workflow run, revision, and content hash, and an approval from another run never
+  authorizes an export), with no persistence or authentication (see
+  [revision-approval-policy.md](../development/revision-approval-policy.md)). Persisting
+  approvals, enforcing uniqueness and immutability, and the atomic re-check at commit time
+  remain this layer's future work.
 - **Creation guard:** an `approved` decision can be created only for the
   run's current revision, only while the run is in `needs_review`, and only if
   the revision is valid.

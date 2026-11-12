@@ -51,6 +51,8 @@ Exact versions in use are recorded in the
 - [Development runbook](docs/development/runbook.md): setup, tests, and current status
 - [Request-intake preparation slice](docs/development/request-intake-slice.md):
   the database-independent schema, validation, test extractor, and canonical content hashing
+- [Revision, approval, and export-eligibility policy](docs/development/revision-approval-policy.md):
+  pure rules only; no persistence, authentication, or export
 
 ## Repository conventions
 

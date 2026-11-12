@@ -172,6 +172,11 @@ one or more blocking findings is **invalid**.
 
 ### Approval and export rules
 
+(A database-independent, pure-Python version of rules 1, 3, 5 and 6 exists in
+[revision-approval-policy.md](../development/revision-approval-policy.md), scoped to the
+case, the run, the revision, and its content hash; nothing is persisted, authenticated, or
+enforced at commit time yet.)
+
 These rules are normative for the whole architecture. Other documents must not
 contradict them.
 

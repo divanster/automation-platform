@@ -6,6 +6,7 @@ Standard library only: no Django, so the request-intake tests run both with
 
 import dataclasses
 import enum
+import uuid
 from decimal import Decimal
 
 from workflows.request_intake import RequestedItem, Requester, StructuredRequest
@@ -38,7 +39,7 @@ def summary(result):
     return [(finding.code.value, finding.field_path) for finding in result.findings]
 
 
-_IMMUTABLE_LEAVES = (str, int, float, bool, Decimal, type(None), bytes, enum.Enum)
+_IMMUTABLE_LEAVES = (str, int, float, bool, Decimal, type(None), bytes, enum.Enum, uuid.UUID)
 
 
 def find_mutable_state(obj, path="root"):

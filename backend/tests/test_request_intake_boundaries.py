@@ -40,6 +40,7 @@ PURE_TEST_MODULES = [
     "test_request_intake_isolation.py",
     "test_request_intake_boundaries.py",
     "test_request_intake_runtime_boundaries.py",
+    "test_revision_approval_policy.py",
     "intake_support.py",
 ]
 

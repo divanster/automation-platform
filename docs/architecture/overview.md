@@ -237,6 +237,7 @@ Rules:
 | Django project skeleton (settings, `accounts`, `health`) | Implemented in Phase 2; DB-free tests pass; PostgreSQL-backed checks pending |
 | `accounts.User` model and its initial migration | Implemented; migration not yet applied to any database |
 | Request-intake preparation slice (`workflows/request_intake`: result schema, pure validation, deterministic test extractor, canonical serialization and content hashing; plain Python, DB-free tests) | Implemented as preparation only; no persistence, stored revisions, approvals, export, or state machine |
+| Revision identity and run scope (UUID identifiers), approval bound to a revision and content hash, and export eligibility (`workflows/revision_approval`: pure rules; plain Python, DB-free tests) | Implemented as pure policy only; no persistence, stored approvals, authentication or authorization, export, or state machine |
 | Domain models (cases, documents, revisions, approvals, exports) and other migrations | Not started |
 | Worker, queue, AI gateway, adapters | Not started |
 | Frontend | Not started |
