@@ -36,7 +36,7 @@
   `(run, step, retry generation)` composition of section 11 and the manual-retry task are not built.
 - No concurrency limits (section 9), no `LISTEN/NOTIFY`, no cleanup of finished tasks, no Windows service.
 - **The request-intake extraction handler** ([slice document](../development/request-intake-orchestration-slice.md);
-  PostgreSQL tests written, **not run**) is the first handler that touches business tables. The allowlist
+  its PostgreSQL tests passed in the owner's local run, tested scenarios only) is the first handler that touches business tables. The allowlist
   `apps.tasks.handlers.HANDLERS` is unchanged; the worker entry point installs a composed, read-only allowlist
   built outside `apps.tasks` (`config/task_registry.py`) plus an after-iteration hook that reconciles runs whose
   task failed for good. A run is linked to its task by a table in `apps/intake`, not by a column on `Task`; the

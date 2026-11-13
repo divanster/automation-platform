@@ -10,7 +10,8 @@ TRANSACTIONS. Each write is ONE ``transaction.atomic()`` block that starts with 
 change, and every audit event commit together or not at all. Two operations on the same run run one after the
 other, and the second sees the first one's result (an edit racing an approval gives exactly one of: approved
 then edited, or edited then a stale approval). Lock order is always the run row first; nothing here locks
-anything else for write. Written against PostgreSQL; NOT run against it yet.
+anything else for write. Written against PostgreSQL; its PostgreSQL tests passed in the owner's local run
+(tested scenarios only; docs/development/review-services-slice.md, section 10.4).
 
 WHAT IS REUSED, NOT REPEATED. Validation, canonicalization and hashing: ``apps.intake.editing`` ->
 ``create_request_intake_revision``. The approval rules: ``approve_revision`` and ``record_approval``. The

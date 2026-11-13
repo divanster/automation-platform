@@ -8,8 +8,9 @@
 > through the worker and the deterministic extractor to `needs_review` (its PostgreSQL tests and a smoke test
 > passed in the owner's local run, tested scenarios only;
 > [slice document](../development/request-intake-orchestration-slice.md)) and a review-services slice (user identity,
-> roles, authorized edit, approve and reject services, audit events; PostgreSQL tests written, **not run**;
-> [slice document](../development/review-services-slice.md)). Export, any API, a login mechanism,
+> roles, authorized edit, approve and reject services, audit events; PostgreSQL tests and a smoke test passed in the
+> owner's local run, tested scenarios only; [slice document](../development/review-services-slice.md)). Export, any
+> API, a product login mechanism,
 > real AI, the AI gateway, frontend, and installer do not exist. Everything below is a design unless an Accepted ADR says otherwise.
 
 This directory contains the initial architecture specification and

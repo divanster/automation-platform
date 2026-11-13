@@ -4,10 +4,10 @@ Excluded from the default run and skipped unless ``AP_RUN_DB_TESTS=1`` is set ex
 test_postgres_required.py and docs/development/runbook.md). When they run, Django creates and later
 destroys a separate ``test_<AP_DB_NAME>`` database; every class refuses to run against anything else.
 
-STATUS: WRITTEN BUT NEVER RUN ON POSTGRESQL. They were written on a development VM that has no PostgreSQL
-and no connection to one. Nothing in them is evidence yet; the project owner runs them locally (see
-docs/development/review-services-slice.md). When they do pass, that covers the tested scenarios only: it
-does not prove that no other race exists. This file is ASCII only.
+STATUS: written on a development VM that has no PostgreSQL and no connection to one; the project owner ran
+them locally against PostgreSQL and reported that all of them passed (owner-supplied; see
+docs/development/review-services-slice.md, section 10.4). That covers the tested scenarios only: it does not
+prove that no other race exists. This file is ASCII only.
 
 Run (from backend\\, after the runbook's database setup):
     python manage.py test tests.test_review_postgres --tag requires_postgres -v 2

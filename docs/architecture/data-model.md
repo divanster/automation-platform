@@ -7,9 +7,8 @@
 > `state` and `failed_step` on `WorkflowRun` (see
 > [request-intake-orchestration-slice.md](../development/request-intake-orchestration-slice.md)), plus
 > `RevisionEdit` in `apps/intake`, `Rejection` in `apps/cases`, `AuditEvent` in `apps/audit`, and a stable
-> `User.public_id` (see [review-services-slice.md](../development/review-services-slice.md); PostgreSQL tests
-> written, not run). The PostgreSQL tests of the earlier models passed in the owner's local run (tested scenarios
-> only, see the [local validation record](../development/local-validation-record.md)). Everything else here is
+> `User.public_id` (see [review-services-slice.md](../development/review-services-slice.md)). The PostgreSQL tests
+> of all of these models passed in the owner's local run (tested scenarios only, see the [local validation record](../development/local-validation-record.md)). Everything else here is
 > not built. This document defines
 > entity responsibilities and relationships. Field lists are illustrative and
 > will be refined when the backend is built (Phase 3). Confirmed product
@@ -260,7 +259,8 @@ AuditEvent * --- 0..1 Case / WorkflowRun / other subject
   database-level), and approver identity stored as data. The review-services slice
   ([review-services-slice.md](../development/review-services-slice.md)) adds the `needs_review` state guard, an
   immutable `Rejection` (a separate model: `Approval` stays "approved" only), and an approval service that
-  derives the approver from the authenticated user's `public_id` (PostgreSQL tests written, not run). The
+  derives the approver from the authenticated user's `public_id` (its PostgreSQL tests passed in the owner's local
+  run, tested scenarios only). The
   atomic re-check at export commit remains future work.
 - **Creation guard:** an `approved` decision can be created only for the
   run's current revision, only while the run is in `needs_review`, and only if

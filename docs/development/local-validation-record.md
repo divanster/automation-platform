@@ -294,11 +294,30 @@ record. It covers the `cases 0002` to `0004` and `intake 0001` migrations as app
 scenarios only; it does not prove that no other race exists. See the
 [slice document](request-intake-orchestration-slice.md).
 
-## Pending: review-services slice (not yet validated)
+## Review-services slice: owner-supplied local results
 
-The review-services slice ([slice document](review-services-slice.md)) has been written, and its DB-free tests
-pass in the development VM (991 tests). **No PostgreSQL result exists for it.** Its 135 PostgreSQL tests (and with
-them a combined collection of 356), the `accounts 0002` to `0004` migrations (including their effect on a database
-that already holds users), the `audit 0001`, `cases 0005` and `intake 0002` migrations, `manage.py setup_roles`,
-and the manual smoke test are all waiting for the owner's local run. Nothing in this record supports any claim
-about them until the owner pastes that output here.
+The review-services slice ([slice document](review-services-slice.md)) was written and committed
+(`05233d2`); its DB-free tests pass in the development VM (991 tests). **These are owner-supplied local
+results.** The VM never connected to PostgreSQL and did not run, repeat or observe any of them. The test,
+migration and role-setup results were reported by the owner without a log (owner-confirmed without pasted
+output). For the manual smoke test the owner supplied the actual console output; it was run through Django's
+interactive shell with PowerShell here-strings (see the
+[slice document](review-services-slice.md), section 10.4). None of this output is stored in the repository.
+The owner reported:
+
+* The 135 review PostgreSQL tests: OK, exit code 0.
+* All 356 PostgreSQL-required tests (221 earlier plus 135): OK, exit code 0.
+* The `User.public_id` migration on the development database: 1 existing user, 0 missing ids, 1 distinct id.
+* All new migrations applied (`accounts` 0002 to 0004, `audit` 0001, `cases` 0005, `intake` 0002);
+  `makemigrations --check --dry-run`: No changes detected; `setup_roles` completed.
+* A manual smoke test: an operator submitted a request; the worker processed the extraction task; the run
+  reached `needs_review` with revision 1; an approval attempt by the operator was refused (`missing_permission`);
+  an approver approved the revision; the final state was `approved`; the audit actions were
+  `request.submitted`, `revision.created`, `run.state_changed`, `approval.recorded`, `run.state_changed`.
+
+What this validates: the tested scenarios of the slice on the owner's PostgreSQL 18 development database,
+including the three-step user migration with one existing user. What it does not: the migration with many
+existing users on PostgreSQL (only one user existed), any race the tests do not cover, database-level
+immutability (revisions, approvals, rejections and audit events are protected at the ORM and service boundary
+only), a login mechanism, a REST API, a UI, real AI, or production readiness. The exact command lines and timings
+of the test runs were not supplied.

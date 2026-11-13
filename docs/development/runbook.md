@@ -7,7 +7,7 @@
 > ([request-intake-orchestration-slice.md](request-intake-orchestration-slice.md)); the owner reported that its
 > 76 PostgreSQL tests, the combined 221, and a manual smoke test passed locally. A review-services slice
 > ([review-services-slice.md](review-services-slice.md)) adds user identity, roles, authorized edit, approve and
-> reject services, and audit events; its **135 PostgreSQL tests are written but have NOT been run**.**
+> reject services, and audit events; the owner reported that its 135 PostgreSQL tests, the combined 356, the user migration and a smoke test passed locally (owner-supplied; tested scenarios only).**
 >
 > **Two machines are involved, with different jobs** (section 0). Claude Code
 > develops code in a Windows **VM** and runs only database-free checks there.
@@ -289,8 +289,9 @@ repository). It also added three `cases` migrations and one `intake` migration: 
 to a development database that may hold runs. Commands: the same document, section 11.
 
 The review-services slice adds `backend/tests/test_review_postgres.py` (**135** tests, tagged `requires_postgres`);
-with them `--tag requires_postgres` should collect **356** (221 + 135; re-check the number). The VM cannot run
-them and **no PostgreSQL result exists for them yet**. It adds three `accounts` migrations (a safe three-step
+with them `--tag requires_postgres` collects **356** (221 + 135). The VM cannot run them. **The owner ran them
+locally: the 135 review tests and the combined 356 both passed, exit code 0** (owner-supplied; no output is attached
+to the repository; see the [local validation record](local-validation-record.md)). It added three `accounts` migrations (a safe three-step
 `User.public_id`: nullable column, per-user backfill, then unique and not null), `audit 0001`, `cases 0005`, and
 `intake 0002`. **Stop the application before `migrate`**, read the user preflight in
 [review-services-slice.md](review-services-slice.md), section 3, and after `migrate` run
@@ -679,7 +680,7 @@ try {
 #     If Django asks whether to delete an existing test database, answer 'no' and report it.
 if ($env:AP_RUN_DB_TESTS) { "WARNING: AP_RUN_DB_TESTS is still set" } else { "AP_RUN_DB_TESTS is unset again" }
 
-# F6. Optional: the whole suite in one run (all DB-free tests plus the PostgreSQL tests; the PostgreSQL tests have not been run). Same try/finally rule.
+# F6. Optional: the whole suite in one run (all DB-free tests plus the PostgreSQL tests; the PostgreSQL tests need the local database). Same try/finally rule.
 try {
     $env:AP_RUN_DB_TESTS = "1"
     & $Py manage.py test                           # expect: OK with no failures or errors, including the PostgreSQL tests in the total
@@ -762,7 +763,7 @@ be updated when that is done and confirmed.
 | PyCharm project and interpreter | Optional developer tooling; not configured or confirmed; not a backend or database acceptance criterion |
 | Request-intake preparation slice: plain-Python schema, pure validation, deterministic test fixture parser, canonical serialization and content hashing, DB-free tests ([details](request-intake-slice.md)) | **Implemented**; DB-free only; passing on the VM |
 | Persistence of cases, runs, result revisions, and approvals (`apps/cases`; minimal models, migration, services; [details](revision-approval-policy.md)) | **Implemented**; DB-free tests pass on the VM; the PostgreSQL tests **passed in the owner's local run** (tested scenarios only); ORM/service-level immutability, not database tamper protection |
-| Review services (`apps/intake/review.py`, `apps/audit`, `User.public_id`, roles via `setup_roles`; [details](review-services-slice.md)) | **Implemented**; DB-free tests pass on the VM; the 135 PostgreSQL tests are **written but not run**; no login mechanism, API, or UI; ORM-level immutability only |
+| Review services (`apps/intake/review.py`, `apps/audit`, `User.public_id`, roles via `setup_roles`; [details](review-services-slice.md)) | **Implemented**; DB-free tests pass on the VM; the 135 PostgreSQL tests and a smoke test **passed in the owner's local run** (tested scenarios only); no product login mechanism, REST API, or UI; ORM-level immutability only |
 | Business workflow beyond that: documents, a login mechanism, exports | Not implemented |
 | Task queue and background worker ([details](persistent-worker-slice.md)) | **Implemented** (first slice); the PostgreSQL tests passed in the owner's local run, tested scenarios only |
 | AI gateway and any AI adapter | Not implemented |

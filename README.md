@@ -12,8 +12,9 @@ A local-first business process automation platform.
 > orchestration slice that connects a text request to the worker and the deterministic extractor (its PostgreSQL
 > tests and a manual smoke test passed in the owner's local run, for the tested scenarios only), and a
 > review-services slice (a stable user identity, Operator, Approver and Auditor roles, authorized edit, approve and
-> reject services, and append-only audit events; DB-free tests pass, its PostgreSQL tests are written but **not yet
-> run**). A login mechanism, any API, export, real AI adapters, frontend, and installer are **not** built. Everything else described below is planned, not built. See the
+> reject services, and append-only audit events; its PostgreSQL tests, a user-migration check and a manual smoke test
+> passed in the owner's local run, for the tested scenarios only). A product login mechanism, a REST API, a React UI,
+> export, real AI adapters, and an installer are **not** built; nothing here is production-ready. Everything else described below is planned, not built. See the
 > [development runbook](docs/development/runbook.md) for exactly what exists.
 
 ## Purpose

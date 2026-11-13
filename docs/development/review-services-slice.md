@@ -1,11 +1,12 @@
 # Review services slice (identity, roles, edit, approve, reject, audit)
 
-> **Status: implemented; DB-free tests pass in the VM; the 135 new PostgreSQL tests are WRITTEN BUT HAVE
-> NOT BEEN RUN.** The development VM has no PostgreSQL and never connects to one. Nothing in this document
-> about PostgreSQL behavior (locking, constraints, the user migration on a database that already has users,
-> concurrency) is proven until the project owner runs the local steps in section 11 and reports the output.
-> This slice has no API, no UI, no login mechanism, no export, and no real AI. The services are Python
-> functions that take an already-authenticated user object.
+> **Status: implemented; DB-free tests pass in the VM; the project owner reported passing local PostgreSQL
+> results** (section 10.4: the 135 new tests and the combined 356, the user migration on a database with an
+> existing user, and a manual smoke test). Those are **owner-supplied local results**: the development VM has no
+> PostgreSQL, never connects to one, and did not run or observe them. They cover the tested scenarios only and
+> are not a claim that no other race exists or that the system is production-ready. This slice has no REST API,
+> no React UI, no product login mechanism, no export, and no real AI. The services are Python functions that
+> take an already-authenticated user object.
 
 ## 1. Scope
 
@@ -86,7 +87,7 @@ New users created afterwards get a distinct `public_id` from the model default (
 
 ### Local preflight before `migrate` (owner)
 
-The VM cannot see the owner's database, so it is **not known** how many users exist there. Whatever the
+The VM cannot see the owner's database. (The owner later reported that it held 1 user; section 10.4.) Whatever the
 number, the migration is written to be safe:
 
 ```powershell
@@ -348,9 +349,10 @@ defect in a test was fixed). **Mutation check:** with each of six safeguards swi
 self-approval rule, the scope check, the content-hash check, the stale-base check, the warning
 acknowledgement, and fresh reloading of the actor), the same tests failed in every case, so they do detect the
 defects they name. The **7 tests it could not run** are the `ConcurrencyTests` (their helper issues the
-PostgreSQL-only `SET lock_timeout`). They, and the locking they cover, have never run anywhere.
+PostgreSQL-only `SET lock_timeout`). They could not run in the VM; they are among the 135 tests the owner
+reported passing against PostgreSQL (section 10.4).
 
-### 10.3 PostgreSQL tests (written, not run): `backend/tests/test_review_postgres.py`, 135 tests, tagged `requires_postgres`
+### 10.3 PostgreSQL tests (owner-run locally, section 10.4): `backend/tests/test_review_postgres.py`, 135 tests, tagged `requires_postgres`
 
 `SchemaTests` 7, `RolesCommandTests` 7, `PublicIdTests` 5, `UserMigrationTests` 6, `AuthorizationTests` 8,
 `SubmitAsTests` 7, `EditServiceTests` 27, `ApprovalServiceTests` 27, `RejectionServiceTests` 15,
@@ -370,7 +372,49 @@ each position, and a failed state change); and, in `ConcurrencyTests`: two edits
 of one revision, an edit racing an approval, two approvals, a rejection racing an approval, and independent
 runs not blocking each other. Each class refuses to run unless the database name starts with `test_`.
 
+### 10.4 Local PostgreSQL results (owner-supplied; NOT run in the VM)
+
+The project owner ran the steps of section 11 on the local Windows computer and reported:
+
+| Item | Reported result |
+| --- | --- |
+| The 135 review PostgreSQL tests (`tests.test_review_postgres`) | OK, exit code 0 |
+| All PostgreSQL-required tests together (221 earlier + 135 new) | 356 tests, OK, exit code 0 |
+| `User.public_id` migration on the development database | 1 existing user, 0 missing public ids, 1 distinct public id |
+| New migrations (`accounts` 0002 to 0004, `audit` 0001, `cases` 0005, `intake` 0002) | All applied |
+| `makemigrations --check --dry-run` | No changes detected |
+| `manage.py setup_roles` | Completed |
+
+Manual smoke test, as reported:
+
+1. An operator submitted a request.
+2. The worker processed the extraction task successfully; the run reached `needs_review` with revision 1.
+3. An approval attempt by the operator was refused with `missing_permission`.
+4. An approver approved the revision; the final run state was `approved`.
+5. The audit actions of the run, in order: `request.submitted`, `revision.created`, `run.state_changed`,
+   `approval.recorded`, `run.state_changed`.
+
+How the smoke test was run: through Django's interactive shell (`manage.py shell`), with the Python code passed
+in PowerShell here-strings, as in the section 11 scripts. The owner supplied the actual console output, and the
+steps above are the owner's summary of it. The test, migration and role-setup results were reported without a log. None of the
+output is stored in the repository, and the VM did not run, repeat or observe any of it (see the
+[local validation record](local-validation-record.md)). What it does and does not show:
+
+* It supports the tested scenarios on the owner's PostgreSQL 18 development database: the three-step user
+  migration with one existing user, the constraints, `setup_roles`, the service rules, the transaction and
+  rollback behavior, and the competing-connection tests, as the tests define them.
+* It does **not** show how the user migration behaves with many existing users on PostgreSQL (only 1 user
+  existed; distinctness for several users is covered by DB-free and SQLite-harness tests only), that no other
+  race exists, anything about a production database, or production readiness.
+* The smoke test was a manual, single-request run in the interactive shell. It shows the operator-refused and approver-approved path and the five audit actions listed
+  above. It did not exercise edit, rejection, stale revisions, warning acknowledgement or self-approval (the
+  PostgreSQL tests cover those), and no REST API, login, or UI was involved: the caller was whichever user the
+  shell session acted as.
+
 ## 11. Local validation steps (owner; on the local Windows computer only)
+
+These steps were run by the owner; the reported results are in section 10.4. They remain the procedure for
+repeating the validation.
 
 Use the runbook's setup (`$LocalProject`, `$Py`, `AP_DB_*`), a dedicated development server, no `--keepdb`,
 no `--noinput`, and remove the flag afterwards. Stop anything that uses the development database first
@@ -478,8 +522,10 @@ it differs.
 
 * **No authentication exists in the product yet** (section 12). `load_actor` rejects a non-user, an
   unauthenticated, a deleted and an inactive user, but it cannot know that the caller really is that user.
-* **Everything about PostgreSQL behavior is unproven** until the owner's run: locking, the user migration on a
-  database with users, constraints, concurrency.
+* **PostgreSQL behavior is supported for the tested scenarios only** (owner-supplied local results, section
+  10.4): locking, constraints and concurrency as the 135 tests exercise them, and the user migration on a
+  database with ONE existing user. It is not proven for many users, other races, or a production database.
+* **No production-readiness claim.** This is a development-database result for a development slice.
 * **ORM-level immutability only** for revisions, approvals, rejections, authorship records, extraction
   outcomes, sources and audit events. Raw SQL, a database administrator, and a migration can change or delete
   them; the hash check detects a change to the bytes or the hash alone, not both; there is no audit hash chain

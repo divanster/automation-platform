@@ -9,8 +9,9 @@
 > [request-intake-orchestration-slice.md](../development/request-intake-orchestration-slice.md); its PostgreSQL
 > tests and a smoke test passed in the owner's local run, for the tested scenarios only). A review-services slice
 > adds authorized edit, approve and reject services and audit events (see
-> [review-services-slice.md](../development/review-services-slice.md); its PostgreSQL tests are written but not
-> run). Export, cancellation, retry, upload, storage, an API, and a login mechanism are not implemented. This
+> [review-services-slice.md](../development/review-services-slice.md); its PostgreSQL tests passed in the owner's
+> local run, for the tested scenarios only). Export, cancellation, retry, upload, storage, a REST API, and a product
+> login mechanism are not implemented. This
 > specification defines the first vertical
 > slice. Confirmed directions: plain-text input, JSON export, a deterministic
 > test AI adapter, and no automatic email sending or ERP writes (PDF parsing and
@@ -286,7 +287,7 @@ action is an open question.)
 > **Proposed; partly implemented.** State names here are the canonical names for
 > `WorkflowRun.state` throughout the architecture documents. The orchestration slice stores the state and
 > performs `(new) -> queued`, `queued -> extracting`, `extracting -> needs_review` and the failure transitions
-> only (PostgreSQL tests not run). It differs from this table in two documented ways: a failed attempt that the
+> only (its PostgreSQL tests passed in the owner's local run). It differs from this table in two documented ways: a failed attempt that the
 > queue retries does **not** move the run back to `queued` (the run stays `extracting`, and `extracting ->
 > extracting` is allowed), and `queued -> failed` is allowed because a task can fail for good before its handler
 > moved the run. See [request-intake-orchestration-slice.md](../development/request-intake-orchestration-slice.md).
