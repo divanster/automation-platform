@@ -253,7 +253,7 @@ class ImmutabilityGuardTests(SimpleTestCase):
         self.assertIn("_base_manager", doc)
         self.assertIn("NOT tamper protection", doc)
         self.assertIn("unverified domain actor identifier", Approval.__doc__)
-        self.assertIn("before any API exposes approval operations", " ".join(Approval.__doc__.split()))
+        self.assertIn("must go through ``apps.intake.review.approve_request``", " ".join(Approval.__doc__.split()))
 
 
 class PureWriteRuleTests(SimpleTestCase):

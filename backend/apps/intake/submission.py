@@ -7,7 +7,8 @@ What one call creates, all in ONE ``transaction.atomic()`` block (all of it comm
 3. an immutable ``RequestSource`` holding the exact text, its SHA-256 and its size,
 4. ONE extraction task, through the existing ``apps.tasks.services.enqueue_task`` (idempotency key
    ``request_intake.extract:<run id>:1``; payload ``{"run_id": "<uuid>"}``, never the text),
-5. the ``StepTask`` row linking that run and step to that task.
+5. the ``StepTask`` row linking that run and step to that task,
+6. the ``request.submitted`` audit event (``apps.audit``), in the same transaction.
 
 The worker cannot see the task before the transaction commits, so it can never run an extraction whose
 source text or run is missing. If any step fails (including the enqueue), nothing is stored.
@@ -17,8 +18,11 @@ returns the original run and creates nothing (``created=False``); the same id wi
 ``ClientRequestConflictError``. Two concurrent submits with one id create one run: the database unique
 constraint decides, and the loser reads the winner's row.
 
-Authentication and authorization are NOT implemented: ``submitted_by`` is recorded as the provenance of the text and
-nothing checks whether that user may submit. There is no API.
+TWO ENTRY POINTS. ``submit_request`` is the UNAUTHORIZED lower layer: ``submitted_by`` is recorded as the
+provenance of the text and nothing checks whether that user may submit. Callers outside tests and
+``submit_request_as`` must not use it. ``submit_request_as`` is the authorized service: it reads the actor fresh,
+requires the ``intake.submit_request`` permission (Operator role; superusers bypass role membership), and
+only then calls ``submit_request`` with that actor as the submitter. There is no API.
 """
 
 import hashlib
@@ -29,11 +33,15 @@ from typing import NamedTuple
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
+from apps.audit import events as audit
+from apps.audit.recorder import record_event
 from apps.cases.models import Case, WorkflowRun
 from apps.cases.services import create_case, create_run
 from apps.tasks.models import Task
 from apps.tasks.services import enqueue_task
 
+from .access import Action
+from .authorization import require_permission
 from .errors import ClientRequestConflictError
 from .models import RequestSource, StepTask
 from .policy import (
@@ -117,6 +125,12 @@ def submit_request(*, text: str, submitted_by, client_request_id: uuid.UUID | No
                 registry=PRODUCTION_REGISTRY,
             ).task
             StepTask.objects.create(run=run, step=STEP_EXTRACT, generation=FIRST_GENERATION, task=task)
+            record_event(
+                audit.user_event(
+                    submitted_by.public_id, audit.ACTION_REQUEST_SUBMITTED, audit.SUBJECT_RUN, run.pk,
+                    case_id=case.pk, run_id=run.pk, byte_length=len(encoded), client_request_id_used=client_request_id is not None,
+                )
+            )  # fmt: skip
     except IntegrityError:
         if client_request_id is None:
             raise
@@ -126,3 +140,13 @@ def submit_request(*, text: str, submitted_by, client_request_id: uuid.UUID | No
             raise
         return replayed
     return SubmissionResult(case, run, source, task, True)
+
+
+def submit_request_as(*, user, text: str, client_request_id: uuid.UUID | None = None, now: datetime | None = None) -> SubmissionResult:
+    """The authorized ``submit_request``: ``user`` must be authenticated, active, and hold ``intake.submit_request``.
+
+    Raises ``AuthorizationError`` (nothing stored) otherwise. The submitter recorded is the freshly loaded
+    user, not the object passed in. Everything else is ``submit_request``.
+    """
+    actor = require_permission(user, Action.SUBMIT)
+    return submit_request(text=text, submitted_by=actor.user, client_request_id=client_request_id, now=now)

@@ -8,7 +8,8 @@ TRANSACTIONS. ``run_extraction`` uses two short transactions and NO transaction 
    slow extractor (a real model, later) never holds a lock or a connection transaction.
 3. T2 (short, one ``atomic`` block): lock the run row again and re-check; insert revision 1 through
    ``apps.cases.services.record_revision`` (only for a valid draft), insert the ``ExtractionOutcome``, and
-   move the run to ``needs_review``. All of it commits together or none of it does.
+   move the run to ``needs_review``, and write the audit events (``revision.created`` for a valid draft and
+   ``run.state_changed``, both by the ``system`` actor). All of it commits together or none of it does.
 
 IDEMPOTENCY. At most one outcome exists per run: the database enforces it (one-to-one on the run) and T1
 and T2 both check for it under the run lock. A repeated call (a retry, or a recovery after a crash after T2
@@ -30,6 +31,8 @@ from typing import NamedTuple
 
 from django.db import transaction
 
+from apps.audit import events as audit
+from apps.audit.recorder import record_event
 from apps.cases import services as case_services
 from apps.cases.adapters import findings_to_json
 from apps.cases.run_state import FailedStep, RunState
@@ -134,6 +137,21 @@ def run_extraction(
             findings=findings_json,
         )
         case_services.transition_run(run.pk, to=RunState.NEEDS_REVIEW)
+        ids = {"case_id": run.case_id, "run_id": run.pk}
+        if revision_row is not None:
+            record_event(
+                audit.system_event(
+                    audit.ACTION_REVISION_CREATED, audit.SUBJECT_REVISION, revision_row.pk, **ids,
+                    revision_number=revision_row.revision_number, content_hash=revision_row.content_hash, origin="extraction",
+                    blocking_count=0, warning_count=len(decision.revision.warnings),
+                )
+            )  # fmt: skip
+        record_event(
+            audit.system_event(
+                audit.ACTION_RUN_STATE_CHANGED, audit.SUBJECT_RUN, run.pk, **ids,
+                from_state=RunState.EXTRACTING.value, to_state=RunState.NEEDS_REVIEW.value, cause="extraction",
+            )
+        )  # fmt: skip
     return _summary_of(outcome, created=True)
 
 

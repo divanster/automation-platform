@@ -216,8 +216,9 @@ transaction. Plus one real end-to-end task through the `runworker` command.
 
 ## Still deferred
 
-Authentication and authorization (including linking approvals to authenticated users, required
-before any API exposes approval operations), connecting the queue to any workflow, a worker
+Authentication and authorization (the review-services slice adds authorization inside the services and links
+approvals to users through `User.public_id`, but a login mechanism does not exist; see the pending section
+above), connecting the queue to any workflow, a worker
 heartbeat, concurrency limits, cooperative cancellation of running tasks, an API, a UI, audit
 events, race-safe export (the atomic re-check at export commit), database-level immutability,
 document storage, the state machine, and real AI adapters. The open questions that cover them
@@ -282,10 +283,41 @@ after this module was added (130 earlier plus 15 = 145) was **not reported**.
   separately reviewed hardening slice.
 - The queue is not connected to any workflow; there is no real AI, API, or UI.
 
-## Pending: request-intake orchestration slice (not yet validated)
+## Request-intake orchestration slice (`apps/intake`): owner-confirmed, no pasted output
 
-The request-intake orchestration slice ([slice document](request-intake-orchestration-slice.md)) has been
-written, and its DB-free tests pass in the development VM. **No PostgreSQL result exists for it.** Its 76
-PostgreSQL tests, the `cases 0002` to `0004` and `intake 0001` migrations (including their effect on a
-database that already holds runs), and the manual smoke test are all waiting for the owner's local run.
-Nothing in this record supports any claim about them until the owner pastes that output here.
+The project owner reported on 2026-11-13 that, on the local Windows computer, the 76 request-intake PostgreSQL
+tests passed, the combined run of all 221 PostgreSQL-required tests passed, and a manual end-to-end smoke test
+succeeded (request, worker, valid outcome, revision 1, `needs_review`). This is **owner-confirmed without pasted
+output**: no log is attached, the VM did not run, repeat or observe any of it, and the exact command lines,
+timings and the output of the existing-row preflight (whether `cases_workflowrun` held rows) are not in this
+record. It covers the `cases 0002` to `0004` and `intake 0001` migrations as applied in that run and the tested
+scenarios only; it does not prove that no other race exists. See the
+[slice document](request-intake-orchestration-slice.md).
+
+## Review-services slice: owner-supplied local results
+
+The review-services slice ([slice document](review-services-slice.md)) was written and committed
+(`05233d2`); its DB-free tests pass in the development VM (991 tests). **These are owner-supplied local
+results.** The VM never connected to PostgreSQL and did not run, repeat or observe any of them. The test,
+migration and role-setup results were reported by the owner without a log (owner-confirmed without pasted
+output). For the manual smoke test the owner supplied the actual console output; it was run through Django's
+interactive shell with PowerShell here-strings (see the
+[slice document](review-services-slice.md), section 10.4). None of this output is stored in the repository.
+The owner reported:
+
+* The 135 review PostgreSQL tests: OK, exit code 0.
+* All 356 PostgreSQL-required tests (221 earlier plus 135): OK, exit code 0.
+* The `User.public_id` migration on the development database: 1 existing user, 0 missing ids, 1 distinct id.
+* All new migrations applied (`accounts` 0002 to 0004, `audit` 0001, `cases` 0005, `intake` 0002);
+  `makemigrations --check --dry-run`: No changes detected; `setup_roles` completed.
+* A manual smoke test: an operator submitted a request; the worker processed the extraction task; the run
+  reached `needs_review` with revision 1; an approval attempt by the operator was refused (`missing_permission`);
+  an approver approved the revision; the final state was `approved`; the audit actions were
+  `request.submitted`, `revision.created`, `run.state_changed`, `approval.recorded`, `run.state_changed`.
+
+What this validates: the tested scenarios of the slice on the owner's PostgreSQL 18 development database,
+including the three-step user migration with one existing user. What it does not: the migration with many
+existing users on PostgreSQL (only one user existed), any race the tests do not cover, database-level
+immutability (revisions, approvals, rejections and audit events are protected at the ORM and service boundary
+only), a login mechanism, a REST API, a UI, real AI, or production readiness. The exact command lines and timings
+of the test runs were not supplied.

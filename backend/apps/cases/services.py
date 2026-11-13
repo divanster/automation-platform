@@ -1,10 +1,11 @@
-"""Persistence operations for revisions and approvals, on top of the pure policy.
+"""Persistence operations for revisions, approvals and rejections, on top of the pure policy.
 
-Every write goes through ``record_revision``, ``record_approval`` or ``transition_run``; there is no
-other supported way to change a run's current revision or state. Reads return the pure domain objects
-(``workflows.revision_approval``), which re-verify hashes and consistency on the way out.
+Every write goes through ``record_revision``, ``record_approval``, ``record_rejection`` or
+``transition_run``; there is no other supported way to change a run's current revision or state. Reads
+return the pure domain objects (``workflows.revision_approval``), which re-verify hashes and consistency
+on the way out.
 
-WRITES ARE SERIALIZED PER RUN. ``record_revision``, ``record_approval`` and ``transition_run`` open
+WRITES ARE SERIALIZED PER RUN. ``record_revision``, ``record_approval``, ``record_rejection`` and ``transition_run`` open
 ``transaction.atomic()`` and lock the run's row with ``SELECT ... FOR UPDATE`` before reading or
 writing anything else for that run, so two competing writers for the same run run one after the
 other, and the second one sees the first one's result. This relies on PostgreSQL row locking and was
@@ -22,6 +23,7 @@ snapshot, so a revision recorded a moment later is not seen. The export-commit r
 future work. Nothing here authenticates or authorizes anyone: ``approver_id`` is stored as data.
 """
 
+import re
 import uuid
 from uuid import UUID
 
@@ -42,13 +44,14 @@ from .adapters import StoredApproval, findings_to_json, to_domain_revision, to_s
 from .errors import (
     ApprovalMismatchError,
     BindingMismatchError,
+    InvalidReasonCodeError,
     InvalidTransitionError,
     NotCurrentRevisionError,
     RecordNotFoundError,
     RevisionNumberError,
     StoredDataError,
 )
-from .models import Approval, Case, ResultRevision, WorkflowRun
+from .models import REASON_CODE_PATTERN, Approval, Case, Rejection, ResultRevision, WorkflowRun
 from .run_state import RunState, transition_problem
 
 
@@ -230,6 +233,51 @@ def record_approval(approval: ApprovalRecord, *, approval_id: UUID | None = None
             content_hash=approval.content_hash,
             approver_id=approval.approver_id,
             acknowledged_warnings=[list(pair) for pair in approval.acknowledged_warnings],
+        )
+
+
+def check_rejection_write(*, revision_id, current_revision_id, stored_hash, submitted_hash, reason_code):
+    """Refuse a rejection write that is not bound to the run's stored current revision; None when fine."""
+    if not isinstance(reason_code, str) or not re.fullmatch(REASON_CODE_PATTERN, reason_code):
+        raise InvalidReasonCodeError("The reason code is not a stable code.")
+    if stored_hash != submitted_hash:
+        raise BindingMismatchError("The rejection's content hash is not the stored revision's hash.")
+    if current_revision_id != revision_id:
+        raise NotCurrentRevisionError("A rejection can be recorded only for the run's current revision.")
+
+
+def record_rejection(*, revision_id: UUID, content_hash: str, rejected_by: UUID, reason_code: str, rejection_id: UUID | None = None) -> Rejection:
+    """Persist a rejection of the run's current revision.
+
+    One transaction: find the revision's run, lock it, re-read the stored revision (re-verifying it
+    through the domain), check that the submitted hash is the stored one and that the revision is still
+    the run's current one, then insert the immutable row. The revision, earlier approvals and rejections,
+    and the run are never touched (state and audit are the caller's job). ``rejected_by`` is stored as
+    data; nothing here authenticates it. ``reason_code`` is checked for shape only.
+    """
+    validate_uuid(revision_id, "revision_id")
+    validate_uuid(rejected_by, "rejected_by")
+    if rejection_id is not None:
+        validate_uuid(rejection_id, "rejection_id")
+
+    with transaction.atomic():
+        run_id = _fetch_revision_row(revision_id).run_id  # revisions are immutable: the run cannot change
+        run = _lock_run(run_id)
+        revision_row = _fetch_revision_row(revision_id)
+        to_domain_revision(revision_row)  # re-verify the stored bytes and hash; StoredDataError if corrupted
+        check_rejection_write(
+            revision_id=revision_row.pk,
+            current_revision_id=run.current_revision_id,
+            stored_hash=revision_row.content_hash,
+            submitted_hash=content_hash,
+            reason_code=reason_code,
+        )
+        return Rejection.objects.create(
+            id=rejection_id or uuid.uuid4(),
+            revision=revision_row,
+            content_hash=content_hash,
+            rejected_by=rejected_by,
+            reason_code=reason_code,
         )
 
 

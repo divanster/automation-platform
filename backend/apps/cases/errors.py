@@ -37,6 +37,10 @@ class ApprovalMismatchError(PersistenceError):
     """The supplied approval is not what the policy produces for the stored revision."""
 
 
+class InvalidReasonCodeError(PersistenceError):
+    """A reason code is not shaped like a stable code (lowercase letters, digits and underscores)."""
+
+
 class ImmutableRecordError(PersistenceError):
     """A write was attempted that would modify or delete an immutable record."""
 

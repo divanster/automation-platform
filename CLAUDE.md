@@ -20,9 +20,14 @@ manual smoke test passed in the owner's local run for the tested scenarios only,
 text request becomes a case, a run, a stored source, and a queued task; the worker extracts with the
 deterministic fixture parser, validates, canonicalizes, and records an `ExtractionOutcome` and, when
 valid, revision 1, moving the run to `needs_review`, or to `failed` when the task fails for good; see
-`docs/development/request-intake-orchestration-slice.md`; its DB-free tests pass, and its PostgreSQL tests
-are written but have NOT been run). Authentication and authorization, review, edit, approval, exports, an
-API, a UI, audit events, and real AI adapters are not implemented. See `README.md` and
+`docs/development/request-intake-orchestration-slice.md`; its DB-free tests pass, and its PostgreSQL tests and
+a manual smoke test passed in the owner's local run for the tested scenarios only), plus a review-services slice
+(`accounts.User.public_id`, Operator, Approver and Auditor groups set up by `manage.py setup_roles`, authorized
+service functions in `apps.intake.review` to edit, approve and reject a request, an immutable `Rejection`, and
+append-only audit events in `apps.audit`; see `docs/development/review-services-slice.md`; its DB-free tests
+pass, and its 135 PostgreSQL tests, the user migration and a manual smoke test passed in the owner's local run for
+the tested scenarios only; audit and record immutability are ORM-level only). A product login mechanism, exports,
+a REST API, a React UI, and real AI adapters are not implemented. See `README.md` and
 `docs/architecture/README.md`. Do not describe planned components as existing.
 
 ## Working rules

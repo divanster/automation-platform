@@ -1,11 +1,16 @@
 # Request-intake orchestration slice (text request to `needs_review`)
 
-> **Status: implemented; DB-free tests pass in the VM; the 76 new PostgreSQL tests are WRITTEN BUT
-> HAVE NOT BEEN RUN.** The development VM has no PostgreSQL and never connects to one. Nothing in this
-> document about PostgreSQL behavior (locking, constraints, migrations, concurrency, recovery) is
-> proven until the project owner runs the local steps in section 11 and reports the output. This slice
-> has no authentication, no authorization, no API, no UI, and no real AI; it extracts with the
-> deterministic fixture parser only.
+> **Status: implemented; DB-free tests pass in the VM. The project owner has reported (2026-11-13, no
+> output attached to the repository) that the 76 new PostgreSQL tests and the combined run of all 221
+> PostgreSQL-required tests passed locally, and that a manual smoke test succeeded: request, worker, valid
+> outcome, revision 1, `needs_review`.** That covers the tested scenarios only. The development VM has no
+> PostgreSQL and never connects to one; it did not observe the run (see the
+> [local validation record](local-validation-record.md)). As merged, this slice has no authentication, no
+> authorization, no API, no UI, and no real AI; it extracts with the deterministic fixture parser only.
+>
+> **Update.** The [review-services slice](review-services-slice.md) was built on top of this one and adds
+> authorization, edit, approval, rejection and audit events. The "out of scope" and "limitations" statements
+> below, and the PostgreSQL-status wording in sections 10 to 12, describe this slice as it was merged.
 
 ## 1. Scope
 

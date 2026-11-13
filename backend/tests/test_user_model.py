@@ -22,14 +22,14 @@ class UserModelTests(SimpleTestCase):
     def test_extends_abstract_user(self):
         self.assertTrue(issubclass(get_user_model(), AbstractUser))
 
-    def test_has_no_added_fields(self):
+    def test_has_no_added_fields_except_the_public_id(self):
         concrete_own = {f.name for f in get_user_model()._meta.local_fields}
         concrete_own |= {f.name for f in get_user_model()._meta.local_many_to_many}
         abstract_fields = {f.name for f in AbstractUser._meta.local_fields}
         abstract_fields |= {f.name for f in AbstractUser._meta.local_many_to_many}
-        # Everything on accounts.User is either inherited from AbstractUser or
-        # the automatic primary key.
-        self.assertEqual(concrete_own - abstract_fields, {"id"})
+        # Everything on accounts.User is inherited from AbstractUser, the automatic primary key, or the
+        # one added field: the stable public identity (see tests.test_review_identity).
+        self.assertEqual(concrete_own - abstract_fields, {"id", "public_id"})
         self.assertTrue(abstract_fields <= concrete_own)
 
     def test_standard_username_behavior(self):

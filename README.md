@@ -10,8 +10,11 @@ A local-first business process automation platform.
 > persistent-worker slice (a generic task queue and one deterministic test handler; its PostgreSQL
 > tests and a manual smoke test passed in the owner's local run, for the tested scenarios only), and a first
 > orchestration slice that connects a text request to the worker and the deterministic extractor (its PostgreSQL
-> tests are written but **not yet run**). The review and approval workflow, authentication, any API, real AI
-> adapters, frontend, and installer are **not** built. Everything else described below is planned, not built. See the
+> tests and a manual smoke test passed in the owner's local run, for the tested scenarios only), and a
+> review-services slice (a stable user identity, Operator, Approver and Auditor roles, authorized edit, approve and
+> reject services, and append-only audit events; its PostgreSQL tests, a user-migration check and a manual smoke test
+> passed in the owner's local run, for the tested scenarios only). A product login mechanism, a REST API, a React UI,
+> export, real AI adapters, and an installer are **not** built; nothing here is production-ready. Everything else described below is planned, not built. See the
 > [development runbook](docs/development/runbook.md) for exactly what exists.
 
 ## Purpose
@@ -61,6 +64,9 @@ Exact versions in use are recorded in the
   what the owner ran locally, what is pasted output, and what remains open
 - [Revision, approval, and export-eligibility policy](docs/development/revision-approval-policy.md):
   pure rules plus their persistence; no authentication or export
+- [Review services slice](docs/development/review-services-slice.md): user identity, roles, edit, approve,
+  reject, and audit events, with the initial policy decisions and the remaining security limitations; no login,
+  API, or export
 
 ## Repository conventions
 

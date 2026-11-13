@@ -7,6 +7,11 @@
 > [local validation record](local-validation-record.md)). There is no endpoint, worker,
 > file export, authentication, authorization, audit trail, or workflow state machine, and
 > nothing here is a completed approval phase.
+>
+> **Update.** The [review-services slice](review-services-slice.md) later added rejection records
+> (`cases.Rejection`), an approval service that derives the approver from `User.public_id` after role and policy
+> checks, a run-state guard, and audit events. The statements below that these do not exist describe this slice
+> as it was written.
 
 ## What exists
 

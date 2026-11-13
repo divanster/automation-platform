@@ -1,12 +1,18 @@
+import uuid
+
 from django.contrib.auth.models import AbstractUser
+from django.db import models
 
 
 class User(AbstractUser):
     """Project user model.
 
-    Deliberately identical to Django's default user: no added fields, standard
-    username and password behavior. It exists as a project-owned model from the
-    first migration because AUTH_USER_MODEL cannot be changed cheaply later
-    (docs/decisions/0007-technology-baseline.md). Roles and permissions for the
-    product are a later phase.
+    Django's default user plus ONE added field, ``public_id``: a random UUID that is the user's stable
+    public identity. The integer primary key is unchanged and stays the foreign-key target; ``public_id``
+    is what domain records that store a plain UUID actor identifier use (``Approval.approver_id``,
+    ``Rejection.rejected_by``, audit events). It is generated here, never supplied by a caller, and it is
+    not a credential: knowing it grants nothing. Roles and permissions are Django Groups and permissions
+    (``apps.accounts.roles``); see docs/development/review-services-slice.md.
     """
+
+    public_id = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)

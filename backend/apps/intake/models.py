@@ -1,8 +1,9 @@
 """Persistence for the request-intake orchestration: the source text, the task link, the outcome.
 
-Three tables, all new; no existing table is changed by this app (``cases.WorkflowRun`` gained its
+Four tables, all new; no existing table is changed by this app (``cases.WorkflowRun`` gained its
 state in the ``cases`` migrations, and ``tasks`` is untouched). There is no second run hierarchy: every
-row points at the existing ``cases.WorkflowRun``.
+row points at the existing ``cases.WorkflowRun``. The permissions the review services check are declared on
+``RequestSource`` (see its docstring); they add no column and no table.
 
 * ``RequestSource``: the submitted text, immutable, one per run.
 * ``StepTask``: the link from a run's step to the queue ``Task`` that executes it. It lives HERE and not
@@ -10,8 +11,10 @@ row points at the existing ``cases.WorkflowRun``.
 * ``ExtractionOutcome``: the immutable result of the extraction step, one per run (the database
   enforces it). A valid draft also has a ``ResultRevision`` (revision number 1); an invalid draft has
   none, because a revision cannot hold blocking findings (open question 2.17).
+* ``RevisionEdit``: who created a revision by editing, and which revision they based it on. Revisions
+  created by extraction have no such row.
 
-IMMUTABILITY. ``RequestSource`` and ``ExtractionOutcome`` use ``apps.cases.models.ImmutableRecord`` and
+IMMUTABILITY. ``RequestSource``, ``ExtractionOutcome`` and ``RevisionEdit`` use ``apps.cases.models.ImmutableRecord`` and
 are guarded at the Django ORM and service boundary only, exactly like ``ResultRevision`` and ``Approval``
 (see the docstring of ``apps.cases.models``): raw SQL, ``QuerySet.raw()``, private ORM internals, a
 database administrator, and a migration are NOT stopped. ``StepTask`` is an ordinary table.
@@ -51,6 +54,20 @@ class RequestSource(ImmutableRecord):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
+        # The request permissions (``apps.accounts.roles`` lists which role holds which) live here because
+        # Django creates a permission only for a model, and an unmanaged model with no table would break
+        # ``dumpdata``. The names say their scope: ``*_own_request`` covers requests the user submitted, the
+        # others any request. The default add/change/delete/view permissions are switched off: this model is
+        # immutable and nothing checks them. A test compares this list with ``apps.accounts.roles``.
+        default_permissions = ()
+        permissions = [
+            ("submit_request", "Can submit a request"),
+            ("view_own_request", "Can view the requests the user submitted"),
+            ("edit_own_request", "Can edit the requests the user submitted"),
+            ("view_any_request", "Can view any request"),
+            ("approve_request", "Can approve a request that is waiting for review"),
+            ("reject_request", "Can reject a request that is waiting for review"),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=["submitted_by", "client_request_id"],
@@ -116,3 +133,28 @@ class ExtractionOutcome(ImmutableRecord):
 
     def __str__(self):
         return f"ExtractionOutcome {self.pk}"
+
+
+class RevisionEdit(ImmutableRecord):
+    """A revision created by a human edit: its author and the revision it was based on.
+
+    ``base_revision`` is the revision the editor started from (the run's current revision at the time),
+    or None for the first edit of a run whose extraction was invalid and so had no revision. It is what
+    the stale-revision check compared, kept as history. The author is what the self-approval rule reads:
+    a user who authored any revision of a run may not approve that run. Written in the same transaction
+    as the revision (``apps.intake.review.edit_request``).
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    revision = models.OneToOneField(ResultRevision, on_delete=models.PROTECT, related_name="+")
+    base_revision = models.ForeignKey(ResultRevision, null=True, blank=True, on_delete=models.PROTECT, related_name="+")
+    edited_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(condition=~Q(base_revision=models.F("revision")), name="intake_edit_base_is_another_revision"),
+        ]
+
+    def __str__(self):
+        return f"RevisionEdit {self.pk}"
