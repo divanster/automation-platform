@@ -32,7 +32,7 @@
 | 3 | Data, documents, and basic authorization | Not started |
 | 4 | Persistent worker | **First slice implemented; phase not complete** (generic queue, `runworker`, one test handler; DB-free tests pass; the 95 PostgreSQL tests, a manual smoke test, and 15 process-level recovery tests (real worker processes, a forced kill) passed in the owner's local run for the tested scenarios only; see [persistent-worker-slice.md](../development/persistent-worker-slice.md) and the [local validation record](../development/local-validation-record.md)) |
 | (checkpoint) | Installation feasibility experiment | Not started |
-| 5 | End-to-end workflow with deterministic test adapter | Not started |
+| 5 | End-to-end workflow with deterministic test adapter | **Not complete; its first orchestration slice is written** (`apps/intake`: submit, queue, extract, validate, canonicalize, record, `needs_review`, failure reconciliation; DB-free tests pass, PostgreSQL tests written but **not run**; see [request-intake-orchestration-slice.md](../development/request-intake-orchestration-slice.md)). Review, edit, approval, export, API, and authentication are not built |
 | 6 | Real AI adapters and policy enforcement | Not started |
 | 7 | Minimal frontend | Not started |
 | 8 | Installer, backup, restore, and controlled updates | Not started |
@@ -269,8 +269,11 @@ Later phases are not marked complete by this validation.
 > scenarios only; see the
 > [local validation record](../development/local-validation-record.md). None of these
 > completes or starts Phase 5: there is no authentication or authorization, no export or
-> race-safe export re-check, no state machine, no connection of tasks to the workflow, no storage, no audit
-> events, no API, and no UI. Immutability of revisions and approvals is ORM and service level,
+> race-safe export re-check, no review or approval flow, no storage, no audit
+> events, no API, and no UI. A later orchestration slice (`apps/intake`; see
+> [request-intake-orchestration-slice.md](../development/request-intake-orchestration-slice.md)) adds the run
+> state and connects a submitted text to the worker and the deterministic extractor up to `needs_review`; its
+> PostgreSQL tests are written but not yet run. It does not complete Phase 5. Immutability of revisions and approvals is ORM and service level,
 > not database tamper protection. Some specification questions they surfaced are open
 > (open-questions.md items 2.6 to 2.19).
 

@@ -22,6 +22,7 @@ INSTALLED_APPS = [
     "apps.accounts",
     "apps.cases",
     "apps.health",
+    "apps.intake",
     "apps.tasks",
 ]
 

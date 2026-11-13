@@ -41,6 +41,18 @@ class ImmutableRecordError(PersistenceError):
     """A write was attempted that would modify or delete an immutable record."""
 
 
+class InvalidTransitionError(PersistenceError):
+    """A workflow-run state change that the transition table does not allow.
+
+    ``reason`` is a stable code from ``apps.cases.run_state.transition_problem``, or ``state_mismatch``
+    when the run was not in one of the states the caller expected.
+    """
+
+    def __init__(self, reason: str):
+        self.reason = reason
+        super().__init__(f"The workflow run state change is refused ({reason}).")
+
+
 class StoredDataError(PersistenceError):
     """Stored data does not satisfy the domain contract (corruption or a bypassed guard).
 

@@ -8,6 +8,8 @@
 > owner's local run ([background-execution.md](../architecture/background-execution.md), section 15,
 > "Evidence status"). The VM never ran the PostgreSQL tests. This slice does not connect the
 > request-intake workflow, performs **no external effect**, authorizes none, and registers no Windows service.
+> (A later slice, [request-intake orchestration](request-intake-orchestration-slice.md), connects the queue to
+> the workflow through an explicit composition point; this document describes the queue slice as it was.)
 
 ## 1. Scope
 
@@ -224,5 +226,7 @@ try {
 * Time comes from the application clock; skewed clocks across hosts are not handled.
 * No heartbeat, no supervisor that restarts a dead worker, no concurrency limits, no cooperative cancellation of running tasks, no cleanup of finished tasks, no monitoring, no Windows service.
 * Lease, retry, and polling values are provisional guesses, not measurements.
-* The queue is not connected to cases, runs, or the request-intake workflow, and no endpoint or UI exists.
+* As of this slice the queue was not connected to cases, runs, or the request-intake workflow. The
+  [orchestration slice](request-intake-orchestration-slice.md) later connects them (composition point in `worker.py` and
+  `runworker`; `HANDLERS` itself is unchanged); no endpoint or UI exists.
 * Task rows hold business payloads in plain JSON in the database; nothing here encrypts or access-controls them, and there is no authorization on enqueueing. Do not enqueue sensitive data until that is designed.

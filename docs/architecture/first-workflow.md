@@ -3,9 +3,12 @@
 > **Status: The workflow is not implemented.** Only a small database-independent
 > preparation slice exists (the result schema, pure validation, and a
 > deterministic test extractor, as plain Python; see
-> [request-intake-slice.md](../development/request-intake-slice.md)). Approval,
-> revisions, export, the state machine, tasks, storage, and persistence are not
-> implemented. This specification defines the first vertical
+> [request-intake-slice.md](../development/request-intake-slice.md)). A first
+> orchestration slice also exists (text submission, a queued task, extraction by the worker, an outcome,
+> revision 1 for a valid draft, the run states `queued`, `extracting`, `needs_review` and `failed`; see
+> [request-intake-orchestration-slice.md](../development/request-intake-orchestration-slice.md); its PostgreSQL
+> tests are written but not run). Review, edit, approval, export, cancellation, retry, upload, storage, and
+> authentication are not implemented. This specification defines the first vertical
 > slice. Confirmed directions: plain-text input, JSON export, a deterministic
 > test AI adapter, and no automatic email sending or ERP writes (PDF parsing and
 > CSV export are deferred). The detailed rules, states, and acceptance
@@ -108,6 +111,9 @@ The system must **not invent missing information**.
   **warning** (`ambiguous_optional_value`) when it is optional. A required
   field's ambiguity blocks approval even if the field still holds a value, and it
   never replaces the `missing_required` finding for a missing required value.
+- (Implementation note: the orchestration slice saves a draft with blocking findings as an `ExtractionOutcome`
+  with status `invalid`, not as a `ResultRevision`, because a revision cannot hold blocking findings; the next
+  sentence describes the design, not the current code.)
 - A draft with blocking findings is still saved as a revision so a human can
   see it and complete it. It cannot be approved until the blocking findings are
   resolved in a newer revision.
@@ -271,8 +277,13 @@ action is an open question.)
 
 ## 11. Proposed workflow state machine
 
-> **Proposed. Not implemented.** State names here are the canonical names for
-> `WorkflowRun.state` throughout the architecture documents.
+> **Proposed; partly implemented.** State names here are the canonical names for
+> `WorkflowRun.state` throughout the architecture documents. The orchestration slice stores the state and
+> performs `(new) -> queued`, `queued -> extracting`, `extracting -> needs_review` and the failure transitions
+> only (PostgreSQL tests not run). It differs from this table in two documented ways: a failed attempt that the
+> queue retries does **not** move the run back to `queued` (the run stays `extracting`, and `extracting ->
+> extracting` is allowed), and `queued -> failed` is allowed because a task can fail for good before its handler
+> moved the run. See [request-intake-orchestration-slice.md](../development/request-intake-orchestration-slice.md).
 
 States:
 
