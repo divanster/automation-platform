@@ -325,7 +325,19 @@ of the test runs were not supplied.
 ## Pending: REST API slice (not yet validated)
 
 The REST API slice ([slice document](rest-api-slice.md)) has been written, and its DB-free tests pass in the development
-VM (1199 tests). **No PostgreSQL result exists for it.** Its 98 PostgreSQL tests (and with them a combined
-collection of 454), the real session table and password verification, and the manual smoke test are all waiting for the
-owner's local run. No SQLite substitute was used. Nothing in this record supports any claim about them until the owner
-reports that output here. The slice adds no model, migration, or dependency, so there is no migration to validate.
+VM (1201 tests). No SQLite substitute was used. **Owner-supplied local result, no output attached:** the first version of
+the PostgreSQL API tests (98) was run locally with 96 passed and 2 failed (exit code 1). Both failures were defects in the
+TESTS, not in the application, and are corrected without weakening any behavioral assertion:
+
+1. `test_an_invalid_draft_is_a_400_with_findings_and_never_becomes_a_revision` (named by the owner) expected the message
+   "Requester name is required."; the domain says "A value is required." for a requester whose name is null (the first
+   wording is only for a missing requester object). The finding code, field path and blocking flag matched. Those three are the
+   stable contract (`workflows/request_intake/findings.py`); the message is fixed explanatory text and is not.
+2. A second failure, not named in the report and identified by analysis: `test_login_rotates_the_session_and_the_csrf_token`
+   assumed Django's `login()` changes the session key on every login. It does so for a pre-existing anonymous session
+   (`cycle_key`) and flushes a different user's session, but keeps the key when the same user logs in again. The test
+   was replaced by three that test exactly those cases (planted anonymous session replaced, CSRF secret rotated, other
+   user's session discarded). **Confirm the identity of the second failure on the rerun.**
+
+The corrected module has 100 tests (a combined collection of 456) and has **not been rerun**; nothing in this record supports
+any claim about it until the owner reports that output here. The slice adds no model, migration, or dependency.

@@ -155,6 +155,43 @@ class DecimalSafetyMappingTests(SimpleTestCase):
         self.assertEqual((exc.reason, exc.findings), ("not_serializable", ()))
 
 
+class FindingsContractThroughTheRealDomainTests(SimpleTestCase):
+    """The machine-readable contract of a refusal is code, field path and blocking flag; the message is fixed text.
+
+    Runs the REAL domain (no mock) for a draft whose requester name is null, the shape the API's edit endpoint
+    produces for ``{"requester": {"name": null}}``, and maps the refusal exactly as the API does.
+    """
+
+    def refusal(self, requester):
+        import uuid
+
+        from apps.intake.editing import build_edit_revision
+        from workflows.request_intake import RequestedItem, StructuredRequest
+
+        draft = StructuredRequest(requester=requester, items=(RequestedItem(description="SECRET-DESC", quantity=0),))
+        with self.assertRaises(DraftInvalidError) as caught:
+            build_edit_revision(draft, source_text="x", case_id=uuid.uuid4(), run_id=uuid.uuid4(), revision_id=uuid.uuid4(), revision_number=1)
+        return caught.exception
+
+    def test_a_null_requester_name_is_missing_required_with_a_fixed_message(self):
+        from workflows.request_intake import Requester
+
+        findings = problem_for(self.refusal(Requester(name=None))).details["findings"]
+        missing = [f for f in findings if f["field_path"] == "requester.name"]
+        self.assertEqual([(f["code"], f["blocking"]) for f in missing], [("missing_required", True)])
+        self.assertTrue(missing[0]["message"])
+        self.assertTrue(all(set(f) == {"code", "field_path", "blocking", "message"} for f in findings))
+        self.assertNotIn("SECRET", json.dumps(findings))  # fixed text; the offending value is never echoed
+
+    def test_the_message_differs_by_origin_so_it_is_not_a_contract_but_the_code_and_path_are_identical(self):
+        from workflows.request_intake import Requester
+
+        absent = [f for f in problem_for(self.refusal(None)).details["findings"] if f["field_path"] == "requester.name"]
+        null_name = [f for f in problem_for(self.refusal(Requester(name=None))).details["findings"] if f["field_path"] == "requester.name"]
+        self.assertEqual([(f["code"], f["blocking"]) for f in absent], [(f["code"], f["blocking"]) for f in null_name])
+        self.assertNotEqual(absent[0]["message"], null_name[0]["message"])  # documented: wording is not stable
+
+
 class FrameworkErrorMappingTests(SimpleTestCase):
     def test_codes(self):
         cases = [

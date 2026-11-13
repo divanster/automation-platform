@@ -8,7 +8,7 @@
 > 76 PostgreSQL tests, the combined 221, and a manual smoke test passed locally. A review-services slice
 > ([review-services-slice.md](review-services-slice.md)) adds user identity, roles, authorized edit, approve and
 > reject services, and audit events; the owner reported that its 135 PostgreSQL tests, the combined 356, the user migration and a smoke test passed locally (owner-supplied; tested scenarios only). A REST API slice
-> ([rest-api-slice.md](rest-api-slice.md)) adds session login, CSRF protection, login throttling, and the request endpoints; its **98 PostgreSQL tests are written but have NOT been run**.**
+> ([rest-api-slice.md](rest-api-slice.md)) adds session login, CSRF protection, login throttling, and the request endpoints; in the owner's local run 96 of its first 98 PostgreSQL tests passed and 2 failed on test defects that are now corrected (the 100 corrected tests have NOT been rerun).**
 >
 > **Two machines are involved, with different jobs** (section 0). Claude Code
 > develops code in a Windows **VM** and runs only database-free checks there.
@@ -304,9 +304,10 @@ to the repository; see the [local validation record](local-validation-record.md)
 by group membership, for example in the Django admin. Commands, including a smoke test: the same document,
 section 11.
 
-The REST API slice adds `backend/tests/test_api_postgres.py` (**98** tests, tagged `requires_postgres`); with them
-`--tag requires_postgres` should collect **454** (356 + 98; re-check the number). The VM cannot run them and **no
-PostgreSQL result exists for them yet**; no SQLite substitute was used. The slice adds no model, migration, or
+The REST API slice adds `backend/tests/test_api_postgres.py` (**100** tests, tagged `requires_postgres`); with them
+`--tag requires_postgres` should collect **456** (356 + 100; re-check the number). The VM cannot run them; no SQLite
+substitute was used. **The owner's first local run (98 tests as first written): 96 passed, 2 failed (test defects, since
+corrected; the corrected tests have not been rerun).** The slice adds no model, migration, or
 dependency. New settings: `AP_SESSION_AGE_SECONDS`, `AP_NUM_PROXIES` (default 0), `AP_API_MAX_BODY_BYTES`. Commands:
 [rest-api-slice.md](rest-api-slice.md), section 14.
 
@@ -775,7 +776,7 @@ be updated when that is done and confirmed.
 | Request-intake preparation slice: plain-Python schema, pure validation, deterministic test fixture parser, canonical serialization and content hashing, DB-free tests ([details](request-intake-slice.md)) | **Implemented**; DB-free only; passing on the VM |
 | Persistence of cases, runs, result revisions, and approvals (`apps/cases`; minimal models, migration, services; [details](revision-approval-policy.md)) | **Implemented**; DB-free tests pass on the VM; the PostgreSQL tests **passed in the owner's local run** (tested scenarios only); ORM/service-level immutability, not database tamper protection |
 | Review services (`apps/intake/review.py`, `apps/audit`, `User.public_id`, roles via `setup_roles`; [details](review-services-slice.md)) | **Implemented**; DB-free tests pass on the VM; the 135 PostgreSQL tests and a smoke test **passed in the owner's local run** (tested scenarios only); no product login mechanism, REST API, or UI; ORM-level immutability only |
-| REST API (`apps/api`; session login and logout, CSRF, login throttling, request, review and audit endpoints; [details](rest-api-slice.md)) | **Implemented**; DB-free tests pass on the VM; the 98 PostgreSQL tests are **written but not run**; no React UI, password reset, or export; throttling is per process; TLS and HSTS undecided |
+| REST API (`apps/api`; session login and logout, CSRF, login throttling, request, review and audit endpoints; [details](rest-api-slice.md)) | **Implemented**; DB-free tests pass on the VM; the 100 PostgreSQL tests: 96 of the first 98 passed locally, 2 test defects corrected, **rerun pending**; no React UI, password reset, or export; throttling is per process; TLS and HSTS undecided |
 | Business workflow beyond that: documents, a login mechanism, exports | Not implemented |
 | Task queue and background worker ([details](persistent-worker-slice.md)) | **Implemented** (first slice); the PostgreSQL tests passed in the owner's local run, tested scenarios only |
 | AI gateway and any AI adapter | Not implemented |

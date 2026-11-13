@@ -10,8 +10,8 @@
 > [slice document](../development/request-intake-orchestration-slice.md)) and a review-services slice (user identity,
 > roles, authorized edit, approve and reject services, audit events; PostgreSQL tests and a smoke test passed in the
 > owner's local run, tested scenarios only; [slice document](../development/review-services-slice.md)) and a REST API slice (session
-> login with CSRF protection and throttling, request endpoints over those services; DB-free tests pass, PostgreSQL
-> tests written, **not run**; [slice document](../development/rest-api-slice.md)). Export, a React UI, password reset,
+> login with CSRF protection and throttling, request endpoints over those services; DB-free tests pass, 96 of the first 98 PostgreSQL
+> tests passed in the owner's local run and 2 failed on test defects now corrected, rerun pending; [slice document](../development/rest-api-slice.md)). Export, a React UI, password reset,
 > real AI, the AI gateway, frontend, and installer do not exist. Everything below is a design unless an Accepted ADR says otherwise.
 
 This directory contains the initial architecture specification and

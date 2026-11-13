@@ -1,10 +1,11 @@
 # REST API slice (authentication, requests, review, audit)
 
-> **Status: implemented; DB-free tests pass in the VM; the 98 PostgreSQL-requiring API tests are WRITTEN BUT HAVE
-> NOT BEEN RUN.** The development VM has no PostgreSQL and never connects to one, and no SQLite substitute was
-> used. Nothing in this document about PostgreSQL-backed behavior (password verification against stored hashes,
-> the session table, row locking, concurrency, the real request flow) is proven until the project owner runs the
-> local steps in section 14 and reports the output. Sections 1 to 6 are the contract the code was built to
+> **Status: implemented; DB-free tests pass in the VM. The owner's first local PostgreSQL run of the API tests (98 as first
+> written) passed 96 and failed 2 (owner-supplied, no output attached); both failures were defects in the tests and are
+> corrected (section 13.3). The 100 corrected tests have NOT been rerun.** The development VM has no PostgreSQL and never
+> connects to one, and no SQLite substitute was used. PostgreSQL-backed behavior (password verification against stored
+> hashes, the session table, row locking, concurrency, the real request flow) is supported only for what the 96 passing
+> tests covered, until the owner reruns the local steps in section 14 and reports the output. Sections 1 to 6 are the contract the code was built to
 > (it was written before the implementation); the rest describes what was built. This slice has no React UI, no
 > real AI, no export, no file upload, and no production-readiness claim.
 
@@ -88,6 +89,8 @@ Every error body is `{"error": {"code": "<stable code>", "message": "<fixed text
 
 A review refusal with a reason the table does not list is a generic `409 conflict`, and a framework error it does
 not list keeps its HTTP status with the code `request_error`; neither is a 500.
+
+**Findings contract.** In `draft_invalid` and in every detail response, a finding's `code`, `field_path` and `blocking` flag are the stable machine-readable contract (versioned by the domain's findings contract). Its `message` is fixed explanatory text for a person: it never echoes a value, but its wording is NOT a stable contract and can differ by origin (a missing requester object says "Requester name is required.", a requester whose name is null says "A value is required."). Clients must not match on it.
 
 **Hidden resources.** An existing request the user is not scoped to (an operator reading another operator's
 request) returns the same `404 not_found` as an unknown id. A user with NO permission for an action gets
@@ -240,7 +243,7 @@ POST .../edit/      (base revision is no longer current)
 
 POST .../edit/      (blocking findings; nothing stored)
 400  {"error": {"code": "draft_invalid", "message": "The draft has blocking findings and was not saved.",
-      "details": {"findings": [{"code": "missing_required", "field_path": "requester.name", "blocking": true, "message": "Requester name is required."}]}}}
+      "details": {"findings": [{"code": "missing_required", "field_path": "requester.name", "blocking": true, "message": "A value is required."}]}}}
 
 GET /api/requests/<another user's run>/     (as an Operator)
 404  {"error": {"code": "not_found", "message": "The resource does not exist."}}       (identical to an unknown id)
@@ -261,7 +264,7 @@ GET /api/requests/?page=2&page_size=10
 | CSRF | The CSRF middleware is on, but DRF views are exempt from it and DRF checks the token only for a request that already has a session. Every unsafe request of a signed-in user is therefore checked by `SessionAuthentication`, and the **login**, which has no session yet, is checked by `CsrfEnforcingAuthentication` (Django's own check, run before the credentials are read). A missing, wrong, or foreign-session token is `403 csrf_failed`. |
 | CSRF token delivery | `GET /api/auth/csrf/` sets the `csrftoken` cookie (`HttpOnly`, `SameSite=Lax`, `Secure` in production) and returns the token in the body, so a client never needs to read the cookie. The login response carries a fresh token (Django rotates it at login). |
 | Session cookie | `HttpOnly`, `SameSite=Lax`, host-only (no `Domain`), `Secure` in production, absolute lifetime `AP_SESSION_AGE_SECONDS` (default 8 hours, minimum 300). |
-| Session fixation | `login` rotates the session key and the CSRF token. |
+| Session fixation | Django's `login` replaces the key of a pre-existing anonymous session (`cycle_key`, so a planted session id is dead after sign-in), flushes a session that belonged to a different user, and rotates the CSRF secret. Logging in again as the same user keeps the session key, by Django's design. |
 | Logout | `POST /api/auth/logout/` (CSRF required) flushes the server-side session; a replayed old cookie authenticates nobody. |
 | Revocation | The session stores no permissions: every request reloads the user. Deactivating a user, deleting them, removing a role, or changing their password takes effect on the next request (Django's session auth hash covers the password), and the services reload the user again. |
 | Inactive users | `authenticate` refuses them, so they get the same `403 invalid_credentials` as a wrong password. |
@@ -328,8 +331,8 @@ Changed: `config/settings/base.py` (`apps.api`, session and CSRF cookie attribut
 
 | Command | Result |
 | --- | --- |
-| `manage.py test` | `Ran 1199 tests`, OK (991 before this slice plus 208 new, 24 of them the pure-domain Decimal resource-safety tests; the PostgreSQL tests are excluded by the project runner) |
-| `manage.py test tests.test_api_serializers tests.test_api_errors tests.test_api_views tests.test_api_queries tests.test_api_boundaries tests.test_api_security` | 188 tests: serializers 39, errors 29, views (CSRF, login, throttling, delegation) 57, read services 27, static boundaries and settings 29, public-endpoint inventory 7 |
+| `manage.py test` | `Ran 1201 tests`, OK (991 before this slice plus 210 new, 24 of them the pure-domain Decimal resource-safety tests; the PostgreSQL tests are excluded by the project runner) |
+| `manage.py test tests.test_api_serializers tests.test_api_errors tests.test_api_views tests.test_api_queries tests.test_api_boundaries tests.test_api_security` | 190 tests: serializers 39, errors 31, views (CSRF, login, throttling, delegation) 57, read services 27, static boundaries and settings 29, public-endpoint inventory 7 |
 | `manage.py test tests.test_request_intake_decimal_safety` (also `python -m unittest`, no Django) | 24 tests: the shared padding rule and length arithmetic against the real formatting, huge exponents of both signs never formatted and never allocating (`tracemalloc`), the boundary at a lowered constant, context independence, ordinary values and floats unchanged, canonicalization unchanged |
 | `python -m unittest` on the pure-domain modules (no Django) | `Ran 547 tests`, OK (523 plus the 24 Decimal-safety tests) |
 | `manage.py check` | no issues |
@@ -346,9 +349,23 @@ The view tests drive the REAL URL, middleware, CSRF, throttling, parser and erro
 
 **No SQLite and no PostgreSQL.** As instructed, the PostgreSQL-requiring tests were NOT run anywhere and no SQLite substitute was used. They were desk-checked line by line against the services and the extractor's real output for their synthetic texts, which found and fixed defects in the tests themselves (a size test aimed at the wrong layer, UUID types, a dictionary that collapsed repeated audit actions, an assumption about warnings, and the cost of password hashing).
 
-### 13.2 PostgreSQL tests (written, NOT RUN): `backend/tests/test_api_postgres.py`, 98 tests, tagged `requires_postgres`
+### 13.2 PostgreSQL tests (first run: 96 of 98 passed; corrected, rerun pending): `backend/tests/test_api_postgres.py`, 100 tests, tagged `requires_postgres`
 
-`AuthLifecycleTests` 15, `CsrfEnforcementTests` 5, `LoginThrottleDbTests` 3, `SubmissionApiTests` 9, `ListingApiTests` 11, `DetailApiTests` 12, `EditApiTests` 12, `ApprovalApiTests` 10, `RejectionApiTests` 6, `AuditApiTests` 6, `IsolationApiTests` 4, `EndToEndApiTests` 2, `ApiConcurrencyTests` 3. They cover: login, logout and the real session table (the session is deleted, a replayed cookie fails, the key and CSRF token rotate); the cookie attributes; inactive, deactivated, deleted, role-removed and password-changed users; roles and permissions in `/me/`; CSRF refusal on every unsafe route (no, wrong, empty, foreign-session token) with nothing changed; login throttling against real accounts; submission, idempotency and the service's text rules; listing with visibility per role, stable complete disjoint pagination, newest-first order and the state filter; the detail (draft, findings, warnings, processing status including a task that failed for good, allowed actions per role and state, self-approval as a blocker); edits (stale base, first edit of an invalid extraction, invalid, unchanged and hostile drafts, scope, approved-then-edited); approvals (the approver is the session user, a client-supplied approver refused, self-approval by submitter, author and superuser, exact warning acknowledgement, history preserved); rejections (reason codes only, rejected revision not approvable); the audit endpoint (order, permission, paging, no content, no trace of refused attempts); cross-user isolation; the full API, worker, review and approval path (the worker cannot run inside a transaction, so that class is a `TransactionTestCase`); and competing connections (two approvals, two edits, an edit racing an approval). The tests use a fast password hasher for speed only, and one test proves a real login with the project's own hasher. Each class refuses to run unless the database name starts with `test_`.
+`AuthLifecycleTests` 17, `CsrfEnforcementTests` 5, `LoginThrottleDbTests` 3, `SubmissionApiTests` 9, `ListingApiTests` 11, `DetailApiTests` 12, `EditApiTests` 12, `ApprovalApiTests` 10, `RejectionApiTests` 6, `AuditApiTests` 6, `IsolationApiTests` 4, `EndToEndApiTests` 2, `ApiConcurrencyTests` 3. They cover: login, logout and the real session table (the session is deleted, a replayed cookie fails, the key and CSRF token rotate); the cookie attributes; inactive, deactivated, deleted, role-removed and password-changed users; roles and permissions in `/me/`; CSRF refusal on every unsafe route (no, wrong, empty, foreign-session token) with nothing changed; login throttling against real accounts; submission, idempotency and the service's text rules; listing with visibility per role, stable complete disjoint pagination, newest-first order and the state filter; the detail (draft, findings, warnings, processing status including a task that failed for good, allowed actions per role and state, self-approval as a blocker); edits (stale base, first edit of an invalid extraction, invalid, unchanged and hostile drafts, scope, approved-then-edited); approvals (the approver is the session user, a client-supplied approver refused, self-approval by submitter, author and superuser, exact warning acknowledgement, history preserved); rejections (reason codes only, rejected revision not approvable); the audit endpoint (order, permission, paging, no content, no trace of refused attempts); cross-user isolation; the full API, worker, review and approval path (the worker cannot run inside a transaction, so that class is a `TransactionTestCase`); and competing connections (two approvals, two edits, an edit racing an approval). The tests use a fast password hasher for speed only, and one test proves a real login with the project's own hasher. Each class refuses to run unless the database name starts with `test_`.
+
+### 13.3 The first local run: two failures, both test defects (owner-supplied; corrected, rerun pending)
+
+The owner ran the 98 tests as first written: 96 passed, 2 failed, exit code 1 (no output attached to the repository).
+
+| Failing test | Cause | Correction (every behavioral assertion kept) |
+| --- | --- | --- |
+| `EditApiTests.test_an_invalid_draft_is_a_400_with_findings_and_never_becomes_a_revision` (named by the owner) | **Stale test expectation.** The test sent `{"requester": {"name": null}}` and expected the message "Requester name is required."; the domain emits that only for a missing requester OBJECT (`requester is None`), and "A value is required." for a requester whose name is null. The finding code, field path and blocking flag matched. Application behavior is correct and the domain was not changed. | The test now asserts code, field path, `blocking is True`, exactly one such finding, a non-empty fixed message on every finding, the exact key set (no excerpts), HTTP status 400 and `draft_invalid`, no `SECRET` text in the response, and that nothing was stored (the snapshot is unchanged). Only the exact wording is no longer asserted. |
+| `AuthLifecycleTests.test_login_rotates_the_session_and_the_csrf_token` (identified by analysis; the report named only one) | **Wrong assumption about Django.** `login()` replaces the session key only when the session has no user yet (`cycle_key`, the fixation defence) and flushes a session of a different user; logging in again as the same user keeps the key. The application is correct. | Replaced by three tests: a planted anonymous session id is replaced and dead after sign-in (and cannot be replayed); the CSRF secret rotates and a pre-login token no longer works; logging in as another user in the same browser discards the previous session. |
+
+Also added, DB-free (`tests/test_api_errors.py`, 2 tests): the real domain's findings for a null requester name through the API's
+mapping, and a test that the message wording differs by origin while the code and path do not, which documents that
+the message is not a contract. Section 4 now states this. Please confirm on the rerun that the second failure was the one
+identified here.
 
 ## 14. Local startup and validation (owner; on the local Windows computer only)
 
@@ -364,20 +381,20 @@ if ($env:AP_RUN_DB_TESTS) { throw "AP_RUN_DB_TESTS is already set. Remove-Item E
 & $Py manage.py setup_roles
 
 # 2. DB-free tests.
-& $Py manage.py test                                  # expect: Ran 1199 tests, OK
+& $Py manage.py test                                  # expect: Ran 1201 tests, OK
 
 # 3. The new PostgreSQL tests only. Creates and drops test_<AP_DB_NAME>.
 try {
     $env:AP_RUN_DB_TESTS = "1"
     & $Py manage.py test tests.test_api_postgres --tag requires_postgres -v 2
-    "exit code: $LASTEXITCODE"                        # expect: Ran 98 tests, OK, none skipped, exit code 0
+    "exit code: $LASTEXITCODE"                        # expect: Ran 100 tests, OK, none skipped, exit code 0
 } finally { Remove-Item Env:AP_RUN_DB_TESTS -ErrorAction SilentlyContinue }
 
-# 4. Everything that needs PostgreSQL (356 earlier + 98 new = 454), to prove nothing regressed.
+# 4. Everything that needs PostgreSQL (356 earlier + 100 new = 456), to prove nothing regressed.
 try {
     $env:AP_RUN_DB_TESTS = "1"
     & $Py manage.py test --tag requires_postgres -v 2
-    "exit code: $LASTEXITCODE"                        # expect: Ran 454 tests, OK
+    "exit code: $LASTEXITCODE"                        # expect: Ran 456 tests, OK
 } finally { Remove-Item Env:AP_RUN_DB_TESTS -ErrorAction SilentlyContinue }
 ```
 
@@ -416,7 +433,7 @@ React UI and any browser client; real AI; export execution; file upload and docu
 
 ## 16. Security limitations
 
-* **Nothing here was run against PostgreSQL.** Password verification against stored hashes, the session table, row locking, and every database-backed behavior of the 98 tests are unproven until the owner's local run.
+* **Only part of the PostgreSQL behavior has been exercised.** The owner's first run passed 96 of 98 tests; the corrected module (100 tests) has not been rerun. Anything those tests cover is unproven until that rerun is reported.
 * **Throttling is per process** and depends on `AP_NUM_PROXIES` being right behind a proxy (section 9). There is no lockout and no CAPTCHA.
 * **HTTP only in development; TLS is not configured.** `security.W004` and `security.W008` remain, by design, until the deployment slice decides TLS termination, HSTS and the HTTPS redirect. The production cookie flags are only effective over HTTPS.
 * **No password policy beyond Django's validators, no reset flow, no MFA.** Account creation and role assignment are administrative (admin site or shell).

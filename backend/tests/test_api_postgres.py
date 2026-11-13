@@ -230,13 +230,49 @@ class AuthLifecycleTests(ApiCase):
         self.assertEqual(session_cookie["samesite"], "Lax")
         self.assertTrue(session_cookie["max-age"] or session_cookie["expires"])
 
-    def test_login_rotates_the_session_and_the_csrf_token(self):
+    def test_login_replaces_a_pre_existing_anonymous_session_key_against_fixation(self):
+        # Django's login() calls cycle_key() when the session has no user yet (the fixation case: an attacker who
+        # planted a session id in the victim's browser must not keep it after the victim signs in).
+        from django.contrib.sessions.backends.db import SessionStore
+
+        planted = SessionStore()
+        planted["probe"] = 1
+        planted.save()
+        planted_key = planted.session_key
         browser = Browser()
-        first = browser.login("olive")
-        first_session, first_token = browser.client.cookies["sessionid"].value, first.json()["csrf_token"]
-        second = browser.login("olive")
-        self.assertNotEqual(browser.client.cookies["sessionid"].value, first_session)
-        self.assertNotEqual(second.json()["csrf_token"], first_token)
+        browser.bootstrap()
+        browser.client.cookies["sessionid"] = planted_key
+        self.assertEqual(browser.login("olive").status_code, 200)
+        new_key = browser.client.cookies["sessionid"].value
+        self.assertNotEqual(new_key, planted_key)
+        self.assertFalse(Session.objects.filter(session_key=planted_key).exists())  # the planted id is dead
+        self.assertEqual(browser.get("/api/auth/me/").status_code, 200)
+        replay = APIClient(enforce_csrf_checks=True)
+        replay.cookies["sessionid"] = planted_key
+        self.assertEqual(replay.get("/api/auth/me/").status_code, 403)
+
+    def test_login_rotates_the_csrf_secret(self):
+        browser = Browser()
+        browser.bootstrap()
+        before_cookie, before_token = browser.client.cookies["csrftoken"].value, browser.token
+        response = browser.login("olive")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotEqual(browser.client.cookies["csrftoken"].value, before_cookie)  # the secret itself changed
+        self.assertNotEqual(response.json()["csrf_token"], before_token)
+        stale = browser.client.post("/api/requests/", {"text": VALID_TEXT}, format="json", HTTP_X_CSRFTOKEN=before_token)
+        self.assertEqual((stale.status_code, err(stale)), (403, "csrf_failed"))  # a pre-login token no longer works
+
+    def test_logging_in_as_another_user_in_the_same_browser_discards_the_previous_session(self):
+        # Django flush()es a session that belongs to a different user. (Logging in again as the SAME user keeps the
+        # session key, by Django's design: there is no other identity to protect.)
+        browser = Browser()
+        self.assertEqual(browser.login("olive").status_code, 200)
+        first_key = browser.client.cookies["sessionid"].value
+        self.assertEqual(browser.login("omar").status_code, 200)
+        second_key = browser.client.cookies["sessionid"].value
+        self.assertNotEqual(second_key, first_key)
+        self.assertFalse(Session.objects.filter(session_key=first_key).exists())
+        self.assertEqual(browser.get("/api/auth/me/").json()["username"], "omar")
 
     def test_a_failed_login_is_one_generic_response_and_creates_no_session(self):
         make_user("dormant", OPERATOR, active=False)
@@ -758,8 +794,16 @@ class EditApiTests(ApiCase):
         response = self.as_(self.operator).post(f"/api/requests/{run_id}/edit/", body)
         self.assertEqual((response.status_code, err(response)), (400, "draft_invalid"))
         findings = response.json()["error"]["details"]["findings"]
-        self.assertIn({"code": "missing_required", "field_path": "requester.name", "blocking": True, "message": "Requester name is required."}, findings)
+        # The machine-readable contract is the code, the field path and the blocking flag (workflows/request_intake/
+        # findings.py). The human-readable message is fixed explanatory text and NOT part of that contract: for a
+        # Requester whose name is null the domain says "A value is required." (only a missing Requester object says
+        # "Requester name is required."), so the message is checked for being present and fixed, not for its wording.
+        missing = [f for f in findings if (f["code"], f["field_path"]) == ("missing_required", "requester.name")]
+        self.assertEqual(len(missing), 1)
+        self.assertIs(missing[0]["blocking"], True)
+        self.assertTrue(isinstance(missing[0]["message"], str) and missing[0]["message"])
         self.assertTrue(all(set(f) == {"code", "field_path", "blocking", "message"} for f in findings))  # no excerpts
+        self.assertTrue(all(isinstance(f["message"], str) and f["message"] for f in findings))
         self.assertNotIn("SECRET", response.content.decode())
         self.assertEqual(self.snapshot(), before)
 

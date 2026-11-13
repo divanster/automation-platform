@@ -15,7 +15,7 @@ A local-first business process automation platform.
 > reject services, and append-only audit events; its PostgreSQL tests, a user-migration check and a manual smoke test
 > passed in the owner's local run, for the tested scenarios only), and a REST API slice (Django session login with CSRF
 > protection and login throttling, and endpoints to submit, list, read, edit, approve, reject and audit requests over
-> those services; DB-free tests pass, its PostgreSQL tests are written but **not yet run**). A React UI, export, real AI
+> those services; DB-free tests pass; in the owner's local run 96 of its first 98 PostgreSQL tests passed and 2 failed on test defects that are now corrected, the corrected tests **not yet rerun**). A React UI, export, real AI
 > adapters, password reset, and an installer are **not** built; nothing here is production-ready. Everything else described below is planned, not built. See the
 > [development runbook](docs/development/runbook.md) for exactly what exists.
 
