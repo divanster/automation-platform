@@ -73,6 +73,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 
 from .findings import ValidationResult
+from .quantity import MAX_PADDING_ZEROS, plain_padding_zeros
 from .schema import StructuredRequest
 from .validation import ValidationLimits, validate_request
 
@@ -80,12 +81,14 @@ CANONICAL_FORMAT_VERSION = 1
 HASH_ALGORITHM = "sha256"
 
 # SERIALIZATION SAFETY GUARD, NOT A BUSINESS LIMIT. A quantity whose plain decimal form
-# would need more than this many padding zeros (from a very large exponent, for example
-# 1E+1000000) is refused BEFORE any large string is built, instead of allocating it. The
-# value mirrors the default decimal context's exponent range (Emax 999999). It does not
-# limit the number of digits of the coefficient and is not a rule about how large a
-# quantity may be: validation accepts such quantities and is not changed.
-MAX_PADDING_ZEROS = 999_999
+# would need more than MAX_PADDING_ZEROS padding zeros (from a very large or a very small
+# exponent, for example 1E+1000000 or 1E-1000000) is refused BEFORE any large string is
+# built, instead of allocating it. The constant and the arithmetic live in ``quantity.py``
+# (imported above) because validation applies the same rule before IT formats a number:
+# validation does not refuse such a quantity (it treats it as not locatable in the source, a
+# warning) and never builds the string; THIS module is the layer that refuses it. The bound
+# mirrors the default decimal context's exponent range (Emax 999999). It does not limit the
+# number of digits of the coefficient and is not a rule about how large a quantity may be.
 
 # Stable reasons carried by SerializationSafetyError.reason.
 REASON_DECIMAL_EXPANSION = "decimal_expansion"
@@ -234,11 +237,7 @@ def canonical_decimal_string(value: Decimal) -> str:
         exponent += 1
 
     # Size check from the digit count and exponent alone, before anything padded exists.
-    if exponent >= 0:
-        padding = exponent
-    else:
-        padding = max(0, -exponent - len(coefficient))
-    if padding > MAX_PADDING_ZEROS:
+    if plain_padding_zeros(value) > MAX_PADDING_ZEROS:
         raise SerializationSafetyError(REASON_DECIMAL_EXPANSION)
 
     text = "".join(str(digit) for digit in coefficient)

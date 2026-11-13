@@ -13,8 +13,10 @@ A local-first business process automation platform.
 > tests and a manual smoke test passed in the owner's local run, for the tested scenarios only), and a
 > review-services slice (a stable user identity, Operator, Approver and Auditor roles, authorized edit, approve and
 > reject services, and append-only audit events; its PostgreSQL tests, a user-migration check and a manual smoke test
-> passed in the owner's local run, for the tested scenarios only). A product login mechanism, a REST API, a React UI,
-> export, real AI adapters, and an installer are **not** built; nothing here is production-ready. Everything else described below is planned, not built. See the
+> passed in the owner's local run, for the tested scenarios only), and a REST API slice (Django session login with CSRF
+> protection and login throttling, and endpoints to submit, list, read, edit, approve, reject and audit requests over
+> those services; DB-free tests pass, its PostgreSQL tests are written but **not yet run**). A React UI, export, real AI
+> adapters, password reset, and an installer are **not** built; nothing here is production-ready. Everything else described below is planned, not built. See the
 > [development runbook](docs/development/runbook.md) for exactly what exists.
 
 ## Purpose
@@ -65,8 +67,9 @@ Exact versions in use are recorded in the
 - [Revision, approval, and export-eligibility policy](docs/development/revision-approval-policy.md):
   pure rules plus their persistence; no authentication or export
 - [Review services slice](docs/development/review-services-slice.md): user identity, roles, edit, approve,
-  reject, and audit events, with the initial policy decisions and the remaining security limitations; no login,
-  API, or export
+  reject, and audit events, with the initial policy decisions and the remaining security limitations
+- [REST API slice](docs/development/rest-api-slice.md): the authenticated JSON API (session login, CSRF, request
+  endpoints), its error contract, examples with synthetic data, local startup, and security limitations
 
 ## Repository conventions
 

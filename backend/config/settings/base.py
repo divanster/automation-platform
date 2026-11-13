@@ -20,6 +20,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "apps.accounts",
+    "apps.api",
     "apps.audit",
     "apps.cases",
     "apps.health",
@@ -102,9 +103,39 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 
-# Django REST Framework: authenticated by default, session authentication,
-# JSON only (no browsable HTML API). Endpoints that must be reachable without
-# a login (health) opt out explicitly on the view.
+# Sessions and CSRF (docs/development/rest-api-slice.md, section 7). Django's session authentication is the only
+# authentication: no JWT, no tokens in browser storage. The cookies are HttpOnly (JavaScript cannot read the
+# session id, and the CSRF token is delivered in the body of GET /api/auth/csrf/), SameSite=Lax, and, in
+# production only, Secure (production.py). The session lifetime is absolute and bounded.
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+SESSION_COOKIE_AGE = get_int("AP_SESSION_AGE_SECONDS", 8 * 60 * 60, minimum=300)
+CSRF_COOKIE_HTTPONLY = True
+CSRF_COOKIE_SAMESITE = "Lax"
+
+# There is NO CORS configuration and no CORS package: the API is same-origin only. Do not add one casually.
+
+# Rate limiting uses Django's cache. Local memory is per process (see apps/api/throttles.py for what that
+# means); a shared cache is an open deployment decision.
+CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache", "LOCATION": "automation-platform-throttle"}}
+
+# "<count>/<sec|min|hour|day>". Provisional, not measured. login_ip and login_user are per minute; login_user_hour
+# bounds guessing against one account over a longer window. Every login attempt counts, successful or not.
+API_THROTTLE_RATES = {
+    "login_ip": "10/min",
+    "login_user": "5/min",
+    "login_user_hour": "20/hour",
+    "api_user": "600/min",
+}
+
+# Largest accepted request body, in bytes (the parser refuses more with 413 before decoding it).
+API_MAX_BODY_BYTES = get_int("AP_API_MAX_BODY_BYTES", 256 * 1024, minimum=1024)
+
+# Django REST Framework: authenticated by default, session authentication, JSON only (no browsable HTML API).
+# Endpoints that must be reachable without a login (health, the CSRF bootstrap, the login) opt out explicitly on
+# the view and are listed in tests/test_api_security.py. NUM_PROXIES = 0 makes DRF's throttles use REMOTE_ADDR
+# and ignore X-Forwarded-For, which a client could forge; set AP_NUM_PROXIES to the number of trusted reverse
+# proxies in front of the application, or the IP limit sees only the proxy.
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.SessionAuthentication",
@@ -115,4 +146,10 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": [
         "rest_framework.renderers.JSONRenderer",
     ],
+    "DEFAULT_PARSER_CLASSES": [
+        "apps.api.parsers.BoundedJSONParser",
+    ],
+    "EXCEPTION_HANDLER": "apps.api.errors.api_exception_handler",
+    "NUM_PROXIES": get_int("AP_NUM_PROXIES", 0, minimum=0),
+    "TEST_REQUEST_DEFAULT_FORMAT": "json",
 }

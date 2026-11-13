@@ -16,9 +16,10 @@ The field list mirrors ``workflows.request_intake.schema``; a test compares the 
 cannot go unnoticed here.
 """
 
+import json
 from decimal import Decimal, InvalidOperation
 
-from workflows.request_intake import Ambiguity, RequestedItem, Requester, SourceRef, StructuredRequest
+from workflows.request_intake import CANONICAL_FORMAT_VERSION, Ambiguity, RequestedItem, Requester, SourceRef, StructuredRequest
 
 from .errors import UnsupportedDraftError
 
@@ -139,3 +140,24 @@ def ambiguities_from_json(data) -> tuple[Ambiguity, ...]:
         raw = _exact_keys(raw, _AMBIGUITY_KEYS, "a stored ambiguity")
         result.append(Ambiguity(field_path=_text(raw["field_path"], "a field path"), excerpt=_text(raw["excerpt"], "an excerpt")))
     return tuple(result)
+
+
+def draft_from_canonical_bytes(canonical_bytes) -> StructuredRequest:
+    """The draft a stored revision's canonical bytes describe, for READING (display); never for hashing.
+
+    The canonical payload has exactly the shape of ``draft_to_json`` (the field list is the same and a test
+    compares them), with quantities as canonical decimal text. This function only DECODES; it does not
+    validate, canonicalize, or hash, and a hash is never computed from its result: the revision's stored hash
+    still comes from the bytes. Bytes that are not a version-1 envelope with a payload of the expected shape
+    raise ``UnsupportedDraftError``; nothing is repaired or guessed.
+    """
+    try:
+        document = json.loads(bytes(canonical_bytes).decode("utf-8"))
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        raise UnsupportedDraftError("the stored revision bytes cannot be read") from None
+    if not isinstance(document, dict) or set(document) != {"canonical_format_version", "payload"}:
+        raise UnsupportedDraftError("the stored revision has an unexpected envelope")
+    version = document["canonical_format_version"]
+    if isinstance(version, bool) or version != CANONICAL_FORMAT_VERSION:
+        raise UnsupportedDraftError("the stored revision has an unsupported format version")
+    return draft_from_json(document["payload"])

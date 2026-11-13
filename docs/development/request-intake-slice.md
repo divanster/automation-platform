@@ -211,18 +211,31 @@ refused, never converted.
 ### Serialization safety versus business validation
 
 A draft can pass business validation and still fail canonical serialization safety
-checks. Validation has no business limit on how large a quantity is or on whether text
-is encodable, and it was **not** changed. Serialization refuses, with
-`SerializationSafetyError`:
+checks. Validation has no business limit on how large or small a quantity is or on whether
+text is encodable, and it does not refuse such values (it never raises a safety error).
+Serialization refuses, with `SerializationSafetyError`:
 
 - **`reason="decimal_expansion"`:** a quantity whose plain decimal form would need more
-  than 999,999 padding zeros (for example `1E+1000000`). The size check is made from
+  than 999,999 padding zeros, from a very large OR a very small exponent (for example
+  `1E+1000000` or `1E-1000001`). The size check is made from
   the digit count and exponent **before any padded string is built**, so a refusal
   allocates almost nothing (tested: under 64 KiB even for an exponent of 10^18).
   Nothing is rounded, truncated, or switched to exponent notation. The number mirrors
   the default decimal context's exponent range; it is a **memory-safety guard, not a
   business quantity limit**, it does not limit the digits of the coefficient, and
   large representable quantities (such as `1E+1000`) are serialized exactly.
+  **Validation applies the same bound before it formats a number.** When a source text is
+  supplied, validation looks each positive quantity up in the text in plain notation. It
+  never builds that string for a value beyond the padding bound (an exponent can be about
+  10^9 in either direction, and `Decimal("1e-999999999")` is a valid `Decimal`), and it
+  never builds one longer than the source text itself (such a number cannot occur in it).
+  Both cases are decided from the digits and exponent alone
+  (`quantity.plain_padding_zeros`, `quantity.plain_notation_length`) and answer "not found
+  in the source", which is a warning, so a value that cannot be serialized still passes
+  business validation and is then refused by canonicalization. One rule, two callers: the
+  constant `MAX_PADDING_ZEROS` and the arithmetic live in `quantity.py`. This closed a
+  resource-exhaustion defect (validation used to call `format(value, "f")` before any
+  guard); tests: `tests/test_request_intake_decimal_safety.py`.
 - **`reason="unencodable_text"`:** text containing an unpaired surrogate, which cannot
   be written as UTF-8. It is refused explicitly with the field path; no character is
   replaced, dropped, or repaired. A valid surrogate pair is one ordinary character.

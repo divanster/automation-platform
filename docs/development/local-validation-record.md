@@ -321,3 +321,11 @@ existing users on PostgreSQL (only one user existed), any race the tests do not 
 immutability (revisions, approvals, rejections and audit events are protected at the ORM and service boundary
 only), a login mechanism, a REST API, a UI, real AI, or production readiness. The exact command lines and timings
 of the test runs were not supplied.
+
+## Pending: REST API slice (not yet validated)
+
+The REST API slice ([slice document](rest-api-slice.md)) has been written, and its DB-free tests pass in the development
+VM (1199 tests). **No PostgreSQL result exists for it.** Its 98 PostgreSQL tests (and with them a combined
+collection of 454), the real session table and password verification, and the manual smoke test are all waiting for the
+owner's local run. No SQLite substitute was used. Nothing in this record supports any claim about them until the owner
+reports that output here. The slice adds no model, migration, or dependency, so there is no migration to validate.

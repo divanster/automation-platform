@@ -306,7 +306,7 @@ class SourceBoundaryTests(SimpleTestCase):
             names,
             {
                 "__init__.py", "access.py", "apps.py", "authorization.py", "draft_json.py", "editing.py", "errors.py", "extraction.py",
-                "handlers.py", "models.py", "policy.py", "registry.py", "review.py", "review_rules.py", "services.py", "submission.py",
+                "handlers.py", "models.py", "policy.py", "queries.py", "registry.py", "review.py", "review_rules.py", "services.py", "submission.py",
             },
         )  # fmt: skip
 
