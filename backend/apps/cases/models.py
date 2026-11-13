@@ -1,4 +1,4 @@
-"""Persistence for cases, workflow runs, result revisions, and approvals.
+"""Persistence for cases, workflow runs, result revisions, approvals, and rejections.
 
 Entity meanings follow docs/architecture/data-model.md. This slice stores only what the pure
 revision/approval policy (``workflows.revision_approval``) needs; everything else the data model
@@ -6,7 +6,7 @@ describes for these entities (run state, definition and configuration snapshots,
 parent, and author, approval decisions other than "approved", and so on) is deferred and will be
 added to these same tables by later migrations.
 
-WHERE IMMUTABILITY IS ENFORCED. ``ResultRevision`` and ``Approval`` rows are immutable at the
+WHERE IMMUTABILITY IS ENFORCED. ``ResultRevision``, ``Approval`` and ``Rejection`` rows are immutable at the
 Django ORM and service boundary only. These paths are guarded and raise ``ImmutableRecordError``:
 
 * ``save()`` and ``save_base()`` on a row that already exists, or with ``update_fields`` or
@@ -40,6 +40,7 @@ from .errors import ImmutableRecordError
 from .run_state import FAILED_STEPS, STATES, RunState
 
 _HASH_PATTERN = r"^[0-9a-f]{64}$"
+REASON_CODE_PATTERN = r"^[a-z][a-z0-9_]{0,39}$"  # the shape of a stable reason code
 
 
 class ImmutableQuerySet(models.QuerySet):
@@ -175,10 +176,10 @@ class Approval(ImmutableRecord):
 
     Bound to its revision by a foreign key (and so, through the revision, to its run and
     case) and to the revision's content hash at decision time. ``approver_id`` is stored as
-    an unverified domain actor identifier: it is NOT a foreign key and nothing here
-    authenticates or authorizes it. Linking approvals to authenticated users is required before
-    any API exposes approval operations. Rejection records and decision time semantics beyond
-    ``created_at`` belong to later slices.
+    an unverified domain actor identifier at this layer: it is NOT a foreign key and nothing in
+    ``apps.cases`` authenticates or authorizes it. Any API that exposes approval operations must go through
+    ``apps.intake.review.approve_request``, which derives the value from the authenticated user's
+    ``User.public_id`` after the role and policy checks. Rejections are the separate ``Rejection`` model. Decision time semantics beyond ``created_at`` belong to later slices.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -195,3 +196,34 @@ class Approval(ImmutableRecord):
 
     def __str__(self):
         return f"Approval {self.pk}"
+
+
+class Rejection(ImmutableRecord):
+    """An immutable record that one revision was rejected by a reviewer.
+
+    Bound exactly like an approval: to its revision by a foreign key (and so, through the revision, to
+    its run and case) and to the revision's content hash at decision time. ``rejected_by`` is the
+    deciding user's ``User.public_id`` stored as a plain UUID (not a foreign key, like
+    ``Approval.approver_id``); ``apps.cases`` does not check who the user is or what they may do,
+    the application service that records the rejection does. ``reason_code`` is a short stable code, never free text: the
+    database checks only its shape, and the workflow that records the rejection checks it against its own
+    list (for request intake, ``apps.intake.policy.REJECTION_REASONS``). A rejection does not change the
+    revision, any approval, or the run's current revision, and rejections are never updated or deleted
+    through the ORM (the same boundary as every ``ImmutableRecord``).
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    revision = models.ForeignKey(ResultRevision, on_delete=models.PROTECT, related_name="rejections")
+    content_hash = models.CharField(max_length=64)
+    rejected_by = models.UUIDField()
+    reason_code = models.CharField(max_length=40)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(condition=models.Q(content_hash__regex=_HASH_PATTERN), name="cases_rejection_hash_is_sha256_hex"),
+            models.CheckConstraint(condition=models.Q(reason_code__regex=REASON_CODE_PATTERN), name="cases_rejection_reason_code_shape"),
+        ]
+
+    def __str__(self):
+        return f"Rejection {self.pk}"

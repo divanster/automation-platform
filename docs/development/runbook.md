@@ -4,8 +4,10 @@
 > workflow, real AI adapters, frontend, and installer do not. A first generic
 > worker slice exists ([persistent-worker-slice.md](persistent-worker-slice.md)); its PostgreSQL tests
 > passed in the owner's local run, for the tested scenarios only. A request-intake orchestration slice connects a text request to that worker
-> ([request-intake-orchestration-slice.md](request-intake-orchestration-slice.md)); its **76 PostgreSQL tests
-> are written but have NOT been run**.**
+> ([request-intake-orchestration-slice.md](request-intake-orchestration-slice.md)); the owner reported that its
+> 76 PostgreSQL tests, the combined 221, and a manual smoke test passed locally. A review-services slice
+> ([review-services-slice.md](review-services-slice.md)) adds user identity, roles, authorized edit, approve and
+> reject services, and audit events; its **135 PostgreSQL tests are written but have NOT been run**.**
 >
 > **Two machines are involved, with different jobs** (section 0). Claude Code
 > develops code in a Windows **VM** and runs only database-free checks there.
@@ -280,11 +282,21 @@ A combined run of all PostgreSQL-required tests (now **145** collected: 130 plus
 reported. Command: [persistent-worker-slice.md](persistent-worker-slice.md), section 9.4.
 
 The request-intake orchestration slice adds `backend/tests/test_intake_postgres.py` (**76** tests, tagged
-`requires_postgres`). The VM cannot run them and **no PostgreSQL result exists for them yet**; with them
-`--tag requires_postgres` should collect **221** (145 + 76; re-check the number). It also adds three `cases`
-migrations and one `intake` migration: read the local preflight in
+`requires_postgres`). The VM cannot run them. The owner reported that they passed locally, and that the combined
+run of all **221** PostgreSQL-required tests (145 + 76) passed (as reported; no output is attached to the
+repository). It also added three `cases` migrations and one `intake` migration: read the local preflight in
 [request-intake-orchestration-slice.md](request-intake-orchestration-slice.md), section 3, before applying them
 to a development database that may hold runs. Commands: the same document, section 11.
+
+The review-services slice adds `backend/tests/test_review_postgres.py` (**135** tests, tagged `requires_postgres`);
+with them `--tag requires_postgres` should collect **356** (221 + 135; re-check the number). The VM cannot run
+them and **no PostgreSQL result exists for them yet**. It adds three `accounts` migrations (a safe three-step
+`User.public_id`: nullable column, per-user backfill, then unique and not null), `audit 0001`, `cases 0005`, and
+`intake 0002`. **Stop the application before `migrate`**, read the user preflight in
+[review-services-slice.md](review-services-slice.md), section 3, and after `migrate` run
+`python manage.py setup_roles` (repeatable) to create the Operator, Approver and Auditor groups. Users get a role
+by group membership, for example in the Django admin. Commands, including a smoke test: the same document,
+section 11.
 
 Expected collection at the commit that added the persistence slice (re-check it, counts
 change as tests are added): **3** skeleton tests (`PostgresUserTests` 2, `PostgresReadinessTests` 1)
@@ -750,8 +762,9 @@ be updated when that is done and confirmed.
 | PyCharm project and interpreter | Optional developer tooling; not configured or confirmed; not a backend or database acceptance criterion |
 | Request-intake preparation slice: plain-Python schema, pure validation, deterministic test fixture parser, canonical serialization and content hashing, DB-free tests ([details](request-intake-slice.md)) | **Implemented**; DB-free only; passing on the VM |
 | Persistence of cases, runs, result revisions, and approvals (`apps/cases`; minimal models, migration, services; [details](revision-approval-policy.md)) | **Implemented**; DB-free tests pass on the VM; the PostgreSQL tests **passed in the owner's local run** (tested scenarios only); ORM/service-level immutability, not database tamper protection |
-| Business workflow beyond that: documents, authentication and authorization, exports, state machine | Not implemented |
-| Task queue and background worker | Not implemented |
+| Review services (`apps/intake/review.py`, `apps/audit`, `User.public_id`, roles via `setup_roles`; [details](review-services-slice.md)) | **Implemented**; DB-free tests pass on the VM; the 135 PostgreSQL tests are **written but not run**; no login mechanism, API, or UI; ORM-level immutability only |
+| Business workflow beyond that: documents, a login mechanism, exports | Not implemented |
+| Task queue and background worker ([details](persistent-worker-slice.md)) | **Implemented** (first slice); the PostgreSQL tests passed in the owner's local run, tested scenarios only |
 | AI gateway and any AI adapter | Not implemented |
 | Frontend | Not implemented |
 | Production application server, Windows service packaging, installer | Not implemented |

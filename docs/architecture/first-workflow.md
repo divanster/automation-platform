@@ -7,8 +7,11 @@
 > orchestration slice also exists (text submission, a queued task, extraction by the worker, an outcome,
 > revision 1 for a valid draft, the run states `queued`, `extracting`, `needs_review` and `failed`; see
 > [request-intake-orchestration-slice.md](../development/request-intake-orchestration-slice.md); its PostgreSQL
-> tests are written but not run). Review, edit, approval, export, cancellation, retry, upload, storage, and
-> authentication are not implemented. This specification defines the first vertical
+> tests and a smoke test passed in the owner's local run, for the tested scenarios only). A review-services slice
+> adds authorized edit, approve and reject services and audit events (see
+> [review-services-slice.md](../development/review-services-slice.md); its PostgreSQL tests are written but not
+> run). Export, cancellation, retry, upload, storage, an API, and a login mechanism are not implemented. This
+> specification defines the first vertical
 > slice. Confirmed directions: plain-text input, JSON export, a deterministic
 > test AI adapter, and no automatic email sending or ERP writes (PDF parsing and
 > CSV export are deferred). The detailed rules, states, and acceptance
@@ -112,8 +115,11 @@ The system must **not invent missing information**.
   field's ambiguity blocks approval even if the field still holds a value, and it
   never replaces the `missing_required` finding for a missing required value.
 - (Implementation note: the orchestration slice saves a draft with blocking findings as an `ExtractionOutcome`
-  with status `invalid`, not as a `ResultRevision`, because a revision cannot hold blocking findings; the next
-  sentence describes the design, not the current code.)
+  with status `invalid`, not as a `ResultRevision`, because a revision cannot hold blocking findings. The
+  review-services slice likewise REFUSES an edit that has blocking findings (returning the findings and storing
+  nothing) and offers a first edit that creates revision 1 from an invalid outcome; see
+  [review-services-slice.md](../development/review-services-slice.md), decision P9. The next sentence describes
+  the design, not the current code.)
 - A draft with blocking findings is still saved as a revision so a human can
   see it and complete it. It cannot be approved until the blocking findings are
   resolved in a newer revision.
@@ -324,6 +330,12 @@ Transitions:
 Any transition not listed is invalid and must be rejected by the domain layer.
 In particular, editing is rejected in `queued`, `extracting`, `failed`,
 `exported`, and `cancelled`; approval is rejected outside `needs_review`.
+
+> **Implementation note (review-services slice).** `edit_request` allows `needs_review` and `approved` and
+> refuses `exporting` for now (export and its cancellation protocol do not exist yet); approval and rejection
+> require `needs_review`; a rejection leaves the run in `needs_review` and the rejected revision cannot then be
+> approved; self-approval is forbidden. See [review-services-slice.md](../development/review-services-slice.md),
+> section 2.
 
 Validation is a stage, not a separate state, because it is deterministic and
 runs inside the extraction commit and each edit. If validation later becomes

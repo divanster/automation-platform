@@ -27,6 +27,11 @@ OUTCOME_STATUSES = (OUTCOME_VALID, OUTCOME_INVALID)
 # Task results are not business content: a status and identifiers only.
 RESULT_DISCARDED = "discarded"
 
+# Stable reasons a reviewer can give for rejecting a revision. A fixed list, never free text: a reviewer's
+# own words could hold personal or business data, and they would end up in logs, audit events and exports.
+# INITIAL VOCABULARY (provisional): the list can grow by adding a code; a code is never reused or renamed.
+REJECTION_REASONS = ("incorrect_content", "incomplete_content", "not_supported_by_source", "other")
+
 _CANONICAL_UUID_TEXT = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 

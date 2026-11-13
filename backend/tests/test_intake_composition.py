@@ -305,8 +305,8 @@ class SourceBoundaryTests(SimpleTestCase):
         self.assertEqual(
             names,
             {
-                "__init__.py", "apps.py", "draft_json.py", "errors.py", "extraction.py", "handlers.py", "models.py",
-                "policy.py", "registry.py", "services.py", "submission.py",
+                "__init__.py", "access.py", "apps.py", "authorization.py", "draft_json.py", "editing.py", "errors.py", "extraction.py",
+                "handlers.py", "models.py", "policy.py", "registry.py", "review.py", "review_rules.py", "services.py", "submission.py",
             },
         )  # fmt: skip
 
@@ -332,8 +332,11 @@ class SourceBoundaryTests(SimpleTestCase):
         for path in sources(INTAKE_DIR):
             tree = ast.parse(path.read_text(encoding="utf-8"))
             used = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)} | {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
+            # The review service REUSES the domain's approve_revision (it is the call the approval is built on);
+            # tests.test_review_boundaries checks that it is imported from the domain and never redefined.
+            allowed = {"approve_revision"} if path.name == "review.py" else set()
             with self.subTest(module=path.name):
-                self.assertEqual(used & banned, set())
+                self.assertEqual(used & (banned - allowed), set())
                 self.assertNotIn("json.dumps", path.read_text(encoding="utf-8"))
 
     def test_only_the_submission_module_hashes_and_only_the_source_text(self):
@@ -524,7 +527,8 @@ class MigrationTests(SimpleTestCase):
         self.assertTrue(migration.initial)
         self.assertEqual({type(op).__name__ for op in migration.operations}, {"CreateModel"})
         self.assertEqual({d for d in migration.dependencies if d[0] in {"cases", "tasks"}}, {("cases", "0004_workflowrun_state_constraints"), ("tasks", "0001_initial")})
-        self.assertEqual({k[1] for k in loader.disk_migrations if k[0] == "intake"}, {"0001_initial"})
+        # 0002 (review services) is checked by tests.test_review_models; 0001 stays exactly as the orchestration slice shipped it.
+        self.assertEqual({k[1] for k in loader.disk_migrations if k[0] == "intake"}, {"0001_initial", "0002_revisionedit_request_permissions"})
 
     def test_the_intake_migration_carries_the_constraints(self):
         migration = self.loader().disk_migrations[("intake", "0001_initial")]

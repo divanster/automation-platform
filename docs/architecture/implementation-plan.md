@@ -29,10 +29,10 @@
 | 0 | Repository preflight | Performed (read-only checks) |
 | 1 | Architecture specification | Reviewed and revised; decisions recorded |
 | 2 | Backend skeleton | **Implemented; database-backed acceptance criteria supported by local evidence** (PostgreSQL 18.6, 35 PostgreSQL-required tests OK, health endpoints `ok`); open: a clean-checkout reproduction (not yet reported) and the `listen_addresses='*'` hardening item; closure is the owner's decision (see "Phase 2 status" below and the [local validation record](../development/local-validation-record.md)) |
-| 3 | Data, documents, and basic authorization | Not started |
+| 3 | Data, documents, and basic authorization | **Partly started, ahead of order** (review-services slice: `User.public_id`, roles as groups, authorization inside the services, audit events; DB-free tests pass, PostgreSQL tests written, **not run**; see [review-services-slice.md](../development/review-services-slice.md)). Documents, storage, and a login mechanism are not started |
 | 4 | Persistent worker | **First slice implemented; phase not complete** (generic queue, `runworker`, one test handler; DB-free tests pass; the 95 PostgreSQL tests, a manual smoke test, and 15 process-level recovery tests (real worker processes, a forced kill) passed in the owner's local run for the tested scenarios only; see [persistent-worker-slice.md](../development/persistent-worker-slice.md) and the [local validation record](../development/local-validation-record.md)) |
 | (checkpoint) | Installation feasibility experiment | Not started |
-| 5 | End-to-end workflow with deterministic test adapter | **Not complete; its first orchestration slice is written** (`apps/intake`: submit, queue, extract, validate, canonicalize, record, `needs_review`, failure reconciliation; DB-free tests pass, PostgreSQL tests written but **not run**; see [request-intake-orchestration-slice.md](../development/request-intake-orchestration-slice.md)). Review, edit, approval, export, API, and authentication are not built |
+| 5 | End-to-end workflow with deterministic test adapter | **Not complete; its first orchestration slice is written** (`apps/intake`: submit, queue, extract, validate, canonicalize, record, `needs_review`, failure reconciliation; DB-free tests pass; its 76 PostgreSQL tests and a manual smoke test passed in the owner's local run, tested scenarios only; see [request-intake-orchestration-slice.md](../development/request-intake-orchestration-slice.md)). A review-services slice adds edit, approve and reject services with audit events (PostgreSQL tests written, **not run**; see [review-services-slice.md](../development/review-services-slice.md)). Export, API, UI, and a login mechanism are not built |
 | 6 | Real AI adapters and policy enforcement | Not started |
 | 7 | Minimal frontend | Not started |
 | 8 | Installer, backup, restore, and controlled updates | Not started |
@@ -273,7 +273,11 @@ Later phases are not marked complete by this validation.
 > events, no API, and no UI. A later orchestration slice (`apps/intake`; see
 > [request-intake-orchestration-slice.md](../development/request-intake-orchestration-slice.md)) adds the run
 > state and connects a submitted text to the worker and the deterministic extractor up to `needs_review`; its
-> PostgreSQL tests are written but not yet run. It does not complete Phase 5. Immutability of revisions and approvals is ORM and service level,
+> PostgreSQL tests passed in the owner's local run (as reported; tested scenarios only). A review-services slice
+> ([review-services-slice.md](../development/review-services-slice.md)) adds authorization inside edit, approve and
+> reject services and audit events (PostgreSQL tests written, not run); the sentence above about "no
+> authentication, no review or approval flow, no audit events" describes the earlier slices. It does not
+> complete Phase 5. Immutability of revisions and approvals is ORM and service level,
 > not database tamper protection. Some specification questions they surfaced are open
 > (open-questions.md items 2.6 to 2.19).
 

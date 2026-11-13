@@ -216,8 +216,9 @@ transaction. Plus one real end-to-end task through the `runworker` command.
 
 ## Still deferred
 
-Authentication and authorization (including linking approvals to authenticated users, required
-before any API exposes approval operations), connecting the queue to any workflow, a worker
+Authentication and authorization (the review-services slice adds authorization inside the services and links
+approvals to users through `User.public_id`, but a login mechanism does not exist; see the pending section
+above), connecting the queue to any workflow, a worker
 heartbeat, concurrency limits, cooperative cancellation of running tasks, an API, a UI, audit
 events, race-safe export (the atomic re-check at export commit), database-level immutability,
 document storage, the state machine, and real AI adapters. The open questions that cover them
@@ -282,10 +283,22 @@ after this module was added (130 earlier plus 15 = 145) was **not reported**.
   separately reviewed hardening slice.
 - The queue is not connected to any workflow; there is no real AI, API, or UI.
 
-## Pending: request-intake orchestration slice (not yet validated)
+## Request-intake orchestration slice (`apps/intake`): owner-confirmed, no pasted output
 
-The request-intake orchestration slice ([slice document](request-intake-orchestration-slice.md)) has been
-written, and its DB-free tests pass in the development VM. **No PostgreSQL result exists for it.** Its 76
-PostgreSQL tests, the `cases 0002` to `0004` and `intake 0001` migrations (including their effect on a
-database that already holds runs), and the manual smoke test are all waiting for the owner's local run.
-Nothing in this record supports any claim about them until the owner pastes that output here.
+The project owner reported on 2026-11-13 that, on the local Windows computer, the 76 request-intake PostgreSQL
+tests passed, the combined run of all 221 PostgreSQL-required tests passed, and a manual end-to-end smoke test
+succeeded (request, worker, valid outcome, revision 1, `needs_review`). This is **owner-confirmed without pasted
+output**: no log is attached, the VM did not run, repeat or observe any of it, and the exact command lines,
+timings and the output of the existing-row preflight (whether `cases_workflowrun` held rows) are not in this
+record. It covers the `cases 0002` to `0004` and `intake 0001` migrations as applied in that run and the tested
+scenarios only; it does not prove that no other race exists. See the
+[slice document](request-intake-orchestration-slice.md).
+
+## Pending: review-services slice (not yet validated)
+
+The review-services slice ([slice document](review-services-slice.md)) has been written, and its DB-free tests
+pass in the development VM (991 tests). **No PostgreSQL result exists for it.** Its 135 PostgreSQL tests (and with
+them a combined collection of 356), the `accounts 0002` to `0004` migrations (including their effect on a database
+that already holds users), the `audit 0001`, `cases 0005` and `intake 0002` migrations, `manage.py setup_roles`,
+and the manual smoke test are all waiting for the owner's local run. Nothing in this record supports any claim
+about them until the owner pastes that output here.

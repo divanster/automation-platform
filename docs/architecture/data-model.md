@@ -5,8 +5,10 @@
 > and `Approval` (approved decisions only), in `apps/cases`, plus the `accounts.User`
 > skeleton model, plus `RequestSource`, `StepTask` and `ExtractionOutcome` in `apps/intake` and a run
 > `state` and `failed_step` on `WorkflowRun` (see
-> [request-intake-orchestration-slice.md](../development/request-intake-orchestration-slice.md); not yet run
-> against PostgreSQL); their PostgreSQL tests passed in the owner's local run (tested scenarios
+> [request-intake-orchestration-slice.md](../development/request-intake-orchestration-slice.md)), plus
+> `RevisionEdit` in `apps/intake`, `Rejection` in `apps/cases`, `AuditEvent` in `apps/audit`, and a stable
+> `User.public_id` (see [review-services-slice.md](../development/review-services-slice.md); PostgreSQL tests
+> written, not run). The PostgreSQL tests of the earlier models passed in the owner's local run (tested scenarios
 > only, see the [local validation record](../development/local-validation-record.md)). Everything else here is
 > not built. This document defines
 > entity responsibilities and relationships. Field lists are illustrative and
@@ -117,6 +119,12 @@ AuditEvent * --- 0..1 Case / WorkflowRun / other subject
   (used by the worker in audit events) is not a login user.
 - **Uniqueness:** unique login identifier. Credentials handling depends on the
   authentication approach (open question) and is never stored in plain text.
+- **Implementation (review-services slice):** `User.public_id` is a random, unique, non-null UUID that
+  identifies the user in domain records that store a plain actor UUID (approvals, rejections, audit events);
+  the integer primary key is unchanged. The `operator`, `approver` and `auditor` roles exist as Django groups
+  (`setup_roles`) with the initial development permissions in
+  [review-services-slice.md](../development/review-services-slice.md); the `administrator` role does not. No
+  login mechanism exists.
 
 ### Case
 
@@ -249,8 +257,11 @@ AuditEvent * --- 0..1 Case / WorkflowRun / other subject
   [revision-approval-policy.md](../development/revision-approval-policy.md)). Approvals
   and revisions are now persisted (`apps/cases`): unique `(run, revision number)` in the
   database, a stored current-revision pointer, ORM- and service-level immutability (not
-  database-level), and approver identity stored as data. Rejections, the `needs_review`
-  state guard, authentication, and the atomic re-check at export commit remain future work.
+  database-level), and approver identity stored as data. The review-services slice
+  ([review-services-slice.md](../development/review-services-slice.md)) adds the `needs_review` state guard, an
+  immutable `Rejection` (a separate model: `Approval` stays "approved" only), and an approval service that
+  derives the approver from the authenticated user's `public_id` (PostgreSQL tests written, not run). The
+  atomic re-check at export commit remains future work.
 - **Creation guard:** an `approved` decision can be created only for the
   run's current revision, only while the run is in `needs_review`, and only if
   the revision is valid.
@@ -286,6 +297,12 @@ AuditEvent * --- 0..1 Case / WorkflowRun / other subject
   rows; the runtime database role is granted insert and select only on this
   table. Tamper-evidence beyond that (for example hash chaining) is an open
   question.
+- **Implementation (review-services slice):** `apps/audit` stores events with the vocabulary `request.submitted`,
+  `revision.created`, `request.edited`, `run.state_changed`, `approval.recorded`, `approval.invalidated` and
+  `rejection.recorded`, written in the transaction of the operation they describe. Append-only at the ORM and
+  service boundary only: no trigger, no restricted database role, no hash chain. The `details` values are
+  restricted to booleans, integers, null and short tokens. Not recorded yet: `document.uploaded`,
+  `export.created`, `task.failed`, and refused attempts.
 
 ### ModelProfile
 
