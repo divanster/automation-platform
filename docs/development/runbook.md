@@ -2,8 +2,10 @@
 
 > **Status (Phase 2 skeleton): the backend skeleton exists; the business
 > workflow, real AI adapters, frontend, and installer do not. A first generic
-> worker slice exists whose PostgreSQL tests have NOT been run
-> ([persistent-worker-slice.md](persistent-worker-slice.md)).**
+> worker slice exists ([persistent-worker-slice.md](persistent-worker-slice.md)); its PostgreSQL tests
+> passed in the owner's local run, for the tested scenarios only. A request-intake orchestration slice connects a text request to that worker
+> ([request-intake-orchestration-slice.md](request-intake-orchestration-slice.md)); its **76 PostgreSQL tests
+> are written but have NOT been run**.**
 >
 > **Two machines are involved, with different jobs** (section 0). Claude Code
 > develops code in a Windows **VM** and runs only database-free checks there.
@@ -276,6 +278,13 @@ races against recovery). The VM cannot run them. **The owner ran that module loc
 exit code 0** (owner-supplied local results; see the [local validation record](local-validation-record.md)).
 A combined run of all PostgreSQL-required tests (now **145** collected: 130 plus 15) was not
 reported. Command: [persistent-worker-slice.md](persistent-worker-slice.md), section 9.4.
+
+The request-intake orchestration slice adds `backend/tests/test_intake_postgres.py` (**76** tests, tagged
+`requires_postgres`). The VM cannot run them and **no PostgreSQL result exists for them yet**; with them
+`--tag requires_postgres` should collect **221** (145 + 76; re-check the number). It also adds three `cases`
+migrations and one `intake` migration: read the local preflight in
+[request-intake-orchestration-slice.md](request-intake-orchestration-slice.md), section 3, before applying them
+to a development database that may hold runs. Commands: the same document, section 11.
 
 Expected collection at the commit that added the persistence slice (re-check it, counts
 change as tests are added): **3** skeleton tests (`PostgresUserTests` 2, `PostgresReadinessTests` 1)

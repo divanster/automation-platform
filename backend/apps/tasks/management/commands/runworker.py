@@ -3,8 +3,9 @@
     python manage.py runworker --once       # process at most one available task, then exit
     python manage.py runworker              # poll until Ctrl+C
 
-In this slice the only registered handler is the deterministic TEST handler ``test.add_numbers``;
-nothing else can run. The first Ctrl+C (or SIGTERM / Ctrl+Break) finishes the current task and
+The handlers that can run are the fixed allowlist assembled in ``config.task_registry``: the deterministic
+TEST handler ``test.add_numbers`` and the request-intake extraction handler. After every iteration the worker also
+reconciles runs whose extraction task failed for good. The first Ctrl+C (or SIGTERM / Ctrl+Break) finishes the current task and
 exits; a second Ctrl+C interrupts at once, and an interrupted task is recovered after its lease
 expires. Handlers may run more than once. No payloads or results are printed or logged.
 """
@@ -21,6 +22,7 @@ from django.db import DatabaseError, connections
 
 from apps.tasks import worker
 from apps.tasks.policy import QueuePolicyError, validate_lease_seconds, validate_poll_seconds
+from config.task_registry import COMPOSITION  # the composition root: the one place the production allowlist is assembled
 
 _SIGNAL_NAMES = ("SIGINT", "SIGTERM", "SIGBREAK")  # SIGBREAK exists on Windows only
 
@@ -71,7 +73,7 @@ def console_logging(stream=None):
 
 
 class Command(BaseCommand):
-    help = "Run the persistent task worker (the deterministic test handler only, in this slice)."
+    help = "Run the persistent task worker (the fixed allowlist of config.task_registry: the test handler and request-intake extraction)."
 
     def add_arguments(self, parser):
         parser.add_argument("--once", action="store_true", help="Process at most one available task and exit.")
@@ -85,6 +87,7 @@ class Command(BaseCommand):
         except QueuePolicyError as error:
             raise CommandError(str(error)) from None
 
+        worker.install_composition(COMPOSITION)
         worker_id = worker.make_worker_id()
         try:
             with console_logging():

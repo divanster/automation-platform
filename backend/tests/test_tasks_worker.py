@@ -388,6 +388,7 @@ class RunWorkerCommandTests(SimpleTestCase):
         patcher = mock.patch.object(runworker, "connections")
         self.connections = patcher.start()
         self.addCleanup(patcher.stop)
+        self.addCleanup(setattr, worker, "_composition", worker._composition)  # the command installs a composition
 
     def run_command(self, *args, **kwargs):
         out, err = io.StringIO(), io.StringIO()

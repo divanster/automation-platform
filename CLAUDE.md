@@ -16,9 +16,13 @@ its PostgreSQL tests passed in the owner's local run, see
 a generic PostgreSQL-backed queue, a `runworker` command, and one deterministic test handler; see
 `docs/development/persistent-worker-slice.md`; its DB-free tests pass, and its PostgreSQL tests and a
 manual smoke test passed in the owner's local run for the tested scenarios only, see
-`docs/development/local-validation-record.md`; nothing is connected to the request-intake
-workflow). Authentication and authorization, exports, an API, a UI, audit events, and real AI
-adapters are not implemented. See `README.md` and
+`docs/development/local-validation-record.md`), plus a first orchestration slice (`apps/intake`: a
+text request becomes a case, a run, a stored source, and a queued task; the worker extracts with the
+deterministic fixture parser, validates, canonicalizes, and records an `ExtractionOutcome` and, when
+valid, revision 1, moving the run to `needs_review`, or to `failed` when the task fails for good; see
+`docs/development/request-intake-orchestration-slice.md`; its DB-free tests pass, and its PostgreSQL tests
+are written but have NOT been run). Authentication and authorization, review, edit, approval, exports, an
+API, a UI, audit events, and real AI adapters are not implemented. See `README.md` and
 `docs/architecture/README.md`. Do not describe planned components as existing.
 
 ## Working rules

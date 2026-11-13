@@ -35,6 +35,17 @@
 - Idempotency keys are caller-supplied strings, unique across the installation; the
   `(run, step, retry generation)` composition of section 11 and the manual-retry task are not built.
 - No concurrency limits (section 9), no `LISTEN/NOTIFY`, no cleanup of finished tasks, no Windows service.
+- **The request-intake extraction handler** ([slice document](../development/request-intake-orchestration-slice.md);
+  PostgreSQL tests written, **not run**) is the first handler that touches business tables. The allowlist
+  `apps.tasks.handlers.HANDLERS` is unchanged; the worker entry point installs a composed, read-only allowlist
+  built outside `apps.tasks` (`config/task_registry.py`) plus an after-iteration hook that reconciles runs whose
+  task failed for good. A run is linked to its task by a table in `apps/intake`, not by a column on `Task`; the
+  idempotency key is `request_intake.extract:<run>:<generation>`; only generation 1 exists.
+- **Section 10 differs for this handler.** There is no single transaction that records the result and marks the
+  task `succeeded`: the handler commits the outcome (revision, outcome row, run state) in its own short
+  transaction, and the worker then records the task result under the lease check. A crash between the two is made
+  safe by idempotence (a repeat returns the existing outcome), not by atomicity. The lease token does not fence the
+  handler's domain write, only the queue's bookkeeping.
 
 ## 1. Proposal
 

@@ -1,0 +1,7 @@
+from django.apps import AppConfig
+
+
+class IntakeConfig(AppConfig):
+    name = "apps.intake"
+    label = "intake"
+    verbose_name = "Request intake orchestration"

@@ -37,6 +37,7 @@ import uuid
 from django.db import models
 
 from .errors import ImmutableRecordError
+from .run_state import FAILED_STEPS, STATES, RunState
 
 _HASH_PATTERN = r"^[0-9a-f]{64}$"
 
@@ -98,11 +99,16 @@ class Case(models.Model):
 
 
 class WorkflowRun(models.Model):
-    """One run for one case (data-model.md, WorkflowRun). Minimal: no state or snapshot yet.
+    """One run for one case (data-model.md, WorkflowRun). Minimal: state, no snapshot yet.
 
     ``current_revision`` is the run's pointer to its current ``ResultRevision``. It is changed
     only by ``apps.cases.services.record_revision`` while the run row is locked. The database
     does not check that the pointed-to revision belongs to this run; the service does.
+
+    ``state`` and ``failed_step`` are changed only by ``apps.cases.services.transition_run`` while the
+    run row is locked, which applies the transition table in ``apps.cases.run_state``. The database
+    checks only that ``state`` is a known state and that ``failed_step`` is set exactly when the run
+    is ``failed``; it does not check which transition happened. State is business state, not task state.
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -114,7 +120,22 @@ class WorkflowRun(models.Model):
         on_delete=models.PROTECT,
         related_name="+",
     )
+    state = models.CharField(max_length=16, default=RunState.QUEUED.value)
+    failed_step = models.CharField(max_length=16, blank=True, default="", help_text="Set only while the run is failed.")
     created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(condition=models.Q(state__in=list(STATES)), name="cases_run_state_valid"),
+            models.CheckConstraint(condition=models.Q(failed_step__in=["", *FAILED_STEPS]), name="cases_run_failed_step_valid"),
+            models.CheckConstraint(
+                condition=(
+                    (models.Q(state=RunState.FAILED.value) & ~models.Q(failed_step=""))
+                    | (~models.Q(state=RunState.FAILED.value) & models.Q(failed_step=""))
+                ),
+                name="cases_run_failed_step_matches_state",
+            ),
+        ]
 
     def __str__(self):
         return f"WorkflowRun {self.pk}"

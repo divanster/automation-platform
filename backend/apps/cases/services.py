@@ -1,17 +1,19 @@
 """Persistence operations for revisions and approvals, on top of the pure policy.
 
-Every write goes through ``record_revision`` or ``record_approval``; there is no other
-supported way to change a run's current revision. Reads return the pure domain objects
+Every write goes through ``record_revision``, ``record_approval`` or ``transition_run``; there is no
+other supported way to change a run's current revision or state. Reads return the pure domain objects
 (``workflows.revision_approval``), which re-verify hashes and consistency on the way out.
 
-WRITES ARE SERIALIZED PER RUN. Both write operations open ``transaction.atomic()`` and lock the
-run's row with ``SELECT ... FOR UPDATE`` before reading or writing anything else for that run, so
-two competing writers for the same run run one after the other, and the second one sees the
-first one's result. This relies on PostgreSQL row locking and was written against it. Database
-tests are not run in the development VM; the project owner ran them locally against
-PostgreSQL 18.6 and they passed for the tested scenarios only (see
-docs/development/local-validation-record.md and docs/development/revision-approval-policy.md).
-That does not prove that no other race exists.
+WRITES ARE SERIALIZED PER RUN. ``record_revision``, ``record_approval`` and ``transition_run`` open
+``transaction.atomic()`` and lock the run's row with ``SELECT ... FOR UPDATE`` before reading or
+writing anything else for that run, so two competing writers for the same run run one after the
+other, and the second one sees the first one's result. This relies on PostgreSQL row locking and was
+written against it. Database tests are not run in the development VM; the project owner ran the
+revision and approval tests locally against PostgreSQL 18.6 and they passed for the tested scenarios
+only (see docs/development/local-validation-record.md and
+docs/development/revision-approval-policy.md). ``transition_run`` and ``lock_run`` were added with the
+request-intake orchestration slice and have not been run against PostgreSQL yet. None of this proves
+that no other race exists.
 
 WHAT THIS DOES NOT PROVIDE. Persistence alone does not make an export race-safe.
 ``check_persisted_export_eligibility`` is a plain read: it takes no lock and does not hold a
@@ -40,12 +42,14 @@ from .adapters import StoredApproval, findings_to_json, to_domain_revision, to_s
 from .errors import (
     ApprovalMismatchError,
     BindingMismatchError,
+    InvalidTransitionError,
     NotCurrentRevisionError,
     RecordNotFoundError,
     RevisionNumberError,
     StoredDataError,
 )
 from .models import Approval, Case, ResultRevision, WorkflowRun
+from .run_state import RunState, transition_problem
 
 
 # --- pure write rules (no database access; unit-testable without a database) ------------------
@@ -112,6 +116,40 @@ def _lock_run(run_id: UUID) -> WorkflowRun:
         return WorkflowRun.objects.select_for_update().get(pk=run_id)
     except WorkflowRun.DoesNotExist as error:
         raise RecordNotFoundError("The run does not exist.") from error
+
+
+def lock_run(run_id: UUID) -> WorkflowRun:
+    """Lock the run row until the surrounding transaction ends. Call it inside ``atomic``.
+
+    The public form of the lock every run write takes. Locking a row this transaction already holds
+    is harmless, so a caller can lock the run first and then call ``record_revision`` or
+    ``transition_run`` in the same transaction.
+    """
+    validate_uuid(run_id, "run_id")
+    return _lock_run(run_id)
+
+
+def transition_run(run_id: UUID, *, to: RunState, failed_step: str = "", allowed_from=None) -> WorkflowRun:
+    """Move the run to state ``to`` if the transition table allows it; the only way state changes.
+
+    One transaction: lock the run, check ``transition_problem`` against the stored state and failed
+    step (and, when ``allowed_from`` is given, that the stored state is one of those), then save. A
+    refusal raises ``InvalidTransitionError`` and writes nothing. ``failed_step`` is required exactly
+    when ``to`` is ``failed``; it is cleared on every other transition. Returns the updated row.
+    """
+    validate_uuid(run_id, "run_id")
+    target = RunState(to)
+    with transaction.atomic():
+        run = _lock_run(run_id)
+        if allowed_from is not None and run.state not in {RunState(state).value for state in allowed_from}:
+            raise InvalidTransitionError("state_mismatch")
+        problem = transition_problem(run.state, target, current_failed_step=run.failed_step, new_failed_step=failed_step)
+        if problem is not None:
+            raise InvalidTransitionError(problem)
+        run.state = target.value
+        run.failed_step = failed_step
+        run.save(update_fields=["state", "failed_step"])
+    return run
 
 
 def record_revision(revision: DomainRevision) -> ResultRevision:

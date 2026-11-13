@@ -3,7 +3,10 @@
 > **Status: Proposed.** Only a minimal subset exists as Django models:
 > `Case`, `WorkflowRun` (identity, case link, current-revision pointer), `ResultRevision`,
 > and `Approval` (approved decisions only), in `apps/cases`, plus the `accounts.User`
-> skeleton model; their PostgreSQL tests passed in the owner's local run (tested scenarios
+> skeleton model, plus `RequestSource`, `StepTask` and `ExtractionOutcome` in `apps/intake` and a run
+> `state` and `failed_step` on `WorkflowRun` (see
+> [request-intake-orchestration-slice.md](../development/request-intake-orchestration-slice.md); not yet run
+> against PostgreSQL); their PostgreSQL tests passed in the owner's local run (tested scenarios
 > only, see the [local validation record](../development/local-validation-record.md)). Everything else here is
 > not built. This document defines
 > entity responsibilities and relationships. Field lists are illustrative and

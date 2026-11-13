@@ -281,3 +281,11 @@ after this module was added (130 earlier plus 15 = 145) was **not reported**.
   discarded and is run again; a hard interrupt does not release the lease. These are for a later,
   separately reviewed hardening slice.
 - The queue is not connected to any workflow; there is no real AI, API, or UI.
+
+## Pending: request-intake orchestration slice (not yet validated)
+
+The request-intake orchestration slice ([slice document](request-intake-orchestration-slice.md)) has been
+written, and its DB-free tests pass in the development VM. **No PostgreSQL result exists for it.** Its 76
+PostgreSQL tests, the `cases 0002` to `0004` and `intake 0001` migrations (including their effect on a
+database that already holds runs), and the manual smoke test are all waiting for the owner's local run.
+Nothing in this record supports any claim about them until the owner pastes that output here.
