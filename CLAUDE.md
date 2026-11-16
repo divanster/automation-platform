@@ -37,9 +37,12 @@ browser against the local stack, as reported, without recorded output), plus UI-
 editing with findings beside fields and stale-revision handling, approval with warning acknowledgement, rejection with the
 API's fixed reasons, and the per-request audit history; every control follows the server's `allowed_actions`, no business
 rule is in React; see `docs/development/frontend-slice.md`, section 13; its 264 frontend tests, typecheck, production build and
-the 1246 backend DB-free tests pass in the development VM against a stubbed `fetch` only, and UI-2 has NOT yet been run against
-the real API, PostgreSQL or the worker; Django does not serve the built app). The source text in the UI, revision diffs, exports,
-password reset, multi-factor authentication, and real AI adapters are not implemented. See `README.md` and
+the 1246 backend DB-free tests pass in the development VM against a stubbed `fetch`; the owner reports one UI-2 workflow
+(submit, worker extraction, edit, approval by a second user, audit history) passing in a real browser against the local Django,
+PostgreSQL and worker, with screenshots described to Claude and not stored, see `docs/development/local-validation-record.md`;
+the stale-revision conflict and rejection were not shown there, so UI-2 is development-validated for that workflow only and not
+production-ready; Django does not serve the built app). The source text in the UI, revision diffs, document upload, exports,
+password reset, multi-factor authentication, an installer, and real AI adapters are not implemented. See `README.md` and
 `docs/architecture/README.md`. Do not describe planned components as existing.
 
 ## Working rules

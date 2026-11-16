@@ -341,3 +341,50 @@ TESTS, not in the application, and are corrected without weakening any behaviora
 
 The corrected module has 100 tests (a combined collection of 456) and has **not been rerun**; nothing in this record supports
 any claim about it until the owner reports that output here. The slice adds no model, migration, or dependency.
+
+## UI-2 request review and approval: owner-supplied browser validation (2026-11-16)
+
+> **Scope.** This records one workflow that the project owner ran in a **real browser on the local Windows computer** against
+> the real Django REST API, the local PostgreSQL 18 database and the persistent worker (`runworker`), with the React app from
+> `frontend/` (see the [slice document](frontend-slice.md), sections 13.7 and 13.7a). **Evidence type: owner-supplied
+> screenshots, described to Claude in text.** The screenshots are not stored in this repository and Claude did not see them; no
+> command output was pasted. The development VM has no PostgreSQL and did not run, repeat or observe any of it. Nothing below is
+> stronger than the owner's description.
+
+**Subject.** Request `REQ-20261116-B666BD8`; accounts `smoke-operator` (Operator) and `smoke-approver` (Approver), and one account
+authorized to view the audit history (its role was not stated).
+
+**Reported observations:**
+
+| Area | Reported result |
+| --- | --- |
+| Submission and extraction | A request submitted through React was extracted by the worker: the task succeeded on attempt 1, the run reached `needs_review`, revision 1 existed |
+| Editing | The Operator changed the requester to "Ivan Test" and a quantity from 2 to 3 (boxes), leaving the description "A4 paper"; revision 2 was created with a new SHA-256 content hash; two `value_not_in_source` warnings (`requester.name`, `items[0].quantity`) were displayed |
+| Authorization | The Operator who submitted and edited the request could not approve it; the UI offered only what the backend permitted |
+| Approval | `smoke-approver` approved revision 2; the UI showed "Revision 2 approved."; the state became approved; approvals/rejections read 1/0; both warnings stayed visible |
+| Audit history | Seven events in the real UI: request submitted; revision 1 created; run state changed to `needs_review`; revision 2 created; draft edited; revision 2 approved; run state changed to `approved`. The edit and approval events showed different actor identifiers; the approval event recorded two warnings |
+
+**What this validates (the reported workflow, this environment only):** the UI-2 editor, approval and audit screens, the REST API
+endpoints behind them (submit, detail, edit, approve, audit), the worker's extraction and the persistence in PostgreSQL work
+together for the path above. The approval succeeded for a revision with two warnings; the backend requires the acknowledgement
+to equal the revision's current warnings exactly and the audit event recorded two, which is consistent with both having been sent,
+but the screenshots do not independently show each checkbox click. Control visibility followed the backend, which shows
+role-based gating for an Operator; it does **not** exercise the self-approval rule, which concerns a user who holds the approve
+permission.
+
+**What it does not validate.** Stated plainly:
+
+- **Not demonstrated in the supplied evidence:** the stale-revision conflict flow; rejection and its confirmation; validation
+  findings beside fields after a refused draft; adding and removing items; a first edit of an invalid extraction; the stale-approval
+  path; the self-approval blocker text; keyboard-only use; small screens; browser console and storage checks; audit paging; other
+  browsers.
+- **Not covered by this evidence:** concurrency beyond what the PostgreSQL tests exercise, database-level immutability (ORM and
+  service level only), real AI (extraction is the deterministic fixture parser), document upload, a source-text review endpoint,
+  a revision diff, a Windows installer, production serving (Django does not serve `frontend/dist`; TLS, HSTS and CSP are
+  undecided), and production readiness.
+- **Known display limits:** the audit history shows actor identifiers, not names (the API returns none), and self-approval stays
+  forbidden by the backend, including for a lone user.
+- **No claim that all possible UI behavior was tested.** UI-2 is **development-validated for the tested workflow** only.
+
+This entry does not change the status of anything recorded above, in particular the REST API PostgreSQL tests in the section
+"Pending: REST API slice", which this record still shows as not rerun.

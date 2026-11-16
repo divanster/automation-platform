@@ -18,8 +18,9 @@ A local-first business process automation platform.
 > those services; DB-free tests pass; in the owner's local run 96 of its first 98 PostgreSQL tests passed and 2 failed on test defects that are now corrected, the corrected tests **not yet rerun**), and a first frontend slice (`frontend/`: a React, TypeScript and Vite app with
 > login, a request list, a new-request form and a request detail page over that API; reported by the owner as run in a real browser),
 > and UI-2 review actions in it (draft editing, approval with warning acknowledgement, rejection, per-request audit history,
-> stale-revision handling; tested in the development VM against a stubbed `fetch` only and **not yet run against the real
-> backend**). The source text in the UI, export, real AI adapters, password reset, and an installer are **not** built; nothing here is production-ready. Everything else described below is planned, not built. See the
+> stale-revision handling; tested in the development VM against a stubbed `fetch`, and one workflow reported by the owner as
+> passing in a real browser against the local Django, PostgreSQL and worker: development-validated for that workflow only,
+> not production-ready). The source text in the UI, document upload, export, real AI adapters, password reset, and an installer are **not** built; nothing here is production-ready. Everything else described below is planned, not built. See the
 > [development runbook](docs/development/runbook.md) for exactly what exists.
 
 ## Purpose
