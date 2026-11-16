@@ -30,8 +30,13 @@ the tested scenarios only; audit and record immutability are ORM-level only), pl
 Django session login and logout with CSRF protection and bounded login throttling, `/api/auth/me/`, and endpoints
 to submit, list, read, edit, approve, reject and audit requests, every one delegating to the services above; see
 `docs/development/rest-api-slice.md`; its DB-free tests pass; in the owner's local run 96 of its first 98 PostgreSQL tests
-passed and 2 failed because of test defects, since corrected (the 100 corrected tests have NOT been rerun); throttling is per process and TLS, HSTS and the HTTPS redirect are undecided). Exports, a React UI,
-password reset, multi-factor authentication, and real AI adapters are not implemented. See `README.md` and
+passed and 2 failed because of test defects, since corrected (the 100 corrected tests have NOT been rerun); throttling is per process and TLS, HSTS and the HTTPS redirect are undecided), plus a first frontend slice
+(`frontend/`: React, TypeScript and Vite, same-origin through a Vite dev proxy, session-cookie login with CSRF, a
+request list, a new-request form, and a request detail page that polls while processing; read-only, no edit, approve or
+reject; see `docs/development/frontend-slice.md`; its 143 frontend tests, typecheck and production build pass in the
+development VM against a stubbed `fetch` only, and it has NOT yet been run against the real API, PostgreSQL or the worker;
+Django does not serve the built app). Review actions in the UI, exports, password reset, multi-factor authentication, and
+real AI adapters are not implemented. See `README.md` and
 `docs/architecture/README.md`. Do not describe planned components as existing.
 
 ## Working rules
