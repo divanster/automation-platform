@@ -6,9 +6,11 @@ from dataclasses import dataclass
 from apps.modules.manifest import (
     ApiContribution,
     AuditActionDeclaration,
+    MaintenanceHookDeclaration,
     ModuleDependency,
     ModuleManifest,
     PermissionDeclaration,
+    RoleGrant,
     TaskHandlerDeclaration,
     UiContribution,
     WorkflowDeclaration,
@@ -86,8 +88,19 @@ def full_manifest(module_id: str = "full_module", **overrides) -> ModuleManifest
         ),
         api_contributions=(ApiContribution("full-module", "the api"),),
         update=UpdateMetadata(data_schema_version=3, minimum_updater_protocol=None),
+        maintenance_hooks=(MaintenanceHookDeclaration(f"{ns}.sweep", True, "bookkeeping"),),
     )
     values.update(overrides)
+    if "role_grants" not in overrides:
+        # Default grants are derived from the permissions the manifest ENDS UP with, so a test that overrides ``permissions``
+        # (or the namespaces) still builds a valid manifest: a grant may only name a permission the module declares.
+        declared = [p.permission_id for p in values["permissions"]]
+        grants = []
+        if len(declared) >= 1:
+            grants.append(RoleGrant("Operator", (declared[0],)))
+        if len(declared) >= 2:
+            grants.append(RoleGrant("Auditor", (declared[1],)))
+        values["role_grants"] = tuple(grants)
     return manifest(**values)
 
 
@@ -98,3 +111,37 @@ class ContractTestCase(unittest.TestCase):
             function(*args, **kwargs)
         self.assertEqual(caught.exception.code, code, str(caught.exception))
         return caught.exception
+
+
+def intake_like_manifest(**overrides) -> ModuleManifest:
+    """A SYNTHETIC Request Intake manifest: the permissions, scopes and default role grants the real module has today.
+
+    It exists so the pure contract can be checked against ``apps.accounts.roles`` without importing ``apps.intake``. The identifiers keep
+    the existing ``intake.*`` prefix through ``extra_namespaces``. Nothing in the application uses this object.
+    """
+    values = dict(
+        module_id="request_intake",
+        license_feature="mod.request_intake",
+        display_name="Request Intake",
+        extra_namespaces=("intake",),
+        capabilities_required=("task.enqueue", "audit.record", "case.run", "revision.approval", "permissions.check"),
+        workflows=(WorkflowDeclaration("request_intake", 1, ("request_intake.extract",)),),
+        task_handlers=(TaskHandlerDeclaration("request_intake.extract", None, "extracts a request"),),
+        permissions=(
+            PermissionDeclaration("intake.submit_request", "global", "Can submit a request"),
+            PermissionDeclaration("intake.view_own_request", "own", "Can view the requests the user submitted"),
+            PermissionDeclaration("intake.edit_own_request", "own", "Can edit the requests the user submitted"),
+            PermissionDeclaration("intake.view_any_request", "any", "Can view any request"),
+            PermissionDeclaration("intake.approve_request", "any", "Can approve a request that is waiting for review"),
+            PermissionDeclaration("intake.reject_request", "any", "Can reject a request that is waiting for review"),
+        ),
+        role_grants=(
+            RoleGrant("Operator", ("intake.submit_request", "intake.view_own_request", "intake.edit_own_request")),
+            RoleGrant("Approver", ("intake.view_any_request", "intake.approve_request", "intake.reject_request")),
+            RoleGrant("Auditor", ("intake.view_any_request",)),
+        ),
+        api_contributions=(ApiContribution("requests"),),
+        maintenance_hooks=(MaintenanceHookDeclaration("request_intake.reconcile", True, "moves runs whose task failed for good to failed"),),
+    )
+    values.update(overrides)
+    return manifest(**values)

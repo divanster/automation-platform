@@ -46,6 +46,11 @@ MANIFEST_CODES = frozenset(
         "duplicate_ui_contribution",
         "duplicate_api_route",
         "duplicate_config_field",
+        "unknown_role",
+        "duplicate_role_grant",
+        "empty_role_grant",
+        "role_grant_undeclared_permission",
+        "duplicate_maintenance_hook",
     }
 )
 
@@ -65,6 +70,11 @@ REGISTRY_CODES = frozenset(
         "capability_not_yet_available",
         "capability_provider_not_dependency",
         "undeclared_ui_permission",
+        "unknown_module",
+        "invalid_core_grants",
+        "invalid_namespace_history",
+        "namespace_released",
+        "namespace_ownership_changed",
     }
 )
 

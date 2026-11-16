@@ -37,9 +37,13 @@ RESERVED_NAMESPACES = frozenset(
     {
         "core", "test", "platform", "module", "auth", "admin", "health",
         "run", "revision", "approval", "rejection", "audit",
-        "task", "case", "document", "documents", "ai", "secrets",
+        "task", "case", "document", "documents", "ai", "secrets", "permissions",
     }
 )  # fmt: skip
+
+# The product roles a module may grant its permissions to. They are Core's three Django groups (apps.accounts.roles.ROLES); a test
+# keeps this tuple equal to that one. A module cannot define a role: new roles are a Core decision, not a manifest field.
+KNOWN_ROLES = ("Operator", "Approver", "Auditor")
 
 # First path segments of the HTTP API that Core owns.
 RESERVED_API_ROUTES = frozenset({"auth", "health", "modules", "admin"})
@@ -55,6 +59,7 @@ _SEGMENT = r"[a-z][a-z0-9_]{0,39}"
 _DOTTED = re.compile(rf"{_SEGMENT}(?:\.{_SEGMENT})*")
 _DOTTED_2 = re.compile(rf"{_SEGMENT}(?:\.{_SEGMENT})+")
 _PERMISSION = re.compile(rf"{_SEGMENT}\.[a-z][a-z0-9_]{{0,59}}")
+_HOOK_ID = re.compile(rf"{_SEGMENT}\.{_SEGMENT}")  # exactly <namespace>.<name>: never a deeper, import-path-shaped name
 _ROUTE_PREFIX = re.compile(r"[a-z][a-z0-9-]{0,39}")
 _UI_PATH = re.compile(r"/(?:[a-z0-9_:-]+(?:/[a-z0-9_:-]+)*)?")
 _CHOICE = re.compile(r"[A-Za-z0-9_.-]{1,40}")
@@ -206,12 +211,22 @@ class WorkflowDeclaration:
         }
 
 
-PERMISSION_SCOPES = ("own", "any", "global")
+PERMISSION_SCOPES = ("global", "own", "any")
 
 
 @dataclass(frozen=True)
 class PermissionDeclaration:
-    """A permission the module defines, as ``<namespace>.<codename>``. ``scope`` says what it reaches: the user's own records, any record, or no record."""
+    """A permission the module defines, as ``<namespace>.<codename>``, which is also the Django ``app_label.codename``.
+
+    ``scope`` says what the permission reaches, and it is the vocabulary the authorization services apply:
+
+    * ``global``: no particular record (for example "may submit a request");
+    * ``own``: only records the user owns (for example "may view the requests the user submitted");
+    * ``any``: any record (for example "may approve any request that is waiting for review").
+
+    The default is ``any`` (unchanged from MOD-1a), so a declaration that wants a narrower reach must say so. A scope is a DECLARATION:
+    nothing in this contract enforces it. Enforcement is the job of the authorization services, which check scope against the record.
+    """
 
     permission_id: str
     scope: str = "any"
@@ -219,12 +234,68 @@ class PermissionDeclaration:
 
     def __post_init__(self):
         _identifier(self.permission_id, "permission id", _PERMISSION, 80)
-        if self.scope not in PERMISSION_SCOPES:
-            raise ManifestError("invalid_identifier", "permission scope must be one of own, any, global")
+        if not isinstance(self.scope, str) or self.scope not in PERMISSION_SCOPES:
+            raise ManifestError("invalid_identifier", "permission scope must be one of global, own, any")
         _label(self.description, "permission description", 200)
 
     def to_dict(self) -> dict:
         return {"permission_id": self.permission_id, "scope": self.scope, "description": self.description}
+
+
+@dataclass(frozen=True)
+class RoleGrant:
+    """A DEFAULT grant: these permissions go to this role. Nothing more is granted, implicitly or by scope.
+
+    ``role`` must be one of ``KNOWN_ROLES`` (``unknown_role`` otherwise). Every permission must be declared by the SAME module
+    (``role_grant_undeclared_permission``, checked by the manifest), so a module cannot grant another module's permission or one
+    of Core's: Core's own grants are a separate, explicit input to the derivation (roles.py). A grant names at least one
+    permission and no permission twice. It is a seed for role setup and says nothing about enforcement.
+    """
+
+    role: str
+    permissions: tuple = ()
+
+    def __post_init__(self):
+        if not isinstance(self.role, str):
+            raise ManifestError("invalid_type", "a role grant's role must be text")
+        if self.role not in KNOWN_ROLES:
+            raise ManifestError("unknown_role", "a role grant names a role that does not exist (Operator, Approver, Auditor)")
+        permissions = _tuple_of(self.permissions, str, "role grant permissions")
+        if not permissions:
+            raise ManifestError("empty_role_grant", "a role grant must name at least one permission")
+        for permission in permissions:
+            _identifier(permission, "role grant permission", _PERMISSION, 80)
+        _unique(permissions, "duplicate_role_grant", "role grant permissions")
+        object.__setattr__(self, "permissions", tuple(sorted(permissions)))
+
+    def to_dict(self) -> dict:
+        return {"role": self.role, "permissions": list(self.permissions)}
+
+
+@dataclass(frozen=True)
+class MaintenanceHookDeclaration:
+    """A DECLARATION that a module will have bookkeeping work the worker runs after every iteration (a future slice wires it up).
+
+    Only declarations exist here: there is no callable, no import path and nothing that executes. ``hook_id`` is an OPAQUE NAME,
+    exactly ``<owned namespace>.<name>`` (two segments, so it can never be a deeper, import-path-shaped string), unique across the
+    registry. Nothing may ever resolve it as a path: a later slice attaches the real callable through the composition root, by id. ``while_disabled`` says whether the
+    worker should keep running the hook when the module is disabled (true for bookkeeping that must not stall, such as moving
+    runs whose task failed for good into the failed state). The module that declares the hook is the manifest it appears in;
+    the registry reports it together with that module id (``RegisteredHook``).
+    """
+
+    hook_id: str
+    while_disabled: bool = False
+    description: str = ""
+
+    def __post_init__(self):
+        _identifier(self.hook_id, "maintenance hook id", _HOOK_ID, MAX_TASK_KIND_LENGTH)
+        if not isinstance(self.while_disabled, bool):
+            raise ManifestError("invalid_type", "while_disabled must be a boolean")
+        _label(self.description, "maintenance hook description", 200)
+
+    def to_dict(self) -> dict:
+        return {"hook_id": self.hook_id, "while_disabled": self.while_disabled, "description": self.description}
 
 
 @dataclass(frozen=True)
@@ -437,6 +508,8 @@ class ModuleManifest:
     ui_contributions: tuple = ()
     api_contributions: tuple = ()
     update: UpdateMetadata = field(default_factory=UpdateMetadata)
+    role_grants: tuple = ()
+    maintenance_hooks: tuple = ()
 
     def __post_init__(self):
         self._check_identity()
@@ -561,6 +634,23 @@ class ModuleManifest:
 
         _unique([a.route_prefix for a in api], "duplicate_api_route", "api_contributions")
 
+        # Default role grants: a module may grant only what it declares itself (which, by the namespace rule above, it owns).
+        grants = _tuple_of(self.role_grants, RoleGrant, "role_grants")
+        _unique([g.role for g in grants], "duplicate_role_grant", "role_grants")
+        declared = set(permission_ids)
+        for grant in grants:
+            for permission in grant.permissions:
+                if permission not in declared:
+                    raise ManifestError("role_grant_undeclared_permission", "a role grant names a permission this module does not declare")
+
+        hooks = _tuple_of(self.maintenance_hooks, MaintenanceHookDeclaration, "maintenance_hooks")
+        hook_ids = [h.hook_id for h in hooks]
+        _unique(hook_ids, "duplicate_maintenance_hook", "maintenance_hooks")
+        for hook_id in hook_ids:
+            _owned(hook_id, namespaces, "a maintenance hook id")
+
+        object.__setattr__(self, "role_grants", tuple(sorted(grants, key=lambda g: g.role)))
+        object.__setattr__(self, "maintenance_hooks", tuple(sorted(hooks, key=lambda h: h.hook_id)))
         object.__setattr__(self, "task_handlers", handlers)
         object.__setattr__(self, "workflows", workflows)
         object.__setattr__(self, "permissions", permissions)
@@ -572,7 +662,7 @@ class ModuleManifest:
 
     def to_dict(self) -> dict:
         """A plain, JSON-ready description with every collection sorted, so declaration order does not matter. Handler objects are reduced to ``has_handler``."""
-        return {
+        document = {
             "manifest_version": self.manifest_version,
             "module_id": self.module_id,
             "module_kind": self.module_kind.value,
@@ -593,6 +683,13 @@ class ModuleManifest:
             "api_contributions": [a.to_dict() for a in sorted(self.api_contributions, key=lambda a: a.route_prefix)],
             "update": self.update.to_dict(),
         }
+        # Added after MOD-1a: written ONLY when present, so every manifest that does not use them keeps exactly the canonical form,
+        # and therefore the fingerprint, it had before. Adding an optional field to manifest v1 must not change old fingerprints.
+        if self.role_grants:
+            document["role_grants"] = [g.to_dict() for g in sorted(self.role_grants, key=lambda g: g.role)]
+        if self.maintenance_hooks:
+            document["maintenance_hooks"] = [h.to_dict() for h in sorted(self.maintenance_hooks, key=lambda h: h.hook_id)]
+        return document
 
     def canonical_json(self) -> str:
         return json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"), ensure_ascii=True)

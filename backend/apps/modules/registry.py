@@ -15,6 +15,9 @@ GUARANTEES (each pinned by tests/test_module_registry.py):
 * NO SILENT OVERWRITING. Two modules claiming the same module id, task kind, permission, audit action, workflow key, API route,
   UI contribution id, UI route path, namespace or provided capability is an error, never a "last one wins".
 * FAIL CLOSED. Any problem raises ``RegistryError`` with a stable code and builds nothing. There is no partial registry.
+* DIRECT DEPENDENCIES ONLY. ``dependencies`` and ``dependents`` list direct edges. There is no transitive query, and no capability is
+  inherited through a chain: a module that needs another module's capability names that module itself (the check
+  ``capability_provider_not_dependency``).
 * STABLE FINGERPRINT. ``fingerprint`` is the SHA-256 of the canonical form of the ordered manifests (``registry_format`` 1). It is
   meant to let the API process and the worker confirm they were built from the same modules (a skew between them is a risk).
 
@@ -31,6 +34,7 @@ import hashlib
 import heapq
 import json
 from collections.abc import Iterable, Iterator
+from dataclasses import dataclass
 from types import MappingProxyType
 
 from .errors import RegistryError
@@ -41,7 +45,7 @@ REGISTRY_FORMAT = 1
 
 # Capabilities Core provides today, each backed by existing code (apps.tasks, apps.audit, apps.cases and the revision and approval
 # services). A module may require these. Their namespaces are reserved, so no module can provide or redefine one.
-CORE_CAPABILITIES = frozenset({"task.enqueue", "audit.record", "case.run", "revision.approval"})
+CORE_CAPABILITIES = frozenset({"task.enqueue", "audit.record", "case.run", "revision.approval", "permissions.check"})
 
 # Capabilities the architecture names but that do not exist yet. Requiring one is refused with its own code, not a generic
 # "missing", so the reason is clear: the capability is planned, not built.
@@ -51,6 +55,15 @@ FUTURE_CAPABILITIES = frozenset({"documents.read", "ai.invoke", "secrets.resolve
 CORE_PERMISSIONS = frozenset({"audit.view_auditevent"})
 
 _BUILD = object()
+
+
+@dataclass(frozen=True)
+class RegisteredHook:
+    """A maintenance hook declaration together with the module that declared it. Data only: nothing here can be run."""
+
+    module_id: str
+    hook_id: str
+    while_disabled: bool
 
 
 def _claim(owners: dict, key: str, owner: str, code: str, what: str) -> None:
@@ -68,7 +81,8 @@ class ModuleRegistry:
 
     __slots__ = (
         "_modules", "_by_id", "_fingerprint", "_core_api_version", "_task_kinds", "_permissions", "_audit_actions", "_workflows",
-        "_api_routes", "_ui_contributions", "_capability_providers", "_namespace_owners",
+        "_api_routes", "_ui_contributions", "_capability_providers", "_namespace_owners", "_maintenance_hooks", "_dependencies",
+        "_dependents",
     )  # fmt: skip
 
     def __init__(self, *, _token=None, **state):
@@ -119,6 +133,11 @@ class ModuleRegistry:
         modules = tuple(by_id[module_id] for module_id in order)
 
         claims = cls._check_clashes(ordered_input)
+        hooks = tuple(
+            RegisteredHook(m.module_id, h.hook_id, h.while_disabled) for m in modules for h in sorted(m.maintenance_hooks, key=lambda h: h.hook_id)
+        )  # registration order (a dependency first, ties by module id), then hook id: deterministic
+        dependencies = {m.module_id: tuple(sorted(d.module_id for d in m.dependencies)) for m in modules}
+        dependents = {module_id: tuple(sorted(m.module_id for m in modules if module_id in dependencies[m.module_id])) for module_id in dependencies}
         cls._check_capabilities(ordered_input, by_id, claims["providers"], core_capabilities, future_capabilities)
         cls._check_ui_permissions(ordered_input, core_permissions)
 
@@ -138,6 +157,9 @@ class ModuleRegistry:
             _ui_contributions=_read_only(claims["ui_ids"]),
             _capability_providers=_read_only(claims["providers"]),
             _namespace_owners=_read_only(claims["namespaces"]),
+            _maintenance_hooks=hooks,
+            _dependencies=_read_only(dependencies),
+            _dependents=_read_only(dependents),
         )
 
     # checks ------------------------------------------------------------------------------------------------------------
@@ -203,6 +225,7 @@ class ModuleRegistry:
         ui_ids: dict = {}
         ui_paths: dict = {}
         providers: dict = {}
+        hooks: dict = {}
         namespaces: dict = {}
         for manifest in ordered:
             owner = manifest.module_id
@@ -222,6 +245,8 @@ class ModuleRegistry:
                     _claim(ui_paths, contribution.path, owner, "duplicate_ui_route", "ui route path")
             for capability in manifest.capabilities_provided:
                 _claim(providers, capability, owner, "duplicate_capability", "provided capability")
+            for hook in manifest.maintenance_hooks:
+                _claim(hooks, hook.hook_id, owner, "duplicate_maintenance_hook", "maintenance hook")
         for manifest in ordered:
             for namespace in manifest.namespaces:
                 _claim(namespaces, namespace, manifest.module_id, "duplicate_namespace", "namespace")
@@ -320,6 +345,35 @@ class ModuleRegistry:
         """namespace -> the one module that owns it (its id and its declared ``extra_namespaces``). Ownership is explicit, never inherited:
         a dependency, a dependent and a similarly named namespace own nothing of each other."""
         return self._namespace_owners
+
+    @property
+    def maintenance_hooks(self) -> tuple:
+        """Every declared maintenance hook as a ``RegisteredHook``: modules in registration order, then by hook id. Declarations only."""
+        return self._maintenance_hooks
+
+    @property
+    def dependencies(self) -> MappingProxyType:
+        """module id -> the ids of the modules it DIRECTLY depends on (sorted). Not transitive; no capability is inherited through it."""
+        return self._dependencies
+
+    @property
+    def dependents(self) -> MappingProxyType:
+        """module id -> the ids of the modules that DIRECTLY depend on it (sorted). Not transitive."""
+        return self._dependents
+
+    def dependencies_of(self, module_id: str) -> tuple:
+        """The direct dependencies of ``module_id`` (sorted ids). An unknown module is an error, not an empty answer."""
+        return self._known(self._dependencies, module_id)
+
+    def dependents_of(self, module_id: str) -> tuple:
+        """The modules that directly depend on ``module_id`` (sorted ids). An unknown module is an error, not an empty answer."""
+        return self._known(self._dependents, module_id)
+
+    @staticmethod
+    def _known(mapping, module_id) -> tuple:
+        if not isinstance(module_id, str) or module_id not in mapping:
+            raise RegistryError("unknown_module", "that module is not registered")
+        return mapping[module_id]
 
     def get(self, module_id: str) -> ModuleManifest | None:
         return self._by_id.get(module_id)
