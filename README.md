@@ -16,9 +16,10 @@ A local-first business process automation platform.
 > passed in the owner's local run, for the tested scenarios only), and a REST API slice (Django session login with CSRF
 > protection and login throttling, and endpoints to submit, list, read, edit, approve, reject and audit requests over
 > those services; DB-free tests pass; in the owner's local run 96 of its first 98 PostgreSQL tests passed and 2 failed on test defects that are now corrected, the corrected tests **not yet rerun**), and a first frontend slice (`frontend/`: a React, TypeScript and Vite app with
-> login, a request list, a new-request form and a request detail page over that API; read-only, tested in the
-> development VM against a stubbed `fetch` only and **not yet run against the real backend**). Review actions in the UI, export, real AI
-> adapters, password reset, and an installer are **not** built; nothing here is production-ready. Everything else described below is planned, not built. See the
+> login, a request list, a new-request form and a request detail page over that API; reported by the owner as run in a real browser),
+> and UI-2 review actions in it (draft editing, approval with warning acknowledgement, rejection, per-request audit history,
+> stale-revision handling; tested in the development VM against a stubbed `fetch` only and **not yet run against the real
+> backend**). The source text in the UI, export, real AI adapters, password reset, and an installer are **not** built; nothing here is production-ready. Everything else described below is planned, not built. See the
 > [development runbook](docs/development/runbook.md) for exactly what exists.
 
 ## Purpose
@@ -72,9 +73,9 @@ Exact versions in use are recorded in the
   reject, and audit events, with the initial policy decisions and the remaining security limitations
 - [REST API slice](docs/development/rest-api-slice.md): the authenticated JSON API (session login, CSRF, request
   endpoints), its error contract, examples with synthetic data, local startup, and security limitations
-- [Frontend slice UI-1](docs/development/frontend-slice.md): the React app (`frontend/`), setup and commands, running it
-  with Django and the worker, the same-origin proxy, the login and CSRF flow, tests, limitations, and the local
-  end-to-end checklist
+- [Frontend slices UI-1 and UI-2](docs/development/frontend-slice.md): the React app (`frontend/`), setup and commands, running
+  it with Django and the worker, the same-origin proxy, the login and CSRF flow, the review screens (edit, approve, reject,
+  audit history) and the API contracts they use, tests, limitations, and the local browser checklists
 
 ## Repository conventions
 

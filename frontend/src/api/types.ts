@@ -127,6 +127,51 @@ export interface RequestDetail {
   action_blockers: Record<string, string>;
 }
 
+// --- review: edit, approve, reject, audit (backend/apps/api/serializers.py, EditOutput .. AuditEventOutput) ---
+
+// The reasons a reviewer may give for a rejection. The API has no endpoint that lists them, so they are mirrored here
+// from apps.intake.policy.REJECTION_REASONS; backend/tests/test_frontend_contract.py fails if the two lists differ.
+// Free text is never accepted: the server answers 400 `validation_error` for any other value.
+export const REJECTION_REASONS = ["incorrect_content", "incomplete_content", "not_supported_by_source", "other"] as const;
+export type RejectionReason = (typeof REJECTION_REASONS)[number];
+
+export interface EditResponse {
+  revision_id: string;
+  revision_number: number;
+  content_hash: string;
+  run_state: RunState;
+  warnings: WarningPair[];
+  approval_invalidated: boolean;
+}
+
+export interface ApproveResponse {
+  approval_id: string;
+  revision_id: string;
+  content_hash: string;
+  run_state: RunState;
+  acknowledged_warnings: WarningPair[];
+}
+
+export interface RejectResponse {
+  rejection_id: string;
+  revision_id: string;
+  reason_code: string;
+  run_state: RunState;
+}
+
+export type AuditDetailValue = string | number | boolean | null;
+
+export interface AuditEvent {
+  id: number;
+  occurred_at: string;
+  actor_kind: "user" | "system";
+  actor_public_id: string | null;
+  action: string;
+  subject_type: string;
+  subject_id: string;
+  details: Record<string, AuditDetailValue>;
+}
+
 export interface ListQuery {
   page?: number;
   page_size?: number;

@@ -32,11 +32,14 @@ to submit, list, read, edit, approve, reject and audit requests, every one deleg
 `docs/development/rest-api-slice.md`; its DB-free tests pass; in the owner's local run 96 of its first 98 PostgreSQL tests
 passed and 2 failed because of test defects, since corrected (the 100 corrected tests have NOT been rerun); throttling is per process and TLS, HSTS and the HTTPS redirect are undecided), plus a first frontend slice
 (`frontend/`: React, TypeScript and Vite, same-origin through a Vite dev proxy, session-cookie login with CSRF, a
-request list, a new-request form, and a request detail page that polls while processing; read-only, no edit, approve or
-reject; see `docs/development/frontend-slice.md`; its 143 frontend tests, typecheck and production build pass in the
-development VM against a stubbed `fetch` only, and it has NOT yet been run against the real API, PostgreSQL or the worker;
-Django does not serve the built app). Review actions in the UI, exports, password reset, multi-factor authentication, and
-real AI adapters are not implemented. See `README.md` and
+request list, a new-request form, and a request detail page that polls while processing; UI-1 was run by the owner in a real
+browser against the local stack, as reported, without recorded output), plus UI-2 review actions in the same frontend (draft
+editing with findings beside fields and stale-revision handling, approval with warning acknowledgement, rejection with the
+API's fixed reasons, and the per-request audit history; every control follows the server's `allowed_actions`, no business
+rule is in React; see `docs/development/frontend-slice.md`, section 13; its 264 frontend tests, typecheck, production build and
+the 1246 backend DB-free tests pass in the development VM against a stubbed `fetch` only, and UI-2 has NOT yet been run against
+the real API, PostgreSQL or the worker; Django does not serve the built app). The source text in the UI, revision diffs, exports,
+password reset, multi-factor authentication, and real AI adapters are not implemented. See `README.md` and
 `docs/architecture/README.md`. Do not describe planned components as existing.
 
 ## Working rules
