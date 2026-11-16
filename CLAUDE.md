@@ -41,7 +41,12 @@ the 1246 backend DB-free tests pass in the development VM against a stubbed `fet
 (submit, worker extraction, edit, approval by a second user, audit history) passing in a real browser against the local Django,
 PostgreSQL and worker, with screenshots described to Claude and not stored, see `docs/development/local-validation-record.md`;
 the stale-revision conflict and rejection were not shown there, so UI-2 is development-validated for that workflow only and not
-production-ready; Django does not serve the built app). The source text in the UI, revision diffs, document upload, exports,
+production-ready; Django does not serve the built app), plus a module-contract foundation (MOD-1a: `backend/apps/modules`, a pure
+standard-library package with manifest v1, a documented SemVer subset and an immutable, deterministic static registry, and
+`backend/config/modules.py`, the composition root whose built-in tuple is EMPTY; see `docs/architecture/module-contract.md`;
+its DB-free tests pass in the development VM; NO module is registered or activated, Request Intake is NOT yet a module, nothing
+calls the registry, and there is no model, migration, endpoint, signature, license enforcement or update manager; modules that
+are admitted to a process are not sandboxed). The source text in the UI, revision diffs, document upload, exports,
 password reset, multi-factor authentication, an installer, and real AI adapters are not implemented. See `README.md` and
 `docs/architecture/README.md`. Do not describe planned components as existing.
 

@@ -35,6 +35,9 @@ implementation plan for the Automation Platform.
    scope, tests, and a stop-and-report gate.
 8. [open-questions.md](open-questions.md): unresolved decisions, grouped by when
    they are needed.
+9. [module-contract.md](module-contract.md): the module manifest, versioning, the static
+   registry (MOD-1a, a foundation with no registered module), trust boundaries, and the
+   future lifecycle and update-manager requirements.
 
 What currently exists and how to run it: [../development/runbook.md](../development/runbook.md).
 

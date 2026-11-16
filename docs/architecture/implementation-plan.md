@@ -38,6 +38,20 @@
 | 8 | Installer, backup, restore, and controlled updates | Not started |
 | 9 | Pilot and repeatable company configuration | Not started |
 
+### Module architecture track (MOD-1 to MOD-4)
+
+A parallel track that prepares independently versioned business modules, connectors and AI adapters on the shared Core. It does not
+replace a phase; it changes how Phases 5, 6 and later deliverables will be packaged. Design: [module-contract.md](module-contract.md).
+
+| Slice | Scope | Status |
+| --- | --- | --- |
+| MOD-1 | Architecture audit and module contract design | Done as a read-only audit (recorded in this document and module-contract.md) |
+| MOD-1a | Manifest v1, SemVer subset, static allowlisted registry, architecture tests | **Implemented in the development VM** (`backend/apps/modules`, `backend/config/modules.py`; DB-free tests only). The built-in tuple is **empty**; nothing activates, no model, no migration, no endpoint. Request Intake is unchanged and not yet a module. |
+| MOD-1b | Capability contracts, permission boundaries, module state table | Not started |
+| MOD-2 | Request Intake as the first registered built-in module | Not started |
+| MOD-3 | A second independent business module | Not started |
+| MOD-4 | Signed installable package lifecycle and update manager | Not started; blocked on a trust-model decision |
+
 ---
 
 ## Phase 0: Repository preflight
