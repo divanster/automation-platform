@@ -267,13 +267,16 @@ describe("what the detail shows", () => {
 });
 
 describe("allowed actions come from the backend", () => {
-  it("lists what the server allows and why other actions are blocked, and offers no review buttons yet", async () => {
+  it("lists what the server allows and why other actions are blocked, and offers a control only for what is allowed", async () => {
     installFakeApi(signedIn(sequence(detail({ allowed_actions: ["reject"], action_blockers: { approve: "self_approval_forbidden" }, submitted_by: USER_ID }))));
     renderApp(`/requests/${RUN_ID}`);
     const panel = await screen.findByRole("region", { name: "Your available actions" });
     expect(within(panel).getByText("Reject")).toBeInTheDocument();
     expect(within(panel).getByText(/Approve is not possible now: you submitted or edited this request/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /approve|reject|edit/i })).not.toBeInTheDocument();
+    // Reject is allowed, so it has a control; approve is blocked and edit is not offered, so neither has one.
+    expect(screen.getByRole("button", { name: /^Reject revision 1/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Approve/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Edit draft" })).not.toBeInTheDocument();
   });
 
   it("shows 'None right now' when the server allows nothing, and an unknown code as it is", async () => {
@@ -282,6 +285,7 @@ describe("allowed actions come from the backend", () => {
     const panel = await screen.findByRole("region", { name: "Your available actions" });
     expect(within(panel).getByText("None right now.")).toBeInTheDocument();
     expect(within(panel).getByText(/some_future_reason/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /approve|reject|edit draft/i })).not.toBeInTheDocument();
   });
 });
 

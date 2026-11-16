@@ -34,7 +34,7 @@
 | (checkpoint) | Installation feasibility experiment | Not started |
 | 5 | End-to-end workflow with deterministic test adapter | **Not complete; its first orchestration slice is written** (`apps/intake`: submit, queue, extract, validate, canonicalize, record, `needs_review`, failure reconciliation; DB-free tests pass; its 76 PostgreSQL tests and a manual smoke test passed in the owner's local run, tested scenarios only; see [request-intake-orchestration-slice.md](../development/request-intake-orchestration-slice.md)). A review-services slice adds edit, approve and reject services with audit events (its PostgreSQL tests and a smoke test passed in the owner's local run, tested scenarios only; see [review-services-slice.md](../development/review-services-slice.md)). A REST API slice exposes submit, review, approval, rejection and audit (PostgreSQL tests written, **not run**; see [rest-api-slice.md](../development/rest-api-slice.md)). Export, the React UI, and real AI are not built |
 | 6 | Real AI adapters and policy enforcement | Not started |
-| 7 | Minimal frontend | Not started |
+| 7 | Minimal frontend | **Partly implemented; phase not complete** (`frontend/`, UI-1 and UI-2: sign-in, request list and submission, request detail with processing status, draft editing, approval with warning acknowledgement, rejection, per-request audit history; one UI-2 workflow (submit, extract, edit, approve by a second user, audit) was run by the owner in a real browser against the local Django, PostgreSQL and worker, as reported with screenshots described to Claude, not stored; development-validated for that workflow only; see [frontend-slice.md](../development/frontend-slice.md) and the [local validation record](../development/local-validation-record.md)) |
 | 8 | Installer, backup, restore, and controlled updates | Not started |
 | 9 | Pilot and repeatable company configuration | Not started |
 
@@ -328,6 +328,16 @@ Later phases are not marked complete by this validation.
   policy test results, and known limitations.
 
 ## Phase 7: Minimal frontend
+
+> **Implementation status (2026-11-16).** Partly implemented ahead of Phases 5 and 6 being complete; see
+> [frontend-slice.md](../development/frontend-slice.md) (UI-1, UI-2). Built: sign-in, request list and text submission, request
+> detail with polling, draft editing, approval with warning acknowledgement, rejection with fixed reasons, per-request audit
+> history, and stale-revision handling, every control following the server's `allowed_actions` with no business rule in React.
+> The owner reports running one UI-2 workflow in a real browser against the real local stack (screenshots described to Claude,
+> not stored; [record](../development/local-validation-record.md)): **development-validated for that workflow only, not
+> production-ready.** Not built: document upload, export download, failure, cancel and retry actions, a source-text review
+> endpoint, revision diffs, serving by Django, an installer, real AI. The stale-revision conflict and rejection were not shown in
+> the reported browser run. The stop-and-report gate (a usability review session) has not been held.
 
 - **Goal:** a minimal React/TypeScript UI for the first workflow.
 - **Deliverables:** screens for upload, case and run status, draft review and
