@@ -33,3 +33,7 @@ models/
 
 # Local Claude Code settings (the rest of .claude/ is tracked)
 .claude/settings.local.json
+
+# Frontend (frontend/): vite and test output; node_modules/ and dist/ are ignored above
+frontend/coverage/
+*.tsbuildinfo

@@ -15,7 +15,9 @@ A local-first business process automation platform.
 > reject services, and append-only audit events; its PostgreSQL tests, a user-migration check and a manual smoke test
 > passed in the owner's local run, for the tested scenarios only), and a REST API slice (Django session login with CSRF
 > protection and login throttling, and endpoints to submit, list, read, edit, approve, reject and audit requests over
-> those services; DB-free tests pass; in the owner's local run 96 of its first 98 PostgreSQL tests passed and 2 failed on test defects that are now corrected, the corrected tests **not yet rerun**). A React UI, export, real AI
+> those services; DB-free tests pass; in the owner's local run 96 of its first 98 PostgreSQL tests passed and 2 failed on test defects that are now corrected, the corrected tests **not yet rerun**), and a first frontend slice (`frontend/`: a React, TypeScript and Vite app with
+> login, a request list, a new-request form and a request detail page over that API; read-only, tested in the
+> development VM against a stubbed `fetch` only and **not yet run against the real backend**). Review actions in the UI, export, real AI
 > adapters, password reset, and an installer are **not** built; nothing here is production-ready. Everything else described below is planned, not built. See the
 > [development runbook](docs/development/runbook.md) for exactly what exists.
 
@@ -70,6 +72,9 @@ Exact versions in use are recorded in the
   reject, and audit events, with the initial policy decisions and the remaining security limitations
 - [REST API slice](docs/development/rest-api-slice.md): the authenticated JSON API (session login, CSRF, request
   endpoints), its error contract, examples with synthetic data, local startup, and security limitations
+- [Frontend slice UI-1](docs/development/frontend-slice.md): the React app (`frontend/`), setup and commands, running it
+  with Django and the worker, the same-origin proxy, the login and CSRF flow, tests, limitations, and the local
+  end-to-end checklist
 
 ## Repository conventions
 

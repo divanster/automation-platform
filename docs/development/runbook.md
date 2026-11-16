@@ -780,7 +780,7 @@ be updated when that is done and confirmed.
 | Business workflow beyond that: documents, a login mechanism, exports | Not implemented |
 | Task queue and background worker ([details](persistent-worker-slice.md)) | **Implemented** (first slice); the PostgreSQL tests passed in the owner's local run, tested scenarios only |
 | AI gateway and any AI adapter | Not implemented |
-| Frontend | Not implemented |
+| Frontend (`frontend/`; React, TypeScript, Vite; [details](frontend-slice.md)) | **Written** (UI-1: login, request list, new request, request detail with polling; read-only). 143 frontend tests, typecheck and build pass on the VM against a stubbed `fetch`; **not yet run against the real API, PostgreSQL or the worker**. Not served by Django; run with `npm run dev` |
 | Production application server, Windows service packaging, installer | Not implemented |
 | TLS, HSTS, static file serving, log configuration, backups | Not decided or implemented |
 | Exposure of the Django admin route (`/admin/`) in production or a hub | Route exists in the skeleton; its production exposure is undecided |
