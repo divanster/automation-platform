@@ -36,7 +36,7 @@ from decimal import Decimal
 
 from .findings import Finding, FindingCode, ValidationResult
 from .paths import parse_field_path
-from .quantity import is_finite, is_number, to_decimal
+from .quantity import MAX_PADDING_ZEROS, is_finite, is_number, plain_notation_length, plain_padding_zeros, to_decimal
 from .schema import (
     Ambiguity,
     Quantity,
@@ -262,6 +262,19 @@ def _check_values_in_source(request, source_text, findings):
 
 
 def _number_in_text(value: Decimal, normalized_text: str) -> bool:
+    """True when the plain-notation form of the positive finite ``value`` occurs as a standalone number in the text.
+
+    RESOURCE SAFETY. The plain form is only built when it is safe and possible to find: (1) a value whose plain
+    form would need more than ``MAX_PADDING_ZEROS`` padding zeros (an enormous positive or negative exponent) is
+    never formatted; (2) a value whose plain form is longer than the text cannot occur in it, so it is not
+    formatted either. Both are decided from the digits and exponent alone (``quantity.plain_padding_zeros`` and
+    ``plain_notation_length``), so no string larger than the source text is ever allocated. Both answer "not
+    found", which is a WARNING here: validation stays a business check and never raises a safety error. A value
+    beyond the padding bound is then refused by canonicalization (``SerializationSafetyError``), the serialization
+    safety layer, so it can never become a revision.
+    """
+    if plain_padding_zeros(value) > MAX_PADDING_ZEROS or plain_notation_length(value) > len(normalized_text):
+        return False
     pattern = r"(?<![0-9.])" + re.escape(format(value, "f")) + r"(?![0-9]|\.[0-9])"
     return re.search(pattern, normalized_text) is not None
 

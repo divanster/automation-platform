@@ -26,8 +26,12 @@ a manual smoke test passed in the owner's local run for the tested scenarios onl
 service functions in `apps.intake.review` to edit, approve and reject a request, an immutable `Rejection`, and
 append-only audit events in `apps.audit`; see `docs/development/review-services-slice.md`; its DB-free tests
 pass, and its 135 PostgreSQL tests, the user migration and a manual smoke test passed in the owner's local run for
-the tested scenarios only; audit and record immutability are ORM-level only). A product login mechanism, exports,
-a REST API, a React UI, and real AI adapters are not implemented. See `README.md` and
+the tested scenarios only; audit and record immutability are ORM-level only), plus a REST API slice (`apps/api`:
+Django session login and logout with CSRF protection and bounded login throttling, `/api/auth/me/`, and endpoints
+to submit, list, read, edit, approve, reject and audit requests, every one delegating to the services above; see
+`docs/development/rest-api-slice.md`; its DB-free tests pass; in the owner's local run 96 of its first 98 PostgreSQL tests
+passed and 2 failed because of test defects, since corrected (the 100 corrected tests have NOT been rerun); throttling is per process and TLS, HSTS and the HTTPS redirect are undecided). Exports, a React UI,
+password reset, multi-factor authentication, and real AI adapters are not implemented. See `README.md` and
 `docs/architecture/README.md`. Do not describe planned components as existing.
 
 ## Working rules

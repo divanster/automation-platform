@@ -1,8 +1,8 @@
-"""DB-free tests: the public health endpoints must not weaken authentication elsewhere.
+"""DB-free tests: the public endpoints must not weaken authentication elsewhere.
 
-The DRF defaults are authenticated + session only. The health views opt out
-individually. These tests fail if any other API view becomes public, or if the
-global defaults change.
+The DRF defaults are authenticated + session only. The health views, the CSRF bootstrap, and the login opt
+out individually, and ONLY those: they are listed here by name. These tests fail if any other API view
+becomes public, or if the global defaults change.
 """
 
 from django.test import SimpleTestCase
@@ -12,9 +12,14 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.test import APIRequestFactory
 from rest_framework.views import APIView
 
+from apps.api import views_auth
 from apps.health import views as health_views
 
-PUBLIC_BY_DESIGN = {health_views.LivenessView, health_views.ReadinessView}
+PUBLIC_HEALTH = {health_views.LivenessView, health_views.ReadinessView}
+# The two public exceptions of the REST API (docs/development/rest-api-slice.md, sections 3 and 7): the CSRF
+# bootstrap (it must work before any login) and the login itself (CSRF-protected and throttled).
+PUBLIC_API = {views_auth.CsrfView, views_auth.LoginView}
+PUBLIC_BY_DESIGN = PUBLIC_HEALTH | PUBLIC_API
 
 
 def _api_view_classes(patterns):
@@ -42,9 +47,9 @@ class GlobalDefaultsTests(SimpleTestCase):
         self.assertIn(response.status_code, (401, 403))
 
 class PublicEndpointInventoryTests(SimpleTestCase):
-    def test_only_the_health_views_are_public(self):
+    def test_only_the_documented_views_are_public(self):
         classes = set(_api_view_classes(get_resolver().url_patterns))
-        self.assertTrue(PUBLIC_BY_DESIGN <= classes, "health views are not routed")
+        self.assertTrue(PUBLIC_BY_DESIGN <= classes, "a documented public view is not routed")
         public = {cls for cls in classes if AllowAny in cls.permission_classes or not cls.authentication_classes}
         self.assertEqual(public, PUBLIC_BY_DESIGN)
 
@@ -57,7 +62,20 @@ class PublicEndpointInventoryTests(SimpleTestCase):
                 self.assertEqual(cls.authentication_classes, [SessionAuthentication])
 
     def test_health_views_are_get_only(self):
-        for cls in PUBLIC_BY_DESIGN:
+        for cls in PUBLIC_HEALTH | {views_auth.CsrfView}:
             with self.subTest(view=cls.__name__):
                 allowed = {m.upper() for m in cls.http_method_names if hasattr(cls, m)}
                 self.assertEqual(allowed - {"OPTIONS"}, {"GET"})
+
+    def test_the_login_is_post_only(self):
+        allowed = {m.upper() for m in views_auth.LoginView.http_method_names if hasattr(views_auth.LoginView, m)}
+        self.assertEqual(allowed - {"OPTIONS"}, {"POST"})
+
+    def test_the_login_is_public_but_never_skips_csrf(self):
+        # An empty authentication_classes would skip CSRF entirely; the login must name the enforcing class.
+        self.assertEqual(views_auth.LoginView.authentication_classes, [views_auth.CsrfEnforcingAuthentication])
+        self.assertEqual(views_auth.LoginView.permission_classes, [AllowAny])
+
+    def test_the_csrf_bootstrap_has_no_authentication_and_no_side_effects_beyond_the_cookie(self):
+        self.assertEqual(views_auth.CsrfView.authentication_classes, [])
+        self.assertEqual(views_auth.CsrfView.permission_classes, [AllowAny])

@@ -35,6 +35,7 @@ PURE_TEST_MODULES = [
     "test_request_intake_validation.py",
     "test_request_intake_quantity.py",
     "test_request_intake_canonical.py",
+    "test_request_intake_decimal_safety.py",
     "test_request_intake_extraction.py",
     "test_request_intake_contract.py",
     "test_request_intake_isolation.py",
