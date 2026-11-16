@@ -5,6 +5,12 @@
 > enabled or run, no application code calls the registry, and Request Intake is **not** a module yet (that is MOD-2). It was
 > written and tested in the development VM with DB-free tests only. The design in sections 8 and 9 (lifecycle, update manager)
 > is intent, not code.
+>
+> **MOD-1b / S1a (pure capability and permission contracts)** extends the same package, still with no runtime: permission scopes,
+> default role grants, the `permissions.check` Core capability, maintenance hook **declarations**, read-only direct dependency
+> inspection, a pure derivation of the default role permission sets, and a pure namespace-continuity check (sections 3.4 to 3.7,
+> 5.5, 5.6). **Nothing here is enforced or executed**: `setup_roles`, `/api/auth/me/`, the worker and every authorization service
+> are unchanged, there is no `apps/module_host` yet, and Request Intake is still not a module.
 
 ## 1. Purpose and scope
 
@@ -60,7 +66,9 @@ manifest cannot exist; it is frozen, and every collection is copied into a tuple
 | `capabilities_required` / `capabilities_provided` | no | Dotted capability ids of at least two segments (section 3.3) |
 | `workflows` | no | `WorkflowDeclaration(workflow_key, definition_version, task_kinds, description)`; `business` modules only; the task kinds must be declared by the same module |
 | `task_handlers` | no | `TaskHandlerDeclaration(kind, handler=None, description)`; kind at most 64 characters (the `Task.kind` column) |
-| `permissions` | no | `PermissionDeclaration(permission_id, scope, description)`; `<namespace>.<codename>`; scope `own`, `any` or `global` |
+| `permissions` | no | `PermissionDeclaration(permission_id, scope, description)`; `<namespace>.<codename>`; scope `global`, `own` or `any` (section 3.5) |
+| `role_grants` | no | `RoleGrant(role, permissions)`: default grants to `Operator`, `Approver` or `Auditor`, of permissions the module itself declares (section 3.6) |
+| `maintenance_hooks` | no | `MaintenanceHookDeclaration(hook_id, while_disabled, description)`: declarations only, `hook_id` exactly `<namespace>.<name>` (section 3.7) |
 | `audit_actions` | no | `AuditActionDeclaration(action, detail_keys)`; at most 32 characters (the `AuditEvent.action` column) |
 | `configuration_schema` | no | `ConfigSchema(schema_version, fields)` of typed `ConfigField`s (`bool`, `int`, `string`, `enum`, `secret_ref`): no code, no expressions; a `secret_ref` names a secret held elsewhere and can have no default |
 | `ui_contributions` | no | `UiContribution(contribution_id, kind, path, label, permission)`; `kind` is `route` or `navigation`; `permission` is a UI hint only |
@@ -75,7 +83,7 @@ A module **owns** its `module_id` and any `extra_namespaces` as identifier prefi
 workflow key, provided capability and UI contribution id must start with an owned namespace followed by a dot. Namespaces are
 unique across modules, and a fixed set is reserved for Core and cannot be owned:
 
-`core, test, platform, module, auth, admin, health, run, revision, approval, rejection, audit, task, case, document, documents, ai, secrets`
+`core, test, platform, module, auth, admin, health, run, revision, approval, rejection, audit, task, case, document, documents, ai, secrets, permissions`
 
 so one module cannot define, shadow or collide with another module's or Core's identifiers (the existing `test.add_numbers`
 handler and the existing `run.state_changed` audit action stay Core's). `extra_namespaces` exists so a built-in module can keep
@@ -115,7 +123,8 @@ metadata; registering handlers with the worker is MOD-2.
 ### 3.4 Capabilities
 
 A capability is a named thing a module needs from Core or from another module. **Core provides today** (each backed by existing
-code): `task.enqueue`, `audit.record`, `case.run`, `revision.approval`. **Planned, not built** (requiring one is refused with
+code, or in the case of `permissions.check` the authorization services): `task.enqueue`, `case.run`, `audit.record`,
+`revision.approval`, `permissions.check`. **Planned, not built** (requiring one is refused with
 `capability_not_yet_available`): `documents.read`, `ai.invoke`, `secrets.resolve`. A module may provide capabilities in its own
 namespaces.
 
@@ -128,6 +137,76 @@ defined and that a module cannot start to "work" because an unrelated dependency
 later changed, the failure would otherwise appear in the wrong place.
 
 Capabilities are declarations used for validation and ordering; MOD-1a enforces nothing at run time.
+
+**The five Core capabilities and what each will mean** (the contract names them; a later slice, S6, adds a thin facade that delegates
+to the existing services unchanged; no capability can be called today):
+
+| Capability | Meaning for a module | Existing service it will delegate to |
+| --- | --- | --- |
+| `task.enqueue` | Enqueue tasks of kinds the module declares, with idempotency keys in its own namespace | `apps.tasks.services.enqueue_task` |
+| `case.run` | Create cases and runs for workflows the module declares, and move them through the Core run states | `apps.cases.services` (`create_case`, `create_run`, `transition_run`) |
+| `audit.record` | Record events whose actions the module declares, inside the operation's transaction | `apps.audit.recorder.record_event` |
+| `revision.approval` | Create revisions and record approvals and rejections through the Core policy | `apps.cases.services` and the pure `workflows.revision_approval` policy |
+| `permissions.check` | Ask whether a user may act, using permissions the module itself declares (or Core's listed ones), with the own/any/superuser rules | `apps.accounts.authz.load_actor` and the access rules (today in `apps.intake.access`) |
+
+`permissions.check` belongs to Core: the `permissions` namespace is reserved, so no module can provide it, and a module cannot
+provide any of the five either (it would need to own a reserved namespace). Requiring an unknown capability is `missing_capability`;
+requiring a planned one is `capability_not_yet_available`. **Capability execution does not exist**: a test checks that the package
+defines no function or class with the names of the services it will one day delegate to.
+
+### 3.5 Permissions and scopes
+
+A permission id is `<namespace>.<codename>` and is also the Django `app_label.codename`, so a built-in module's permissions are
+backed by a model's `Meta.permissions` (as `RequestSource` does for the existing `intake.*` permissions; Django creates a permission
+only for a model). The module must own the namespace; Request Intake keeps its existing ids through `extra_namespaces=("intake",)`.
+The `scope` says what the permission reaches:
+
+| Scope | Reaches | Example (Request Intake today) |
+| --- | --- | --- |
+| `global` | No particular record | `intake.submit_request` |
+| `own` | Only records the user owns | `intake.view_own_request`, `intake.edit_own_request` |
+| `any` | Any record | `intake.view_any_request`, `intake.approve_request`, `intake.reject_request` |
+
+A scope is a **declaration**. Nothing in the contract applies it: the authorization services check scope against the stored record,
+as they do now. The default scope is `any` (unchanged from MOD-1a), so a declaration that wants a narrower reach states it. A test
+checks that the synthetic Request Intake declarations use scopes consistent with how `apps.intake.access` uses each permission.
+
+### 3.6 Default role grants
+
+A `RoleGrant(role, permissions)` seeds a **default** grant to one of the three existing groups, `Operator`, `Approver` or `Auditor`
+(`KNOWN_ROLES`, kept equal to `apps.accounts.roles.ROLES` by a test). Owner decision: no new roles in this slice; a module cannot
+define a role. Rules, each enforced and tested:
+
+1. A module may grant **only permissions it declares itself** (`role_grant_undeclared_permission`). Because a declared permission
+   must be in an owned namespace, this also means **no cross-module grants** and no grant of a Core permission by a module.
+2. An unknown role is refused (`unknown_role`); a role granted twice by one module, or a permission twice in one grant, is refused
+   (`duplicate_role_grant`); a grant must name at least one permission (`empty_role_grant`).
+3. **No implicit permissions.** A declared permission that no grant lists belongs to no role, whatever its scope; a scope never
+   grants anything.
+4. Grants are immutable, sorted, and part of the canonical form, so they are part of the fingerprint. A manifest that uses neither
+   `role_grants` nor `maintenance_hooks` keeps exactly the canonical form, and fingerprint, it had before they existed.
+
+**Derivation.** `derive_role_permissions(registry)` returns `role -> frozenset(permission ids)` for the three roles, in a fixed order:
+Core's own grants (`CORE_ROLE_GRANTS`: the Auditor reads the audit history, a Core permission no module declares) united with every
+registered module's grants. It does not depend on registration order, ignores whether a module is enabled (so disabling never silently
+revokes access), and is **not** wired to `setup_roles` or to `/api/auth/me/`: `apps/accounts/roles.py` remains the source of truth.
+`derive_all_permissions(registry)` returns every declared permission plus Core's (the set `/me` may report).
+
+**Golden equivalence (tested).** A synthetic Request Intake manifest (`tests/module_support.py`, built without importing
+`apps.intake` into `apps.modules`) derives **exactly** the existing `apps.accounts.roles.ROLE_PERMISSIONS` and `ALL_PERMISSIONS`, role
+by role, including the Auditor's Core permission; a guard test changes one grant and checks that the equivalence then fails. A
+Django-runner test also checks that the synthetic permission ids and descriptions equal the real `RequestSource` model's
+`Meta.permissions`.
+
+### 3.7 Maintenance hook declarations
+
+A `MaintenanceHookDeclaration(hook_id, while_disabled, description)` declares that a module will have bookkeeping work the worker runs
+after every iteration (today Request Intake's reconciler is such a thing). **Only the declaration exists.** There is no callable, no
+import path and nothing that executes; `hook_id` is an **opaque name**, exactly `<owned namespace>.<name>` (two segments, so it cannot
+be a deeper, import-path-shaped string), unique across the registry, and nothing may ever resolve it as a path: a later slice
+attaches the real callable through the composition root, by id. `while_disabled` says whether the worker keeps running the hook while
+the module is disabled (true for bookkeeping that must not stall). The registry lists hooks as `RegisteredHook(module_id, hook_id,
+while_disabled)`, deterministically: modules in registration order, then hook id. `worker.py` is not changed.
 
 ## 4. Versioning
 
@@ -211,7 +290,9 @@ every raised code is declared) and a message that never echoes a submitted value
 `duplicate_*` within one module); registry (`duplicate_module_id`, `duplicate_namespace`, `duplicate_ui_route`,
 `incompatible_core_api`, `unsupported_updater_protocol`, `missing_dependency`, `incompatible_dependency_version`,
 `dependency_cycle`, `missing_capability`, `capability_not_yet_available`, `capability_provider_not_dependency`,
-`undeclared_ui_permission`, `invalid_manifest_object`).
+`undeclared_ui_permission`, `invalid_manifest_object`, `unknown_module`, `invalid_core_grants`, `invalid_namespace_history`,
+`namespace_released`, `namespace_ownership_changed`). S1a added the manifest codes `unknown_role`, `duplicate_role_grant`,
+`empty_role_grant`, `role_grant_undeclared_permission` and `duplicate_maintenance_hook`.
 
 ### 5.4 The composition root
 
@@ -220,6 +301,22 @@ every raised code is declared) and a message that never echoes a submitted value
 no setting with dotted paths, no entry points, no import by name. In MOD-1a the tuple is empty. Because a future module's manifest
 will live in the module's own package, which imports Django models, the exact loading mechanism (a function that imports lazily,
 after Django's app registry is ready) is decided in MOD-2.
+
+### 5.5 Direct dependency inspection
+
+`registry.dependencies` and `registry.dependents` are read-only mappings (`module id -> sorted tuple of ids`) of the **direct** edges,
+and `dependencies_of(id)` and `dependents_of(id)` answer for one module; an unknown module is `unknown_module`, never an empty answer.
+There is deliberately **no transitive query**, and no capability is inherited through a chain (the strict direct-provider rule,
+section 3.4). A future disable operation uses `dependents` to refuse disabling a module that an enabled module depends on.
+
+### 5.6 Namespace continuity across releases
+
+`apps/modules/continuity.py` holds the rule as pure code (owner decision: ownership is preserved across releases). Given the earlier
+claims as a plain mapping `namespace -> module id`, `check_namespace_continuity(history, registry)` refuses a namespace that now
+belongs to a different module (`namespace_ownership_changed`) and one that nobody claims any more (`namespace_released`, because its
+identifiers may still be stored); a module may add namespaces. `next_namespace_history(history, registry)` returns the history to
+keep. **Nothing stores the history and nothing calls these functions yet**: the later module-state and update slices will keep the
+history in the database and run the check before a release is activated.
 
 ## 6. Compatibility rules (summary)
 
@@ -259,8 +356,21 @@ provider; significant external actions need human approval; AI output is validat
 | Upgrade | New version beside the old; runs stay pinned to their workflow definition version; migrations forward-only | Same, with rollback metadata | Version handshake |
 | Uninstall | Not possible for built-ins (disable only) | Disable, then data kept by default; purging is an explicit audited action | Remove the endpoint |
 
-Open points that shape this: what happens to queued tasks of a disabled module (hold or fail; a hold probably needs the claim query
-to filter by kind) and how API and worker agree on the enabled set.
+**Owner decisions (MOD-1b audit), still design intent, none built:**
+
+- **Disabling is read-only mode.** New writes through the module are blocked; queued tasks of the module are **held** (not failed);
+  attempts already running are allowed to finish; historical records stay readable. A hold needs the worker's claim step to take
+  only kinds that are enabled, version-matched and known to the worker, and maintenance hooks declared `while_disabled=True` keep
+  running. S2 changes the worker for this; S1a does not touch it.
+- **Runtime state lives in a separate `apps/module_host` Django app** (a future `ModuleState`, namespace claims, sync/enable/disable
+  commands). `apps/modules` stays pure and gains no models. S1a only prepares the pure inputs that app will use: the registry,
+  `dependents_of` (refuse to disable a module an enabled one needs), `derive_role_permissions` and the namespace continuity check.
+- **Roles.** The existing Operator, Approver and Auditor groups stay; modules supply default grants to them and add no role.
+- **Updates.** A module release may change its permissions, hooks and capabilities, but never the owner of a namespace
+  (section 5.6). A Core release that adds a capability only adds to `CORE_CAPABILITIES`; a manifest that needs one the running Core
+  lacks fails with `missing_capability`, which is how a module update can be refused cleanly.
+
+How API and worker agree on the enabled set remains open (the registry fingerprint is the proposed comparison).
 
 ## 9. Future Update Manager requirements
 
@@ -269,7 +379,11 @@ An update manager does not exist and is **not** part of MOD-1a. When it is desig
 - **Namespace continuity.** Refuse any release in which a namespace (a module id or an `extra_namespace`) that an earlier release of
   another module id owned is claimed by a different module id, and refuse a release that drops a namespace whose identifiers are
   still stored (permissions, audit actions, task kinds, workflow keys). A single registry cannot see across releases, so this check
-  belongs to the update path (owner decision on `extra_namespaces`, requirement 4).
+  belongs to the update path (owner decision on `extra_namespaces`, requirement 4). The pure rule exists since S1a
+  (`apps/modules/continuity.py`, section 5.6); storing the history and calling the check remain to be built.
+- **Permission and capability changes.** Compare a release's role grants and required capabilities with the installed ones, show the
+  difference to the administrator before activation, and never apply a changed default grant to existing groups silently: grants
+  are seeds, and an administrator's later changes to a group are not overwritten.
 
 - **Signed packages.** Verify a vendor signature, against a pinned key, before reading anything else in a package; refuse downgrades
   and revoked versions; protect against archive path traversal; never execute package content during verification. The signature
@@ -298,7 +412,14 @@ An update manager does not exist and is **not** part of MOD-1a. When it is desig
 - No configuration storage or value validation (only schema declarations), no secrets store, no document storage, no AI gateway.
 - No license enforcement, no signatures, no package format, no installer, no update manager, no marketplace.
 - No sandbox; see section 7.
-- Capability and permission declarations are not enforced at run time.
+- Capability and permission declarations are not enforced at run time. Permission scopes are declarations; the default scope is `any`.
+- Default role grants are not wired: `setup_roles`, `/api/auth/me/` and `apps/accounts/profile.py` still use `apps/accounts/roles.py`,
+  and nothing calls `derive_role_permissions`. Roles are fixed to the existing three.
+- Maintenance hooks are declarations: `apps/tasks/worker.py` still has its single `after_iteration` hook and does not read them.
+  A hook id is not resolved to code anywhere.
+- No `ModuleState`, no `apps/module_host`, no enable/disable, no persisted namespace history; the continuity check is not called.
+- No capability facade exists (`task.enqueue` and the others are names a manifest may require, nothing a module can call).
+- Request Intake has no manifest in the application; the synthetic one in `tests/module_support.py` exists only for the golden test.
 - Only manifest version 1; no pre-release versions.
 
 ## 11. Open decisions (for later slices)
@@ -312,9 +433,11 @@ An update manager does not exist and is **not** part of MOD-1a. When it is desig
    ([data-model.md](data-model.md), `WorkflowDefinition`).
 5. **Result schema versioning and the content hash** ([open-questions.md](open-questions.md), 2.14), before a second module
    produces revisions.
-6. **Permission model for installable modules:** Django permissions declared on a model (works for built-ins) versus a Core
-   permission registry table.
-7. **Disabling a module** that has queued tasks.
+6. **Permission model for installable modules:** namespaced permissions and the existing three roles are decided (owner,
+   MOD-1b); still open is how an installable package without models gets Django permission rows (Django creates them only for a
+   model), versus a Core permission registry table. Built-ins keep `Meta.permissions`.
+7. **Disabling a module:** decided as read-only mode (section 8); the worker claim filter, the state storage and the API/worker
+   agreement on the enabled set are still to be built (S2, S4).
 8. **Trust model:** first-party modules only, third-party in-process Python, or external isolated services.
 9. **What "Core API v1" contains** and how it is versioned.
 10. **Frontend contributions:** a build-time static registry (proposed), declarative screens, or remote code (not proposed).
@@ -322,7 +445,13 @@ An update manager does not exist and is **not** part of MOD-1a. When it is desig
 
 ## 12. Tests and files
 
-Pure-domain tests (plain `unittest`, no Django, no database): `tests/test_module_manifest.py`, `tests/test_module_registry.py`;
-Django-runner static tests: `tests/test_module_boundaries.py` (imports, "not a Django app", nothing activated, existing worker
-composition and routes unchanged); shared helpers `tests/module_support.py`. Source: `backend/apps/modules/{__init__,manifest,versions,registry,errors}.py`
-and `backend/config/modules.py`. Existing Request Intake, worker, API and frontend code is unchanged.
+Pure-domain tests (plain `unittest`, no Django, no database): `tests/test_module_manifest.py`, `tests/test_module_registry.py`, and
+from S1a `tests/test_module_permissions.py` (scopes, role grants, derivation, golden equivalence with `apps.accounts.roles`),
+`tests/test_module_capabilities_hooks.py` (capability contracts, hook declarations, ordering, direct dependency inspection) and
+`tests/test_module_continuity.py`. Django-runner static tests: `tests/test_module_boundaries.py` (imports, "not a Django app",
+nothing activated, existing worker composition and routes unchanged) and, from S1a, `tests/test_module_golden_django.py` (the
+synthetic Request Intake permissions equal the real model's `Meta.permissions`; `setup_roles`, the profile and the authz code do not
+reference `apps.modules`). Shared helpers: `tests/module_support.py`. Source:
+`backend/apps/modules/{__init__,manifest,versions,registry,errors,roles,continuity}.py` and `backend/config/modules.py`. Existing
+Request Intake, worker, API and frontend code is unchanged. All of these were run in the development VM without a database; the
+PostgreSQL-backed suite was not run there.
