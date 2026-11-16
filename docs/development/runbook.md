@@ -157,10 +157,10 @@ absolute paths and are not portable.
 
 ## 3. Environment configuration
 
-The application reads **process environment variables only**. It does not read a
-`.env` file and has no dotenv dependency (a dependency would add a package for
-something a few lines of PowerShell can do). Variables are documented, with
-placeholders, in `.env.example`. These are the variables read by
+The settings read **process environment variables only**; they never open a file. For local development,
+`manage.py` fills in the variables that are not already set from a git-ignored **`.env` file in the repository root**
+before Django starts (`backend/config/localenv.py`, a small standard-library module; there is no dotenv dependency).
+Variables are documented, with placeholders, in `.env.example`. These are the variables read by
 `backend/config/settings/`:
 
 | Variable | Used by | Notes |
@@ -173,31 +173,68 @@ placeholders, in `.env.example`. These are the variables read by
 | `AP_CSRF_TRUSTED_ORIGINS` | production optional | Comma-separated explicit origins |
 | `AP_RUN_DB_TESTS` | tests | Only `1` enables PostgreSQL-backed tests |
 
-**On the VM, no real database variables are configured.** On the local computer,
-section 6, part E sets the `AP_DB_*` variables for one PowerShell window at a
-time. A local, git-ignored `.env` file is optional; if you use one, fill it in
-yourself, never commit it, and load it into the current session:
+**On the VM, no real database variables are configured and no `.env` exists.** On the local computer, create the
+file once and every `manage.py` command picks it up, in any terminal:
 
 ```powershell
+cd C:\Projects\newnew\automation-platform          # the repository root
 Copy-Item .env.example .env
-# edit .env (the password is typed by you and never shared), then:
-Get-Content .env | Where-Object { $_ -match '^\s*[A-Za-z_][A-Za-z0-9_]*=' } | ForEach-Object {
-    $name, $value = $_ -split '=', 2
-    Set-Item -Path "Env:$($name.Trim())" -Value $value.Trim()
-}
+notepad .env                                       # fill in AP_DB_NAME, AP_DB_USER, AP_DB_PASSWORD yourself
 ```
+
+`.env` is git-ignored (`.gitignore` lists `.env` and `.env.*`, with `!.env.example`); check with
+`git status`, which must never list it. Never commit it, paste it into a chat, or put real values in `.env.example`.
+
+**Loading rules** (pinned by `backend/tests/test_localenv.py`):
+
+- **Who reads it.** Only `manage.py`, and only when the settings module is `config.settings.development` (the default).
+  `--settings=...` or `DJANGO_SETTINGS_MODULE` naming any other module, `wsgi.py`, `asgi.py` and the production settings
+  read no file. A deployment supplies real environment variables.
+- **Precedence.** A variable already set in the terminal always wins, **even if it is set to an empty string**
+  (`$env:AP_DB_PASSWORD = ""` would hide the file's value). The file only fills in what is missing. To see which `AP_*`
+  names a terminal currently defines (names only): `Get-ChildItem Env: | Where-Object Name -like "AP_*" | Select-Object -ExpandProperty Name`.
+- **Format.** `NAME=value` per line; only names starting `AP_`; `#` starts a comment only at the beginning of a line, so a
+  `#` inside a value is kept; surrounding quotes are removed (use them to keep leading or trailing spaces); no `$VAR` or
+  `%VAR%` expansion; each name once; UTF-8 with or without a BOM (Notepad's default is fine).
+- **Missing file.** Not an error. If the database variables are then also missing, opening a connection fails; there is no SQLite
+  fallback. Commands that never connect (`check`, DB-free tests) still work.
+- **Invalid file.** `manage.py` stops with `Error in .env (see .env.example): line N: <rule>`. The message never contains a
+  value from the file, and nothing from the file is applied.
+- **No output.** Loading prints and logs nothing. To confirm that it worked without showing secrets:
+  `python manage.py shell -c "from django.conf import settings as s; d = s.DATABASES['default']; print(d['NAME'], d['USER'], d['HOST'], d['PORT'], bool(d['PASSWORD']))"`
+  (this opens no connection).
+- **Tests.** `manage.py test` also loads `.env`. The test helpers that check the settings clear every `AP_*` variable first, so
+  they are not influenced by it. Do **not** put `AP_RUN_DB_TESTS` in `.env`; set it in the terminal for the one PostgreSQL
+  test command (section 5), so an ordinary test run never touches the database.
+
+Section 6, part E sets the `AP_DB_*` variables for one PowerShell window instead; that still works and, by the precedence rule,
+overrides the file.
 
 Settings modules: `manage.py` defaults to `config.settings.development`;
 `wsgi.py` and `asgi.py` default to `config.settings.production`.
 
 ## 4. Starting the development server
 
-On the **local computer**, after the database is provisioned (section 6):
+On the **local computer**, after the database is provisioned (section 6) and `.env` is filled in (section 3), nothing
+needs to be set in the terminal. Use one terminal per process, each from the repository root:
 
 ```powershell
+# Terminal 1: Django API
 cd backend
-python manage.py runserver        # binds to 127.0.0.1:8000 by default
+python manage.py runserver 127.0.0.1:8010          # 127.0.0.1:8000 if you omit the address
+
+# Terminal 2: the worker (reads the same .env; without it requests stay "Queued")
+cd backend
+python manage.py runworker
+
+# Terminal 3: the web UI (only if you use it; see frontend-slice.md)
+cd frontend
+$env:AP_DEV_BACKEND = "http://127.0.0.1:8010"       # omit if Django uses port 8000
+npm run dev                                         # http://localhost:5173/
 ```
+
+The first time on a new database: `python manage.py migrate`, `python manage.py setup_roles`, then
+`python manage.py createsuperuser` (all from `backend\`, all read the same `.env`).
 
 The REST API is served by the same process under `/api/` (login, request endpoints; health stays public). Run the
 worker in a second window (`python manage.py runworker`) so submitted requests are extracted. How to sign in, the
@@ -781,6 +818,7 @@ be updated when that is done and confirmed.
 | Task queue and background worker ([details](persistent-worker-slice.md)) | **Implemented** (first slice); the PostgreSQL tests passed in the owner's local run, tested scenarios only |
 | AI gateway and any AI adapter | Not implemented |
 | Frontend (`frontend/`; React, TypeScript, Vite; [details](frontend-slice.md)) | **Written** (UI-1: login, request list, new request, request detail with polling; read-only). 143 frontend tests, typecheck and build pass on the VM against a stubbed `fetch`; **not yet run against the real API, PostgreSQL or the worker**. Not served by Django; run with `npm run dev` |
+| Local `.env` loading (`manage.py` only, development settings only, existing variables win; [section 3](#3-environment-configuration)) | **Implemented**; 42 DB-free tests; checked end to end on the VM with a temporary fake `.env` (deleted); **not yet used with the real local database** |
 | Production application server, Windows service packaging, installer | Not implemented |
 | TLS, HSTS, static file serving, log configuration, backups | Not decided or implemented |
 | Exposure of the Django admin route (`/admin/`) in production or a hub | Route exists in the skeleton; its production exposure is undecided |

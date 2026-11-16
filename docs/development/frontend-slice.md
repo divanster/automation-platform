@@ -57,10 +57,10 @@ npm run build           # typecheck + production build into frontend/dist (git-i
 Three terminals. The backend steps are the runbook's; nothing about them changes.
 
 ```powershell
-# 1. Django (from backend\, with your usual AP_DB_* environment loaded; see runbook section 3)
+# 1. Django (from backend\; the database settings come from the repository's .env, see runbook section 3)
 python manage.py runserver 127.0.0.1:8010
 
-# 2. The worker (same environment). Without it requests stay "Queued" forever.
+# 2. The worker (from backend\, same .env). Without it requests stay "Queued" forever.
 python manage.py runworker
 
 # 3. The frontend, pointing the proxy at Django

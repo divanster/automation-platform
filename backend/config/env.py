@@ -1,7 +1,8 @@
 """Helpers for reading configuration from process environment variables.
 
-Settings read ``os.environ`` only. No ``.env`` file is read by the application;
-see docs/development/runbook.md for how a developer supplies variables.
+Settings read ``os.environ`` only. They never read a ``.env`` file themselves. For local development,
+``manage.py`` fills in missing variables from the repository's git-ignored ``.env`` before Django starts
+(``config/localenv.py``; development settings only, existing variables win). See docs/development/runbook.md, section 3.
 """
 
 import os
