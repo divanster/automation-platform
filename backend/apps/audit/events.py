@@ -29,6 +29,10 @@ ACTION_RUN_STATE_CHANGED = "run.state_changed"
 ACTION_APPROVAL_RECORDED = "approval.recorded"
 ACTION_APPROVAL_INVALIDATED = "approval.invalidated"
 ACTION_REJECTION_RECORDED = "rejection.recorded"
+# MOD-1b S4: the module host (apps.module_host) enables and disables modules. ``module`` is a namespace the module contract reserves for
+# Core, so no module can declare these two; they are Core's own actions, recorded with the ``module`` subject type.
+ACTION_MODULE_ENABLED = "module.enabled"
+ACTION_MODULE_DISABLED = "module.disabled"
 
 ACTIONS = (
     ACTION_REQUEST_SUBMITTED,
@@ -38,13 +42,15 @@ ACTIONS = (
     ACTION_APPROVAL_RECORDED,
     ACTION_APPROVAL_INVALIDATED,
     ACTION_REJECTION_RECORDED,
+    ACTION_MODULE_ENABLED,
+    ACTION_MODULE_DISABLED,
 )
 
 SUBJECT_RUN = "run"
 SUBJECT_REVISION = "revision"
 SUBJECT_APPROVAL = "approval"
 SUBJECT_REJECTION = "rejection"
-SUBJECT_MODULE = "module"  # a module as a subject (enabling, disabling); no event of this subject exists yet
+SUBJECT_MODULE = "module"  # a module as a subject: ``module.enabled`` and ``module.disabled`` (S4); ``subject_id`` is the ModuleState id
 SUBJECT_TYPES = (SUBJECT_RUN, SUBJECT_REVISION, SUBJECT_APPROVAL, SUBJECT_REJECTION, SUBJECT_MODULE)
 
 ACTOR_USER = "user"  # a login user, identified by ``User.public_id``
@@ -61,6 +67,9 @@ DETAIL_KEYS = MappingProxyType(
         ACTION_APPROVAL_RECORDED: frozenset({"revision_id", "content_hash", "warning_count"}),
         ACTION_APPROVAL_INVALIDATED: frozenset({"revision_id", "by_revision_id", "approval_count"}),
         ACTION_REJECTION_RECORDED: frozenset({"revision_id", "content_hash", "reason_code"}),
+        # identifiers, a version and a fingerprint only; ``cause`` is a short token such as ``admin_command`` or ``sync``
+        ACTION_MODULE_ENABLED: frozenset({"module_id", "installed_version", "registry_fingerprint", "cause"}),
+        ACTION_MODULE_DISABLED: frozenset({"module_id", "installed_version", "registry_fingerprint", "cause"}),
     }
 )
 

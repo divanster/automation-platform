@@ -36,7 +36,8 @@ implementation plan for the Automation Platform.
 8. [open-questions.md](open-questions.md): unresolved decisions, grouped by when
    they are needed.
 9. [module-contract.md](module-contract.md): the module manifest, versioning, the static
-   registry (MOD-1a, a foundation with no registered module), trust boundaries, and the
+   registry (MOD-1a, a foundation with no registered module), the persistent module state, sync and
+   enable/disable and the worker gate (MOD-1b / S4, committed locally, PostgreSQL tests not run), trust boundaries, and the
    future lifecycle and update-manager requirements.
 
 What currently exists and how to run it: [../development/runbook.md](../development/runbook.md).

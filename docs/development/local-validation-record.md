@@ -528,3 +528,23 @@ The section "Pending: REST API slice" above is **not changed** by this entry, be
   or machine, or that no other race exists.
 - **This is not a production-readiness claim.** The other limits recorded above (`listen_addresses`, per-process login throttling, undecided TLS and
   HSTS, ORM-level immutability) are unchanged.
+
+## MOD-1b / S4 module host (persistent module state, enable/disable, worker gate): PENDING, NOT RUN
+
+> **Scope.** S4 adds `apps/module_host` (`ModuleState`, the append-only `ModuleNamespaceClaim`, migration `module_host.0001_initial`), a module sync,
+> audited enable and disable administrator commands, a status command, and installs the S2 kind gate in the production worker composition (branch
+> `feat/module-runtime-state`, **committed locally, not pushed**; see [module-contract.md](../architecture/module-contract.md), section 3.11).
+
+**Nothing in this entry was run on PostgreSQL by anybody.** The development VM has no PostgreSQL and no result has been supplied by the owner.
+
+| Item | Status |
+| --- | --- |
+| DB-free tests (198 new; 1914 in all), Django system checks, migration-state check without a database, `compileall`, `git diff --check` | Pass in the development VM |
+| Migration `module_host.0001_initial` applied to a PostgreSQL database | **NOT RUN** (the DDL was previewed without a connection: three `CREATE TABLE`s and three `CREATE INDEX`es) |
+| `tests/test_module_host_postgres.py` (73 tests) | **NOT RUN** |
+| The existing PostgreSQL suites with the gate installed (`test_intake_postgres` end to end, `test_tasks_*_postgres`, `test_audit_vocabulary_postgres`, `test_authz_core_postgres`, `test_review_postgres`, `test_api_postgres`) | **NOT RUN after the S4 change** |
+| A manual run of `module_status`, `module_sync`, `module_enable`, `module_disable` against a database | **NOT RUN** |
+
+The commands for the owner are in [runbook.md](runbook.md), section 5.1. Record the result here only when the owner supplies it, as the earlier entries do. Until then
+nothing about the behaviour of the module host on PostgreSQL (the locks, the constraints, concurrent operation, rollback, the worker holding and resuming tasks,
+Request Intake with the gate installed) is claimed.

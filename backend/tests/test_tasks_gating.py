@@ -240,8 +240,10 @@ class NoGateTests(CompositionTestCase):
         composition = worker.Composition(None, lambda: None)
         self.assertEqual((composition.maintenance_hooks, composition.kind_gate), ((), None))
 
-    def test_the_production_composition_has_no_gate_and_no_extra_hook(self):
-        self.assertIsNone(task_registry.COMPOSITION.kind_gate)
+    def test_the_production_composition_has_the_module_gate_and_no_extra_hook(self):
+        # MOD-1b S4 installs the module-state gate (apps.module_host.gate); there is still no extra maintenance hook. Without any registered module the gate
+        # answers the legacy kinds, so nothing is held (tests/test_module_host_gate.py).
+        self.assertIsNotNone(task_registry.COMPOSITION.kind_gate)
         self.assertEqual(task_registry.COMPOSITION.maintenance_hooks, ())
         self.assertIsNotNone(task_registry.COMPOSITION.after_iteration)
 

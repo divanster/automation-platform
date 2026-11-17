@@ -49,7 +49,8 @@ BACKEND = Path(__file__).resolve().parent.parent
 STDLIB = set(sys.stdlib_module_names)
 ACTOR, SUBJECT, CASE, RUN = (uuid.uuid4() for _ in range(4))
 
-# A frozen copy of Core's vocabulary as it was before S3 (apart from the new "module" subject type, which is asserted separately). If an
+# A frozen copy of Core's vocabulary: the seven actions that existed before S3, plus "module.enabled" and "module.disabled", which MOD-1b S4 added as Core's
+# own actions (the "module" namespace is reserved for Core, so no module can declare them). The new "module" subject type is asserted separately. If an
 # action or a detail key of Core ever changes, this table is what makes the change visible.
 CORE_ACTIONS = (
     "request.submitted",
@@ -59,6 +60,8 @@ CORE_ACTIONS = (
     "approval.recorded",
     "approval.invalidated",
     "rejection.recorded",
+    "module.enabled",
+    "module.disabled",
 )
 CORE_KEYS = {
     "request.submitted": {"byte_length", "client_request_id_used"},
@@ -68,6 +71,8 @@ CORE_KEYS = {
     "approval.recorded": {"revision_id", "content_hash", "warning_count"},
     "approval.invalidated": {"revision_id", "by_revision_id", "approval_count"},
     "rejection.recorded": {"revision_id", "content_hash", "reason_code"},
+    "module.enabled": {"module_id", "installed_version", "registry_fingerprint", "cause"},
+    "module.disabled": {"module_id", "installed_version", "registry_fingerprint", "cause"},
 }
 CORE_SUBJECTS = ("run", "revision", "approval", "rejection", "module")
 
@@ -935,7 +940,7 @@ class ArchitectureTests(SimpleTestCase):
     def test_the_worker_composition_and_the_module_composition_root_are_unchanged(self):
         from config.task_registry import COMPOSITION
 
-        self.assertIsNone(COMPOSITION.kind_gate)
+        self.assertIsNotNone(COMPOSITION.kind_gate)  # S4 installs the module gate; it has nothing to do with the audit vocabulary
         self.assertEqual(COMPOSITION.maintenance_hooks, ())
         source = (BACKEND / "config" / "task_registry.py").read_text(encoding="utf-8")
         self.assertNotIn("audit", source)

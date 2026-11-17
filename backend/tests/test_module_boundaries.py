@@ -89,15 +89,27 @@ class CoreStaysIndependentTests(SimpleTestCase):
         importers = set(imports_of("apps.modules"))
         inside = {p for p in importers if p.startswith("apps/modules/")}
         # config/audit_vocabulary.py (MOD-1b S3) is the second composition root: it reads a registry and builds the audit vocabulary from it.
-        self.assertEqual(importers - inside, {"config/modules.py", "config/audit_vocabulary.py"})
+        # apps/module_host (MOD-1b S4) is the module host: it is handed a registry and checks it (the type, the namespace continuity rule, the errors).
+        host = {"apps/module_host/cli.py", "apps/module_host/gate.py", "apps/module_host/services.py"}
+        self.assertEqual(importers - inside, {"config/modules.py", "config/audit_vocabulary.py"} | host)
 
     def test_nothing_in_the_application_imports_the_composition_root_yet(self):
-        # MOD-1a activates nothing: no entry point, command, view or settings module calls build_registry.
-        # The only importer is the audit vocabulary composition root (S3), itself imported by nothing in the application.
-        self.assertEqual(imports_of("config.modules"), ["config/audit_vocabulary.py"])
+        # MOD-1a activated nothing. S3 added the audit vocabulary composition root (imported by nothing in the application). S4 activates the registry in
+        # exactly two kinds of place: the worker's composition root (the kind gate) and the four administrator commands of the module host. No view,
+        # serializer, settings module or other entry point calls build_registry.
+        expected = [
+            "apps/module_host/management/commands/module_disable.py",
+            "apps/module_host/management/commands/module_enable.py",
+            "apps/module_host/management/commands/module_status.py",
+            "apps/module_host/management/commands/module_sync.py",
+            "config/audit_vocabulary.py",
+            "config/task_registry.py",
+        ]
+        self.assertEqual(sorted(imports_of("config.modules")), expected)
         self.assertEqual(imports_of("config.audit_vocabulary"), [])
+        allowed = {Path(name).name for name in expected} | {"modules.py"}
         for path in non_test_sources():
-            if path.name not in ("modules.py", "audit_vocabulary.py"):
+            if path.name not in allowed:
                 self.assertNotIn("build_registry", path.read_text(encoding="utf-8"), path.name)
 
     def test_the_composition_root_imports_only_the_module_package_and_the_standard_library(self):
@@ -164,13 +176,15 @@ class ExistingBehaviorIsUnchangedTests(SimpleTestCase):
         self.assertEqual(set(PRODUCTION_REGISTRY), {"test.add_numbers", "request_intake.extract"})
         source = (BACKEND / "config" / "task_registry.py").read_text(encoding="utf-8")
         self.assertIn("from apps.intake.registry import PRODUCTION_REGISTRY", source)
-        self.assertNotIn("config.modules", source)
+        # MOD-1b S4: the composition root now also installs the module kind gate (config.modules is read there, and only there in this file); the
+        # handler allowlist and the reconciler are exactly what they were, and the gate leaves the legacy kinds claimable (tests/test_module_host_gate.py).
+        self.assertIn("from config.modules import build_registry", source)
         self.assertNotIn("apps.modules", source)
 
     def test_installed_apps_gained_nothing(self):
         self.assertEqual(
             [a for a in settings.INSTALLED_APPS if a.startswith("apps.")],
-            ["apps.accounts", "apps.api", "apps.audit", "apps.cases", "apps.health", "apps.intake", "apps.tasks"],
+            ["apps.accounts", "apps.api", "apps.audit", "apps.cases", "apps.health", "apps.intake", "apps.module_host", "apps.tasks"],
         )
 
     def test_the_http_routes_are_the_ones_the_api_documents(self):

@@ -44,9 +44,15 @@ the stale-revision conflict and rejection were not shown there, so UI-2 is devel
 production-ready; Django does not serve the built app), plus a module-contract foundation (MOD-1a: `backend/apps/modules`, a pure
 standard-library package with manifest v1, a documented SemVer subset and an immutable, deterministic static registry, and
 `backend/config/modules.py`, the composition root whose built-in tuple is EMPTY; see `docs/architecture/module-contract.md`;
-its DB-free tests pass in the development VM; NO module is registered or activated, Request Intake is NOT yet a module, nothing
-calls the registry, and there is no model, migration, endpoint, signature, license enforcement or update manager; modules that
-are admitted to a process are not sandboxed). The source text in the UI, revision diffs, document upload, exports,
+its DB-free tests pass in the development VM; NO module is registered or activated, Request Intake is NOT yet a module, and there
+is no module endpoint, signature, license enforcement or update manager; modules that are admitted to a process are not sandboxed),
+plus MOD-1b slices S1a to S3 (pure permission and capability contracts, a generic authorization core, worker claim-filter and kind-gate
+seams, and an extensible audit vocabulary; merged), plus MOD-1b / S4 (`apps/module_host`: `ModuleState`, an initialization marker and append-only namespace
+claims, a repeatable `module_sync`, audited `module_enable`, `module_disable` and `module_status` administrator commands, and the
+worker kind gate installed in the production composition; see `docs/architecture/module-contract.md` section 3.11; **committed locally on `feat/module-runtime-state`, not pushed,
+awaiting the owner's PostgreSQL run: its DB-free tests pass in the development VM, its 73 PostgreSQL tests and its migration have NOT been run by
+anybody**; the registry is still empty so nothing is gated, Request Intake's task kind is a legacy ungated kind, and there is no
+enable/disable API). The source text in the UI, revision diffs, document upload, exports,
 password reset, multi-factor authentication, an installer, and real AI adapters are not implemented. See `README.md` and
 `docs/architecture/README.md`. Do not describe planned components as existing.
 
