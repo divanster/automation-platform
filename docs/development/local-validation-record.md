@@ -428,3 +428,44 @@ nothing about module-driven permissions: there is **no `ModuleState`, no runtime
 capability facade**, Request Intake is not a module, and nothing builds authorization rules from a manifest. It is **not a
 production-readiness claim**: a login throttle per process, undecided TLS/HSTS, ORM-level immutability and the other limits recorded
 above are unchanged.
+
+## MOD-1b / S2 worker claim filter, maintenance hooks and kind gate: owner-supplied local PostgreSQL results
+
+> **Scope.** S2 added an allowed-kind filter to the atomic claim, ordered maintenance hooks and a fail-closed kind gate seam to `apps/tasks`
+> (implementation commit `28483a6`, branch `feat/module-worker-gating`; see [module-contract.md](../architecture/module-contract.md),
+> section 3.9, and [persistent-worker-slice.md](persistent-worker-slice.md), section 11). The project owner ran three PostgreSQL test
+> modules **locally on the Windows computer**. **These are owner-supplied results.** The development VM has no PostgreSQL, never connected
+> to one, and did not run, repeat or observe any of it. No output or log is stored in this repository.
+
+**Modules the owner named:** `tests.test_tasks_gating_postgres`, `tests.test_tasks_postgres`, `tests.test_tasks_recovery_postgres`.
+
+**Reported by the owner:**
+
+| Item | Reported result |
+| --- | --- |
+| Tests | **149 passed** |
+| Runtime | 66.399 seconds |
+| Exit code | 0 |
+| Test database | The dedicated test database was destroyed successfully |
+
+**What was not supplied:** the exact command line and the output. For orientation only (the VM's arithmetic from counting the test methods in
+the files, not something the owner stated): 149 equals the 39 tests of `test_tasks_gating_postgres.py`, the 95 of `test_tasks_postgres.py`
+and the 15 of `test_tasks_recovery_postgres.py`.
+
+**What this supports (this environment and these scenarios only):**
+
+- **Filtered claiming (new tests).** On the owner's PostgreSQL database the filtered claim behaved as the tests expect: no filter claims any
+  kind as before, an empty filter claims nothing, a non-empty filter is part of the single `FOR UPDATE SKIP LOCKED` statement and keeps the
+  order, tasks of other kinds (an unknown kind included) stay queued and untouched, and a worker with an installed gate holds tasks of gated-off
+  kinds and runs them once the gate opens.
+- **Worker concurrency and recovery regression.** The existing queue suite (95 tests: claim, lease, retry, recovery, cancellation, concurrent
+  workers) and the 15 real-process recovery tests (separate `runworker` processes, a forced kill, races against recovery) passed unchanged with
+  S2 in place, together with the new threaded tests of workers with disjoint and overlapping filters.
+- **Lease and retry behaviour preserved.** Lease tokens, attempt numbering, backoff, retry, recovery of expired leases and fencing gave the
+  results the tests expect, in the tested scenarios.
+
+**What it does not validate, and what does not exist.** It does not prove that no other concurrency race exists. **`ModuleState` is not
+implemented and nothing can be enabled or disabled at run time**: no gate is installed by the production composition, so every kind is still
+claimable and no task is held. The **gate race window remains** (a kind gated off between the gate read and the claim can still be claimed by
+that one claim, section 3.9 of the module contract), `while_disabled` is read by nothing, and the gate that reads module state is S4. The tests
+run on one machine and operating system. This is **not a production-readiness claim**: the other limits recorded above are unchanged.

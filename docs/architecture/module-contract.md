@@ -17,7 +17,18 @@
 > refactor, not a contract change: no module uses Core's rule, no manifest is turned into rules, and the behaviour-preservation
 > evidence is DB-free in the development VM, plus an owner-supplied local PostgreSQL run (242 tests, exit code 0; section 3.8 and
 > [local-validation-record.md](../development/local-validation-record.md)). Still absent: `ModuleState`, runtime module permissions,
-> enable/disable and a capability facade. No production-readiness claim.
+> enable/disable and a capability facade. No production-readiness claim. S1b is merged into `main` (PR #12).
+>
+> **MOD-1b / S2 (worker claim filter, ordered maintenance hooks, kind gate seam)** is implemented on `feat/module-worker-gating` (commit `28483a6`) and is
+> not merged yet. It gives `apps/tasks` three optional, generic seams (section 3.9): `claim_next_task` accepts an allowed-kind
+> filter that is part of the atomic claim query; the worker `Composition` accepts further named maintenance hooks that run after the legacy
+> `after_iteration` hook; and it accepts a `kind_gate` callable that answers which kinds may be claimed, failing closed. **Nothing installs a
+> gate or a new hook:** the production composition is unchanged, so the worker behaves exactly as before. `apps/tasks` still imports neither
+> `apps.modules` nor `apps.intake`, and there is no module enable/disable, `ModuleState` or `apps/module_host` (S4). The DB-free tests pass in
+> the development VM. The PostgreSQL tests (`tests/test_tasks_gating_postgres.py`, with the existing queue and process-level recovery suites)
+> were run by the project owner locally: **149 passed, 66.399 s, exit code 0, test database destroyed** (owner-supplied; the VM did not run or
+> observe them; section 3.9 and [local-validation-record.md](../development/local-validation-record.md)). Supported for the tested scenarios
+> only; no production-readiness claim.
 
 ## 1. Purpose and scope
 
@@ -213,7 +224,8 @@ import path and nothing that executes; `hook_id` is an **opaque name**, exactly 
 be a deeper, import-path-shaped string), unique across the registry, and nothing may ever resolve it as a path: a later slice
 attaches the real callable through the composition root, by id. `while_disabled` says whether the worker keeps running the hook while
 the module is disabled (true for bookkeeping that must not stall). The registry lists hooks as `RegisteredHook(module_id, hook_id,
-while_disabled)`, deterministically: modules in registration order, then hook id. `worker.py` is not changed.
+while_disabled)`, deterministically: modules in registration order, then hook id. S1a did not change `worker.py`. S2 adds the worker's side of this
+(section 3.9) without reading the declarations: the worker keeps its own, smaller id check and knows nothing about manifests.
 
 ### 3.8 The Core authorization rule (MOD-1b / S1b)
 
@@ -289,6 +301,94 @@ Request Intake is still written in code. A later slice will build rules from a r
 `permissions.check` facade; a golden test will then have to show that rules built from the manifest equal the table above. A disabled
 module's actions are blocked by a separate gate, never by changing who holds a permission. `apps/modules` does not import Core's
 rule (a test pins it), and `setup_roles`, `/api/auth/me/` and `profile.py` are untouched.
+
+### 3.9 The worker seams: claim filter, maintenance hooks, kind gate (MOD-1b / S2)
+
+S2 changes only `apps/tasks` (`policy.py`, `services.py`, `worker.py`). The queue stays one queue and one worker; the seams are optional and
+generic, they know nothing about modules, and nothing in the repository uses them yet except the tests.
+
+**Claim filter.** `claim_next_task(*, worker_id, lease_seconds, now=None, allowed_kinds=None)`:
+
+| `allowed_kinds` | Meaning |
+| --- | --- |
+| `None` (default) | No restriction. The statement is the one every existing caller has always run; callers that omit the argument are unchanged. |
+| empty set, frozenset, list or tuple | Claim nothing. The arguments are validated, then `None` is returned **without any database query**. |
+| non-empty set, frozenset, list or tuple of strings | `kind IN (...)` is added to the **same** locking statement (`SELECT ... FOR UPDATE SKIP LOCKED ... ORDER BY available_at, created_at, id LIMIT 1`). |
+
+Anything else is refused with `QueuePolicyError` before any query: a bare string (it would be read as characters), a mapping (its `False`
+entries would read as allowed), a generator, `bytes`, a number, a member that is not a string of 1 to 64 characters. The rule is that a caller's
+mistake can narrow a claim and never widen it. The filter is a `WHERE` condition, so a task of another kind is **never locked, claimed, counted
+or changed** and stays queued; this includes a task whose kind no allowlist knows. Nothing is claimed and then put back. Order, the lease token,
+`attempt_count`, the `TaskAttempt` row, retries with backoff, recovery of expired leases, cancellation and fencing are the code they were; none of
+them reads the filter (a static test checks that recovery, renewal, completion, failure and cancellation never mention it).
+
+**Unrestricted legacy behaviour is unchanged.** Without a filter, an unknown kind is still claimed and failed permanently (`unknown_kind`), as
+before; a test pins it. A filtered claim does not judge kinds: a filter that names an unknown kind can claim it (the worker's narrowing, below,
+is what keeps such a task from being claimed by a gated worker).
+
+**Maintenance hooks.** `Composition(registry, after_iteration, maintenance_hooks=(), kind_gate=None)`; the two new fields are last, so positional
+use of the first two is unchanged. `maintenance_hooks` is a **tuple** of `MaintenanceHook(hook_id, run)`:
+
+- `hook_id` is an opaque name, exactly `<namespace>.<name>` in lower case (the same two-segment shape as the manifest's hook id, so it cannot be an
+  import path). `run` is a callable the composition root already imported and takes no arguments. A string, a path or a list of hooks is refused.
+- **Order.** After every iteration, idle or not, after the outcome is recorded: first the legacy `after_iteration` hook (its fixed id is
+  `core.after_iteration`; `core` is a reserved namespace, so no module hook can carry it, and the id is reserved even when no legacy hook is
+  set), then `maintenance_hooks` **in the order they were written in the composition root** (not sorted, not by id). One composition is used for
+  the whole iteration.
+- **Duplicate ids** are refused when the composition is installed (`ValueError`, naming the id); a refused composition changes nothing.
+- **Failure isolation.** An exception from a hook other than a database error is logged and the next hook still runs; the log line is the hook id
+  and the exception **class** only (the legacy hook keeps its original line, `after-iteration hook raised <Class>`). Messages, tracebacks and task
+  payloads are never logged, and a hook failure does not change a task's recorded outcome.
+- **Database errors** follow the existing recovery unchanged: a `DatabaseError` from any hook is re-raised, the worker loop closes the connections
+  and retries after the poll interval, and after five in a row the worker stops. **Consequence:** the hooks after the failing one do not run in that
+  iteration, and a hook that fails persistently with a database error therefore starves the hooks after it and eventually stops the worker, exactly
+  as the single hook could before.
+- No dynamic imports: the hook callables are objects, and a test pins that `apps/tasks` imports nothing dynamic and no module or business code.
+- `while_disabled` (section 3.7) is **not read** by anything yet. Every installed hook runs every iteration; honouring `while_disabled` belongs to
+  the S4 gate.
+
+**Kind gate.** `Composition.kind_gate` is a callable with no arguments returning the kinds that may be claimed (a set, frozenset, list or tuple of
+strings). Per iteration the worker does: recover expired leases, **ask the gate**, claim with the answer, run, record, run the hooks.
+
+- **No gate:** nothing changes; the claim is unrestricted (`allowed_kinds=None`).
+- **Narrowing.** The answer is intersected with the kinds the worker has a handler for (the registry in use, or the default allowlist). A kind the
+  gate allows but this worker cannot run therefore stays queued instead of being claimed and failed. This is deliberate (a worker that is older
+  than the process that enqueued the task must not destroy it) and matches the owner decision in section 8 that a claim takes only kinds that are
+  enabled **and** known to the worker. It applies only when a gate is installed.
+- **Empty answer:** no task can be claimed. Recovery of expired leases and the hooks still run.
+- **Fail closed.** A gate that raises, answers `None`, or answers anything that is not a set, frozenset, list or tuple of valid kind strings allows
+  **nothing**, logs one line with the exception class (or "invalid answer") and never the answer, and the worker goes on to its hooks. `None` is not
+  "unrestricted". A `KeyboardInterrupt` is not swallowed.
+- **A database error from the gate** (the S4 gate will read `ModuleState`) is re-raised before any claim and follows the worker loop's connection
+  recovery, like the hooks; nothing is claimed.
+- **Held, not failed.** Tasks of a gated-off kind are not touched: still `queued`, `attempt_count` unchanged, same position. When the gate opens they
+  are claimed as attempt 1 (or the next attempt, for a retry). A running attempt whose kind is gated off is allowed to finish.
+- **Race window.** The gate is read once per iteration and the claim follows immediately; a kind gated off between the two can still be claimed by
+  that one claim. The S4 design accepts this (attempts already in flight finish), so it is a property to know, not a bug to fix here.
+- **Layering.** `apps/tasks` receives a plain callable from the composition root (`config/task_registry.py`, which does not install one yet). It
+  imports neither `apps.modules` nor `apps.intake` (tests pin it). The `ModuleState`-backed gate, the use of `while_disabled`, and any decision about
+  which kinds belong to which module are **S4**.
+
+**Compatibility with existing callers.** The production `COMPOSITION` has no gate and no extra hook (a test pins it); `runworker`,
+`process_one`'s and `run_until_stopped`'s signatures (the real-process recovery tests wrap them), the existing hook semantics and every existing
+test are unchanged. The one visible difference without a gate is that `process_one` now passes `allowed_kinds=None` to `claim_next_task`.
+
+**Tests.** DB-free, run in the development VM: `tests/test_tasks_gating.py` (the filter value, the service with a mocked query chain and the
+no-query empty filter, no-gate compatibility, gate narrowing and fail-closed cases, hook order, isolation, database errors and installation
+rules, static guarantees; 22 deliberate mutations of the implementation were each caught). PostgreSQL:
+`tests/test_tasks_gating_postgres.py` (39 tests: the filtered claim as one `FOR UPDATE SKIP LOCKED` statement with the kind condition,
+untouched filtered-out and unknown-kind tasks, ordering, lease, attempt numbering, retry and recovery unchanged, threaded workers with disjoint
+and overlapping filters, and `process_one` with an installed gate against committed data), together with the unchanged
+`tests/test_tasks_postgres.py` (95) and `tests/test_tasks_recovery_postgres.py` (15; the real-process crash recovery).
+
+**Owner-supplied local PostgreSQL result (the VM did not run, repeat or observe it; no output is stored).** The project owner ran those three
+modules locally on the Windows computer and reported: **149 passed, runtime 66.399 seconds, exit code 0, and the dedicated test database
+destroyed successfully** (the exact command line was not supplied; 39 + 95 + 15 = 149 is the VM's own count of the test methods). This
+supports, **for the tested scenarios only**: filtered claiming as specified; the existing worker concurrency and process-level recovery
+behaviour passing unchanged with S2 in place; and lease, retry, attempt numbering and fencing behaviour preserved. It does not prove that no
+other concurrency race exists, it is one machine and one operating system, it says nothing about module state (there is none), and it is not a
+production-readiness claim. The gate race window described above remains. Record:
+[local-validation-record.md](../development/local-validation-record.md).
 
 ## 4. Versioning
 
@@ -443,7 +543,8 @@ provider; significant external actions need human approval; AI output is validat
 - **Disabling is read-only mode.** New writes through the module are blocked; queued tasks of the module are **held** (not failed);
   attempts already running are allowed to finish; historical records stay readable. A hold needs the worker's claim step to take
   only kinds that are enabled, version-matched and known to the worker, and maintenance hooks declared `while_disabled=True` keep
-  running. S2 changes the worker for this; S1a does not touch it.
+  running. S2 built the worker's side of this as generic seams (a claim filter, a kind gate and ordered maintenance hooks; section 3.9)
+  that nothing installs yet; S1a did not touch the worker. The gate that reads module state, and the use of `while_disabled`, are S4.
 - **Runtime state lives in a separate `apps/module_host` Django app** (a future `ModuleState`, namespace claims, sync/enable/disable
   commands). `apps/modules` stays pure and gains no models. S1a only prepares the pure inputs that app will use: the registry,
   `dependents_of` (refuse to disable a module an enabled one needs), `derive_role_permissions` and the namespace continuity check.
@@ -506,8 +607,12 @@ An update manager does not exist and is **not** part of MOD-1a. When it is desig
   existing review and API suites passed in the owner's local run (242 tests, owner-supplied, section 3.8); the VM never ran them.
 - Still absent after S1b: `ModuleState`, runtime module permissions (no module permission is checked at run time; no manifest becomes
   an `AccessRule`), enable/disable, and the capability facade. Request Intake is not a module.
-- Maintenance hooks are declarations: `apps/tasks/worker.py` still has its single `after_iteration` hook and does not read them.
-  A hook id is not resolved to code anywhere.
+- Maintenance hooks in a manifest are declarations: nothing reads them. Since S2 `apps/tasks/worker.py` can run further named hooks after
+  the legacy `after_iteration` hook (section 3.9), but the production composition installs none, `while_disabled` is not consulted, and a manifest
+  hook id is not resolved to code anywhere.
+- The worker's claim filter and kind gate (S2, section 3.9) exist and are tested, but **no gate is installed**: every kind is still claimable, no
+  task is held, and nothing can be disabled. The S2 PostgreSQL tests passed in the owner's local run (section 3.9) for the tested scenarios
+  only; the gate race window remains.
 - No `ModuleState`, no `apps/module_host`, no enable/disable, no persisted namespace history; the continuity check is not called.
 - No capability facade exists (`task.enqueue` and the others are names a manifest may require, nothing a module can call).
 - Request Intake has no manifest in the application; the synthetic one in `tests/module_support.py` exists only for the golden test.
@@ -527,8 +632,9 @@ An update manager does not exist and is **not** part of MOD-1a. When it is desig
 6. **Permission model for installable modules:** namespaced permissions and the existing three roles are decided (owner,
    MOD-1b); still open is how an installable package without models gets Django permission rows (Django creates them only for a
    model), versus a Core permission registry table. Built-ins keep `Meta.permissions`.
-7. **Disabling a module:** decided as read-only mode (section 8); the worker claim filter, the state storage and the API/worker
-   agreement on the enabled set are still to be built (S2, S4).
+7. **Disabling a module:** decided as read-only mode (section 8); the worker claim filter and kind gate seam exist since S2 (section 3.9,
+   nothing installed; its PostgreSQL tests passed in the owner's local run); the state storage, the gate that reads it and the API/worker agreement on the enabled set
+   are still to be built (S4).
 8. **Trust model:** first-party modules only, third-party in-process Python, or external isolated services.
 9. **What "Core API v1" contains** and how it is versioned.
 10. **Frontend contributions:** a build-time static registry (proposed), declarative screens, or remote code (not proposed).
@@ -552,3 +658,8 @@ generic behaviour, structure and delegation); Django-runner `tests/test_authz_gl
 fabricated actor, refusal precedence, service order); PostgreSQL, `tests/test_authz_core_postgres.py` (owner-run locally, section 3.8; the VM did not run it); helpers
 `tests/authz_oracle.py` (the frozen old algorithm) and `tests/authz_truth_table.py`. Source: `backend/apps/accounts/access.py` (new),
 `backend/apps/intake/access.py` and a docstring in `backend/apps/accounts/authz.py` (changed).
+
+From S2 (section 3.9): pure and Django-runner `tests/test_tasks_gating.py` (DB-free, passes in the VM); PostgreSQL
+`tests/test_tasks_gating_postgres.py` (owner-run locally, section 3.9; the VM did not run it). Source: `backend/apps/tasks/policy.py` (`normalize_allowed_kinds`),
+`backend/apps/tasks/services.py` (`claim_next_task`) and `backend/apps/tasks/worker.py` (`MaintenanceHook`, `Composition`, the kind gate) (changed).
+`config/task_registry.py` and `runworker` are unchanged.

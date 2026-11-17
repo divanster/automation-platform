@@ -257,6 +257,25 @@ def validate_idempotency_key(key):
     return key
 
 
+def normalize_allowed_kinds(value) -> frozenset | None:
+    """The claim filter as a frozenset of kinds, or None for "unrestricted".
+
+    ``None`` means no restriction (the behaviour of every caller that predates the filter). An empty
+    collection means "claim nothing". Only a set, frozenset, list or tuple of strings of 1 to 64
+    characters is accepted: a bare string (it would be read as its characters), a mapping (its
+    False entries would be read as allowed), a generator and any other type are refused, so a bug in
+    the caller can narrow what is claimed but never widen it. Error messages never echo a value.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, (set, frozenset, list, tuple)):
+        raise QueuePolicyError("allowed kinds must be None or a set, list or tuple of task kinds")
+    for kind in value:
+        if not isinstance(kind, str) or not 1 <= len(kind) <= MAX_KIND_LENGTH:
+            raise QueuePolicyError(f"every allowed kind must be a string of 1 to {MAX_KIND_LENGTH} characters")
+    return frozenset(value)
+
+
 def validate_aware(value: datetime, name: str) -> datetime:
     if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
         raise QueuePolicyError(f"{name} must be a timezone-aware datetime")
