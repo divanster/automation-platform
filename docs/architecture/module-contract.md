@@ -19,13 +19,16 @@
 > [local-validation-record.md](../development/local-validation-record.md)). Still absent: `ModuleState`, runtime module permissions,
 > enable/disable and a capability facade. No production-readiness claim. S1b is merged into `main` (PR #12).
 >
-> **MOD-1b / S2 (worker claim filter, ordered maintenance hooks, kind gate seam)** is implemented on `feat/module-worker-gating` and is
-> **committed locally but not pushed or merged yet**. It gives `apps/tasks` three optional, generic seams (section 3.9): `claim_next_task` accepts an allowed-kind
+> **MOD-1b / S2 (worker claim filter, ordered maintenance hooks, kind gate seam)** is implemented on `feat/module-worker-gating` (commit `28483a6`) and is
+> not merged yet. It gives `apps/tasks` three optional, generic seams (section 3.9): `claim_next_task` accepts an allowed-kind
 > filter that is part of the atomic claim query; the worker `Composition` accepts further named maintenance hooks that run after the legacy
 > `after_iteration` hook; and it accepts a `kind_gate` callable that answers which kinds may be claimed, failing closed. **Nothing installs a
 > gate or a new hook:** the production composition is unchanged, so the worker behaves exactly as before. `apps/tasks` still imports neither
 > `apps.modules` nor `apps.intake`, and there is no module enable/disable, `ModuleState` or `apps/module_host` (S4). The DB-free tests pass in
-> the development VM; the new PostgreSQL tests (`tests/test_tasks_gating_postgres.py`) are written and **have not been run by anyone**.
+> the development VM. The PostgreSQL tests (`tests/test_tasks_gating_postgres.py`, with the existing queue and process-level recovery suites)
+> were run by the project owner locally: **149 passed, 66.399 s, exit code 0, test database destroyed** (owner-supplied; the VM did not run or
+> observe them; section 3.9 and [local-validation-record.md](../development/local-validation-record.md)). Supported for the tested scenarios
+> only; no production-readiness claim.
 
 ## 1. Purpose and scope
 
@@ -372,11 +375,20 @@ test are unchanged. The one visible difference without a gate is that `process_o
 
 **Tests.** DB-free, run in the development VM: `tests/test_tasks_gating.py` (the filter value, the service with a mocked query chain and the
 no-query empty filter, no-gate compatibility, gate narrowing and fail-closed cases, hook order, isolation, database errors and installation
-rules, static guarantees; 22 deliberate mutations of the implementation were each caught). PostgreSQL, **written and not run**:
-`tests/test_tasks_gating_postgres.py` (the filtered claim as one `FOR UPDATE SKIP LOCKED` statement with the kind condition, untouched
-filtered-out and unknown-kind tasks, ordering, lease, attempt numbering, retry and recovery unchanged, threaded workers with disjoint and
-overlapping filters, and `process_one` with an installed gate against committed data). The existing `tests/test_tasks_postgres.py` and
-`tests/test_tasks_recovery_postgres.py` (including the real-process crash recovery) must still pass **unchanged**; they were not rerun after S2.
+rules, static guarantees; 22 deliberate mutations of the implementation were each caught). PostgreSQL:
+`tests/test_tasks_gating_postgres.py` (39 tests: the filtered claim as one `FOR UPDATE SKIP LOCKED` statement with the kind condition,
+untouched filtered-out and unknown-kind tasks, ordering, lease, attempt numbering, retry and recovery unchanged, threaded workers with disjoint
+and overlapping filters, and `process_one` with an installed gate against committed data), together with the unchanged
+`tests/test_tasks_postgres.py` (95) and `tests/test_tasks_recovery_postgres.py` (15; the real-process crash recovery).
+
+**Owner-supplied local PostgreSQL result (the VM did not run, repeat or observe it; no output is stored).** The project owner ran those three
+modules locally on the Windows computer and reported: **149 passed, runtime 66.399 seconds, exit code 0, and the dedicated test database
+destroyed successfully** (the exact command line was not supplied; 39 + 95 + 15 = 149 is the VM's own count of the test methods). This
+supports, **for the tested scenarios only**: filtered claiming as specified; the existing worker concurrency and process-level recovery
+behaviour passing unchanged with S2 in place; and lease, retry, attempt numbering and fencing behaviour preserved. It does not prove that no
+other concurrency race exists, it is one machine and one operating system, it says nothing about module state (there is none), and it is not a
+production-readiness claim. The gate race window described above remains. Record:
+[local-validation-record.md](../development/local-validation-record.md).
 
 ## 4. Versioning
 
@@ -599,7 +611,8 @@ An update manager does not exist and is **not** part of MOD-1a. When it is desig
   the legacy `after_iteration` hook (section 3.9), but the production composition installs none, `while_disabled` is not consulted, and a manifest
   hook id is not resolved to code anywhere.
 - The worker's claim filter and kind gate (S2, section 3.9) exist and are tested, but **no gate is installed**: every kind is still claimable, no
-  task is held, and nothing can be disabled. The S2 PostgreSQL tests have not been run.
+  task is held, and nothing can be disabled. The S2 PostgreSQL tests passed in the owner's local run (section 3.9) for the tested scenarios
+  only; the gate race window remains.
 - No `ModuleState`, no `apps/module_host`, no enable/disable, no persisted namespace history; the continuity check is not called.
 - No capability facade exists (`task.enqueue` and the others are names a manifest may require, nothing a module can call).
 - Request Intake has no manifest in the application; the synthetic one in `tests/module_support.py` exists only for the golden test.
@@ -620,7 +633,7 @@ An update manager does not exist and is **not** part of MOD-1a. When it is desig
    MOD-1b); still open is how an installable package without models gets Django permission rows (Django creates them only for a
    model), versus a Core permission registry table. Built-ins keep `Meta.permissions`.
 7. **Disabling a module:** decided as read-only mode (section 8); the worker claim filter and kind gate seam exist since S2 (section 3.9,
-   nothing installed, PostgreSQL tests not run); the state storage, the gate that reads it and the API/worker agreement on the enabled set
+   nothing installed; its PostgreSQL tests passed in the owner's local run); the state storage, the gate that reads it and the API/worker agreement on the enabled set
    are still to be built (S4).
 8. **Trust model:** first-party modules only, third-party in-process Python, or external isolated services.
 9. **What "Core API v1" contains** and how it is versioned.
@@ -647,6 +660,6 @@ fabricated actor, refusal precedence, service order); PostgreSQL, `tests/test_au
 `backend/apps/intake/access.py` and a docstring in `backend/apps/accounts/authz.py` (changed).
 
 From S2 (section 3.9): pure and Django-runner `tests/test_tasks_gating.py` (DB-free, passes in the VM); PostgreSQL
-`tests/test_tasks_gating_postgres.py` (**not run**). Source: `backend/apps/tasks/policy.py` (`normalize_allowed_kinds`),
+`tests/test_tasks_gating_postgres.py` (owner-run locally, section 3.9; the VM did not run it). Source: `backend/apps/tasks/policy.py` (`normalize_allowed_kinds`),
 `backend/apps/tasks/services.py` (`claim_next_task`) and `backend/apps/tasks/worker.py` (`MaintenanceHook`, `Composition`, the kind gate) (changed).
 `config/task_registry.py` and `runworker` are unchanged.

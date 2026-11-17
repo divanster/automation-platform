@@ -232,7 +232,7 @@ try {
   `runworker`; `HANDLERS` itself is unchanged); no endpoint or UI exists.
 * Task rows hold business payloads in plain JSON in the database; nothing here encrypts or access-controls them, and there is no authorization on enqueueing. Do not enqueue sensitive data until that is designed.
 
-## 11. MOD-1b / S2: claim filter, maintenance hooks and kind gate (not yet merged; PostgreSQL tests not run)
+## 11. MOD-1b / S2: claim filter, maintenance hooks and kind gate (commit `28483a6`; not yet merged)
 
 A later, small change to `apps/tasks`; the design and the guarantees of sections 2 to 4 stand. The full contract is
 [module-contract.md](../architecture/module-contract.md) section 3.9; in short:
@@ -255,9 +255,15 @@ A later, small change to `apps/tasks`; the design and the guarantees of sections
 * **Deferred.** The gate that reads module state, `while_disabled`, and any enable/disable are S4. Nothing here decides which kinds belong to a
   module.
 * **Validation.** `tests/test_tasks_gating.py` (DB-free, 72 tests) passes in the development VM. `tests/test_tasks_gating_postgres.py`
-  (`FilteredClaimTests`, `FilteredRetryAndRecoveryTests`, `FilteredClaimConcurrencyTests`, `GatedWorkerTests`) is written and **has not been run by
-  anyone**; the existing `test_tasks_postgres.py` and `test_tasks_recovery_postgres.py` have not been rerun since S2 and must pass unchanged. From
-  `backend\` with the setup of section 9.3 (no `--keepdb`, no `--noinput`, flag removed afterwards):
+  (`FilteredClaimTests`, `FilteredRetryAndRecoveryTests`, `FilteredClaimConcurrencyTests`, `GatedWorkerTests`) (39 tests) was run, together
+  with the unchanged `test_tasks_postgres.py` (95) and `test_tasks_recovery_postgres.py` (15), by the project owner on the local Windows
+  computer: **149 passed, 66.399 s, exit code 0, test database destroyed** (owner-supplied; the VM did not run or observe them; no output is
+  stored; [record](local-validation-record.md)). For the tested scenarios only this supports filtered claiming as specified, the existing worker
+  concurrency and process-level recovery tests passing unchanged with S2 in place, and lease, retry, attempt numbering and fencing behaviour
+  preserved. It does not prove that no other concurrency race exists, **`ModuleState` is not implemented, nothing can be enabled or disabled at
+  run time, the gate race window remains** (a kind gated off between the gate read and the claim can still be claimed by that one claim), and
+  there is no production-readiness claim. To repeat the run, from `backend\` with the setup of section 9.3 (no `--keepdb`, no `--noinput`, flag
+  removed afterwards):
 
 ```powershell
 try {

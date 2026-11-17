@@ -51,8 +51,8 @@
   inside its single `FOR UPDATE SKIP LOCKED` statement, and the worker composition takes ordered named maintenance hooks and an optional
   kind gate that fails closed ([module-contract.md](module-contract.md) section 3.9 and
   [persistent-worker-slice.md](../development/persistent-worker-slice.md) section 11). Nothing installs a gate or an extra hook, so the
-  worker behaves as before. A gate would hold tasks of other kinds in `queued` rather than fail them. The new PostgreSQL tests are written
-  and not run.
+  worker behaves as before. A gate would hold tasks of other kinds in `queued` rather than fail them. The new PostgreSQL tests passed with
+  the existing queue and recovery suites in the owner's local run (149 tests; tested scenarios only; the gate race window remains).
 
 ## 1. Proposal
 
