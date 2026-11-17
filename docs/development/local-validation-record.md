@@ -340,7 +340,9 @@ TESTS, not in the application, and are corrected without weakening any behaviora
    user's session discarded). **Confirm the identity of the second failure on the rerun.**
 
 The corrected module has 100 tests (a combined collection of 456) and has **not been rerun**; nothing in this record supports
-any claim about it until the owner reports that output here. The slice adds no model, migration, or dependency.
+any claim about it until the owner reports that output here. The slice adds no model, migration, or dependency. (See the
+later entry "MOD-1b / S1b core authorization refactor" for a 242-test local PostgreSQL run that the owner reported for the
+authorization, review and API tests; this section is deliberately left unchanged until the owner confirms which modules it covered.)
 
 ## UI-2 request review and approval: owner-supplied browser validation (2026-11-16)
 
@@ -388,3 +390,41 @@ permission.
 
 This entry does not change the status of anything recorded above, in particular the REST API PostgreSQL tests in the section
 "Pending: REST API slice", which this record still shows as not rerun.
+
+## MOD-1b / S1b core authorization refactor: owner-supplied local PostgreSQL results (2026-11-17)
+
+> **Scope.** The generic own / any / superuser authorization algorithm moved from `apps/intake/access.py` into Core
+> (`apps/accounts/access.py`) with no change in any authorization outcome (commit `962d6ab`, branch `feat/module-authz-core`; see
+> [module-contract.md](../architecture/module-contract.md), section 3.8). The project owner ran the PostgreSQL authorization, review
+> and API integration tests **locally on the Windows computer**. **These are owner-supplied results.** The development VM has no
+> PostgreSQL, never connected to one, and did not run, repeat or observe any of it. No output or log is stored in this repository.
+
+**Reported by the owner:**
+
+| Item | Reported result |
+| --- | --- |
+| Tests | **242 passed** |
+| Runtime | 55.659 seconds |
+| Exit code | 0 |
+| Test database | `test_automation_dev` destroyed successfully |
+
+**Scenarios the owner reported as included:** Django users and groups; authorization equivalence; the review services; API
+permissions; concurrent edits and approvals; the end-to-end API workflow.
+
+**What was not supplied:** the command line, the list of test modules, and the output. For orientation only (this is the VM's
+arithmetic, not something the owner stated): 242 equals the 135 tests of `tests/test_review_postgres.py`, the 100 of the corrected
+`tests/test_api_postgres.py` and the 7 of the new `tests/test_authz_core_postgres.py`. The section "Pending: REST API slice" above is
+**not changed** by this entry, because the owner did not name the modules; if the 242 did include the corrected API module, the owner
+can confirm that there.
+
+**What this validates (this environment and these scenarios only):** with the refactor in place, the authorization, review-service and
+API behaviours exercised by those tests give the same results on the owner's PostgreSQL database, including real users read by
+`load_actor`, groups created by `setup_roles`, inactive and deleted users, and the concurrency and end-to-end scenarios in the tests.
+Together with the DB-free evidence in the VM (a 36,864-row truth table recorded from the old code before the change, reproduced
+by the old algorithm, by the delegating module and by Core), this is the evidence that the refactor preserved behaviour.
+
+**What it does not validate, and what does not exist.** It does not prove that no other race or authorization path exists. It says
+nothing about module-driven permissions: there is **no `ModuleState`, no runtime module permission, no enable/disable and no
+capability facade**, Request Intake is not a module, and nothing builds authorization rules from a manifest. It is **not a
+production-readiness claim**: a login throttle per process, undecided TLS/HSTS, ORM-level immutability and the other limits recorded
+above are unchanged.
