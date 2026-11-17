@@ -43,6 +43,7 @@ MANIFEST_CODES = frozenset(
         "duplicate_workflow",
         "duplicate_permission",
         "duplicate_audit_action",
+        "forbidden_audit_detail_key",
         "duplicate_ui_contribution",
         "duplicate_api_route",
         "duplicate_config_field",

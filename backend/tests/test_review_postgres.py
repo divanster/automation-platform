@@ -190,7 +190,7 @@ class SchemaTests(DedicatedTestDatabaseMixin, TestCase):
         expected = {
             Rejection: {"cases_rejection_hash_is_sha256_hex", "cases_rejection_reason_code_shape"},
             RevisionEdit: {"intake_edit_base_is_another_revision"},
-            AuditEvent: {"audit_event_action_valid", "audit_event_subject_type_valid", "audit_event_actor_kind_valid", "audit_event_actor_matches_kind"},
+            AuditEvent: {"audit_event_action_shape", "audit_event_subject_type_valid", "audit_event_actor_kind_valid", "audit_event_actor_matches_kind"},
         }
         for model, names in expected.items():
             with self.subTest(model=model.__name__):

@@ -19,8 +19,8 @@
 > [local-validation-record.md](../development/local-validation-record.md)). Still absent: `ModuleState`, runtime module permissions,
 > enable/disable and a capability facade. No production-readiness claim. S1b is merged into `main` (PR #12).
 >
-> **MOD-1b / S2 (worker claim filter, ordered maintenance hooks, kind gate seam)** is implemented on `feat/module-worker-gating` (commit `28483a6`) and is
-> not merged yet. It gives `apps/tasks` three optional, generic seams (section 3.9): `claim_next_task` accepts an allowed-kind
+> **MOD-1b / S2 (worker claim filter, ordered maintenance hooks, kind gate seam)** was implemented in commit `28483a6` and is merged into `main` (PR #13).
+> It gives `apps/tasks` three optional, generic seams (section 3.9): `claim_next_task` accepts an allowed-kind
 > filter that is part of the atomic claim query; the worker `Composition` accepts further named maintenance hooks that run after the legacy
 > `after_iteration` hook; and it accepts a `kind_gate` callable that answers which kinds may be claimed, failing closed. **Nothing installs a
 > gate or a new hook:** the production composition is unchanged, so the worker behaves exactly as before. `apps/tasks` still imports neither
@@ -29,6 +29,21 @@
 > were run by the project owner locally: **149 passed, 66.399 s, exit code 0, test database destroyed** (owner-supplied; the VM did not run or
 > observe them; section 3.9 and [local-validation-record.md](../development/local-validation-record.md)). Supported for the tested scenarios
 > only; no production-readiness claim.
+>
+> **MOD-1b / S3 (extensible audit vocabulary)** is implemented on `feat/module-audit-vocabulary` (implementation commit `ba4060a`, test-expectation fix `5398a1b`; pushed, **not merged**). A module can
+> declare audit actions and Core's one recorder accepts them, without a migration per action (section 3.10): an immutable `AuditVocabulary`
+> (Core's seven actions, their detail keys and subject types unchanged, plus validated module declarations) is checked in Python whenever an event
+> is built, and audit migration `0002` replaces the fixed list of action names with a bounded, anchored **shape** check and adds the `module`
+> subject type. **The database checks syntax only; the Python vocabulary is the allowlist.** Raw SQL can still store any well-formed action, and
+> nothing here is tamper protection or a sandbox. `BUILTIN_MODULES` is still empty, nothing in the application installs a module vocabulary yet,
+> and there is no `ModuleState`, enable/disable or S4. The DB-free tests pass in the development VM. The owner reports, from a local run that the VM
+> did not observe (no output is stored): migration `0002` completed, the 15 audit events that existed remained after it, the 24 new PostgreSQL
+> tests passed, the corrected schema-constraint test passed, and the selected PostgreSQL regression ran **342 tests, all passed, 80.063 s, exit
+> code 0, dedicated test database destroyed** (section 3.10 and [local-validation-record.md](../development/local-validation-record.md)).
+> Supported for the tested scenarios only. No production-readiness claim.
+>
+> S3 review (owner decisions): the runtime installation of a module vocabulary is deferred to MOD-2; `request` is now a reserved Core namespace in
+> the manifest; and the manifest and the audit vocabulary apply the same detail-key restrictions (sections 3.2 and 3.10).
 
 ## 1. Purpose and scope
 
@@ -43,7 +58,7 @@ compatibility checks, dependency checks with cycle detection, capability declara
 fingerprint, and architecture tests that keep all of it isolated.
 
 **Not built:** loading or activating modules, a module state table, permissions seeding, task-handler registration with the
-worker, API or UI mounting, the audit-vocabulary change, configuration storage, licensing, signatures, packages, an update
+worker, API or UI mounting, the audit-vocabulary change (added later, in S3, section 3.10), configuration storage, licensing, signatures, packages, an update
 manager, a marketplace (section 10).
 
 ## 2. Terms
@@ -87,7 +102,7 @@ manifest cannot exist; it is frozen, and every collection is copied into a tuple
 | `permissions` | no | `PermissionDeclaration(permission_id, scope, description)`; `<namespace>.<codename>`; scope `global`, `own` or `any` (section 3.5) |
 | `role_grants` | no | `RoleGrant(role, permissions)`: default grants to `Operator`, `Approver` or `Auditor`, of permissions the module itself declares (section 3.6) |
 | `maintenance_hooks` | no | `MaintenanceHookDeclaration(hook_id, while_disabled, description)`: declarations only, `hook_id` exactly `<namespace>.<name>` (section 3.7) |
-| `audit_actions` | no | `AuditActionDeclaration(action, detail_keys)`; at most 32 characters (the `AuditEvent.action` column) |
+| `audit_actions` | no | `AuditActionDeclaration(action, detail_keys)`; at most 32 characters (the `AuditEvent.action` column). Since S3 the audit vocabulary is composed from these (section 3.10), which also refuses a detail key whose name suggests free content |
 | `configuration_schema` | no | `ConfigSchema(schema_version, fields)` of typed `ConfigField`s (`bool`, `int`, `string`, `enum`, `secret_ref`): no code, no expressions; a `secret_ref` names a secret held elsewhere and can have no default |
 | `ui_contributions` | no | `UiContribution(contribution_id, kind, path, label, permission)`; `kind` is `route` or `navigation`; `permission` is a UI hint only |
 | `api_contributions` | no | `ApiContribution(route_prefix)`: one path segment under `/api/`; `auth`, `health`, `modules` and `admin` are Core's |
@@ -101,10 +116,11 @@ A module **owns** its `module_id` and any `extra_namespaces` as identifier prefi
 workflow key, provided capability and UI contribution id must start with an owned namespace followed by a dot. Namespaces are
 unique across modules, and a fixed set is reserved for Core and cannot be owned:
 
-`core, test, platform, module, auth, admin, health, run, revision, approval, rejection, audit, task, case, document, documents, ai, secrets, permissions`
+`core, test, platform, module, auth, admin, health, run, revision, approval, rejection, request, audit, task, case, document, documents, ai, secrets, permissions`
 
 so one module cannot define, shadow or collide with another module's or Core's identifiers (the existing `test.add_numbers`
-handler and the existing `run.state_changed` audit action stay Core's). `extra_namespaces` exists so a built-in module can keep
+handler and the existing `run.state_changed` audit action stay Core's). `request` was added to the list in S3 by owner decision, because
+`request.submitted` and `request.edited` are Core audit actions; a module's own ids such as `request_intake` are different namespaces and unaffected. `extra_namespaces` exists so a built-in module can keep
 identifiers that predate the contract: Request Intake's permissions are `intake.*` and its task kind is
 `request_intake.extract`, so MOD-2 will declare `extra_namespaces=("intake",)` rather than rename anything. Workflow keys,
 capabilities and UI ids are namespaced the same way. API route prefixes are not namespaced (Request Intake serves `requests`)
@@ -390,6 +406,166 @@ other concurrency race exists, it is one machine and one operating system, it sa
 production-readiness claim. The gate race window described above remains. Record:
 [local-validation-record.md](../development/local-validation-record.md).
 
+### 3.10 The audit vocabulary (MOD-1b / S3)
+
+**Goal.** A module may declare audit actions (`AuditActionDeclaration`, section 3.1) and have them recorded by Core's **one** recorder
+(`apps.audit.recorder.record_event`, unchanged), without a Core migration for every new action. Nothing existing changed: the seven Core
+actions and their detail keys, the four Core subject types, the value rules (booleans, integers, null, short tokens of letters, digits and
+`_ . : -`), the content restraint, and the rule that an event is recorded only inside the transaction of the operation it describes (an audit
+failure rolls the operation back). Existing audit rows are not touched.
+
+**Core versus module ownership.**
+
+| Rule | Enforced by | Code |
+| --- | --- | --- |
+| The seven Core actions, their detail keys and the subject types `run`, `revision`, `approval`, `rejection` stay exactly as they were; `module` is added as a Core subject type (no event uses it yet; S4 will) | `apps/audit/events.py` constants, a frozen golden copy in `tests/test_audit_vocabulary.py` | - |
+| A module cannot declare a Core action | the manifest (a Core action's namespace is reserved) and, again, the vocabulary | `core_action_claimed` |
+| A module cannot declare an action in a namespace Core uses: the first segment of a Core action (`request`, `run`, `revision`, `approval`, `rejection`) or any reserved namespace | the manifest (all five Core prefixes, `request` included since the S3 owner decision, are reserved namespaces, so no registry can give them to a module) and, as defence in depth, the vocabulary itself | `core_namespace_claimed` |
+| A module may declare an action only in a namespace it owns, as the registry knows it (`namespace_owners`); a dependency, a dependent and a prefix own nothing of each other | the vocabulary, fed the registry's owners | `namespace_not_owned` |
+| An action is declared once (never "last one wins") | the registry (`duplicate_audit_action`) and the vocabulary | `duplicate_action` |
+| An action has the shape (below) and at most 32 characters | the manifest and the vocabulary | `invalid_action_shape` |
+| Detail keys: lower-case identifiers, at most 20, no duplicates, and no key whose name suggests free content (`text`, `name`, `email`, `contact`, `notes`, `description`, `message`, `excerpt`, `reason`, `error`, `password`, `username`); Core's own keys already avoid those names (a test) | **both**, by one rule: the manifest (`FORBIDDEN_AUDIT_DETAIL_KEYS`, `MAX_AUDIT_DETAIL_KEYS`; code `forbidden_audit_detail_key`) and the vocabulary apply the same names, the same character set and length (`[a-z][a-z0-9_]{0,39}`) and the same count limit, so a manifest that registers can always be composed. The two packages may not import each other, so the rule is written twice and tests pin the constants and compare behaviour on a generated sample | `invalid_detail_key`, `forbidden_detail_key` |
+| Values keep Core's rules for every action alike | `apps/audit/events.py` | `AuditEventError` |
+
+A module may **emit Core events through Core services** (for example `run.state_changed`); it cannot redefine them or their detail keys. A
+module's declared action is checked with the keys its own declaration lists, never Core's, and a Core action is checked with Core's keys, never a
+module's.
+
+**The design.**
+
+- `apps/audit/vocabulary.py` (pure, standard library only; no Django, no `apps.modules`): `ModuleAuditAction(module_id, action, detail_keys)`
+  (plain data, validated on construction) and `AuditVocabulary`, an immutable value (`__slots__`, read-only mappings, tuples, frozen sets, no
+  public constructor). `AuditVocabulary.core(...)` builds Core's part; `core_vocabulary.with_modules(declarations, namespace_owners,
+  reserved_namespaces)` returns a **new** vocabulary or raises `AuditVocabularyError` (stable `code`). Declarations are applied in a fixed order
+  (by action), so the result and the first error depend only on content, not on input order or the process (checked across `PYTHONHASHSEED`
+  values). Equal vocabularies have equal `fingerprint`s (SHA-256 of a canonical form); `core_fingerprint` identifies the Core part.
+- `apps/audit/events.py`: Core's constants stay where they were, plus `CORE_VOCABULARY`, `current_vocabulary()` and `install_vocabulary()`.
+  `NewAuditEvent` checks the action, the subject type and the detail keys against the **installed** vocabulary, which is Core's alone until one is
+  installed. An action nobody declared, an undeclared detail key and a non-text action are `AuditEventError`, raised before anything reaches the
+  database.
+- `config/audit_vocabulary.py`, the explicit composition root: `build_audit_vocabulary(registry=None)` (pure) turns a validated `ModuleRegistry`
+  into declarations and hands over the registry's `namespace_owners` and the manifest's reserved namespaces; `install_audit_vocabulary(registry=None)`
+  builds and installs. `registry=None` means `config.modules.BUILTIN_MODULES`, which is **empty**, so the built-in result equals Core's vocabulary
+  (a test). Importing it needs no Django and reads no database or file (a subprocess test); it names no module and imports no business code.
+  Core packages never import it (tests pin that), and `apps.audit` imports neither `apps.modules` nor `config`.
+
+**Initialization.** `install_vocabulary` is idempotent and never a silent replacement: installing a vocabulary equal to the installed one (same
+fingerprint) changes nothing; installing a different one, **including Core-only after a module one**, is refused (`vocabulary_conflict`), and
+so is one built on a different Core part. It runs under a lock, so concurrent installations leave exactly one winner. **Nothing in the application
+calls it yet** (no settings module, `AppConfig.ready()`, entry point or command; a test pins that): with no module registered, Core's own
+vocabulary is already in force. The first module (MOD-2) decides where the call belongs; the proposal is next to the worker's composition
+(`runworker`) and the API's start-up, **before any event is built**, in every process that records module events (the API and the worker are
+separate processes and must install the same vocabulary; compare `fingerprint`s, as for the registry). A process that never installs one refuses
+module actions: that fails loudly, not silently. Tests restore state with `mock.patch.object(events, "_installed", ...)`
+(`tests/audit_support.py`: `installed(...)`, and a mixin that fails any test that starts with something installed), so nothing leaks between tests.
+
+**Database shape check versus Python allowlist.**
+
+| Question | Answered by |
+| --- | --- |
+| Is the action text well formed (two or more lower-case dotted segments, at most 32 characters)? | **Both**: the database CHECK `audit_event_action_shape` and `action_shape_ok` use one pattern, `ACTION_SHAPE_PATTERN` (`^[a-z][a-z0-9_]{0,39}(\.[a-z][a-z0-9_]{0,39}){1,15}$`; the migration repeats the text because a migration must not import application code, and a test keeps them equal) |
+| Is the action declared by Core or a module? | **Python only** (`AuditVocabulary`) |
+| Are the detail keys the declared ones? Are the values safe? | **Python only** |
+| Is the subject type known? | **Both**: a fixed list in the CHECK (`run`, `revision`, `approval`, `rejection`, `module`) and in Python |
+
+The pattern accepts every action a manifest may declare (a test compares it with the manifest on a large generated sample) and every Core action.
+Its repetition is bounded (the column holds 32 characters and a segment plus its dot takes at least two, so at most 16 segments). It uses only
+anchors, character classes and one bounded group, so PostgreSQL and Python should read it alike; **the PostgreSQL test that compares them on a fixed
+corpus passed in the owner's local run (below), for that corpus only**.
+
+**What this does not protect.** Because the database checks syntax only, raw SQL, a privileged migration or a database administrator can store any
+well-formed action, declared or not, and nothing detects it (a PostgreSQL test pins this so nobody claims more). Namespace ownership and the
+vocabulary are naming rules inside one process: code admitted to the process can import Core internals, build events, or write the table. Neither
+the ORM's immutability nor a namespace declaration is database-level tamper protection or a sandbox. There is still no hash chain, trigger or
+insert-only role (data-model open questions 2.5 and 2.18).
+
+**The migration** (`apps/audit/migrations/0002_extensible_audit_vocabulary.py`; depends only on `audit.0001_initial`; additive in intent; nothing
+is read, rewritten or deleted):
+
+1. remove `audit_event_action_valid` (the fixed list of seven names) and add `audit_event_action_shape` (a regular-expression CHECK);
+2. replace `audit_event_subject_type_valid` with the same name and the list extended by `module`;
+3. a `RunPython` that does nothing going forward, and **on a reverse runs first as a guard** (below).
+
+PostgreSQL validates the existing rows against both new constraints while adding them (a table scan under a brief exclusive lock; fine for today's
+volume, worth knowing if the table grows large). Field lengths are unchanged (`action` 32, `subject_type` 16): no contract mismatch required a
+change. Model state and migration agree: a DB-free test runs Django's autodetector against the migration graph without a database and finds no
+change, and compares the migration's constraints with the model's.
+
+**Rollback limits.** Reversing restores the old fixed lists, which is possible only while every stored event satisfies them. If an event with a
+module action or the `module` subject type exists, the reverse is **refused with `IrreversibleError` before any constraint is touched**, naming
+counts only. **Events are never deleted or rewritten to make a reverse succeed.** Past such events the way back is a restore from backup or a
+reviewed, owner-run data decision outside this migration. Without such events the reverse restores the old constraints and keeps every row. Also
+note that after a rollback of the *code* (not the migration), Python would again refuse module actions while their rows stay readable.
+
+**Not done.** `ModuleState`, runtime enable/disable, the capability facade (`audit.record` is still only a name a manifest may require), a
+module-owned subject type, storing the vocabulary, a database-level allowlist or protection, and wiring any entry point. Request Intake is not a
+module and emits only Core events. The API's audit serializer passes `action` through as text and the frontend shows an unknown action as its raw
+name, so a module action displays without a change there.
+
+**Tests.** DB-free (`tests/test_audit_vocabulary.py`, 102 tests, pass in the VM; each of 32 deliberate mutations of the
+implementation was caught by the focused set): Core unchanged against a frozen copy, module actions accepted only when declared, refusals and their codes, namespace and
+reserved-name rules, detail keys and values, immutability, determinism (input order, processes), idempotent and conflicting installation, state
+isolation, the composition root (and that it needs no Django), shape agreement with the manifest, the migration and the model, the transaction
+requirement, "one recorder", and the import boundaries. Pinned older tests changed narrowly because the design changed: `test_review_audit.py`
+(the action constraint is now the shape, by a new name), `test_review_boundaries.py` (`events.py` may import `threading` for the install lock) and
+`test_module_boundaries.py` (`config/audit_vocabulary.py` is the second, and only other, importer of `apps.modules` and of `config.modules`).
+PostgreSQL (`tests/test_audit_vocabulary_postgres.py`, **24 tests; passed in the owner's local run, see below**; the VM never ran them): the forward migration with existing rows (unchanged),
+the constraints as PostgreSQL stores them, PostgreSQL's reading of the pattern against Python's, a valid module action and the `module` subject
+through the recorder, an unknown well-formed action refused by Python but accepted by the database, malformed actions refused by the database,
+rollback of the business operation when the audit write fails (database-level, Python-level and a Core service), Core's history unchanged and the
+audit API unchanged with a module vocabulary installed, and the reverse migration with and without events only the new vocabulary allows.
+
+**Local PostgreSQL validation (owner-run; the commands, and the result recorded after them).** From `backend\`, with the database set up as in the runbook (section 6) and
+`AP_RUN_DB_TESTS` unset in the window before and after:
+
+```powershell
+$Py = "$LocalProject\.venv\Scripts\python.exe"
+Set-Location "$LocalProject\backend"
+if ($env:AP_RUN_DB_TESTS) { throw "AP_RUN_DB_TESTS is already set in this window. Run: Remove-Item Env:AP_RUN_DB_TESTS   then repeat." }
+
+# 1. Preflight against the development database (reads it; applies nothing)
+& $Py manage.py showmigrations audit                                          # expect: 0001 [X], 0002 [ ]
+& $Py manage.py makemigrations --check --dry-run                              # expect: No changes detected
+& $Py manage.py sqlmigrate audit 0002_extensible_audit_vocabulary             # read the DDL: two DROP CONSTRAINT, two ADD CONSTRAINT
+& $Py manage.py sqlmigrate audit 0002_extensible_audit_vocabulary --backwards
+
+# 2. DB-free tests
+& $Py manage.py test                                                          # expect OK
+
+# 3. PostgreSQL tests: Django creates and destroys test_<AP_DB_NAME>; no --keepdb, no --noinput
+try {
+    $env:AP_RUN_DB_TESTS = "1"
+    & $Py manage.py test tests.test_audit_vocabulary_postgres tests.test_authz_core_postgres tests.test_review_postgres tests.test_api_postgres tests.test_intake_postgres --tag requires_postgres -v 2
+    "exit code: $LASTEXITCODE"                                                # expect 0
+} finally {
+    Remove-Item Env:AP_RUN_DB_TESTS -ErrorAction SilentlyContinue
+}
+```
+
+Report the exact `Ran N tests` line (the new module contributes exactly 24) and any failure; the existing review, API and intake suites must pass
+unchanged. Applying the migration to a development database that already holds audit events (`python manage.py migrate audit`) is a separate,
+optional step; take a backup first and do not run it against anything that is not disposable until the PostgreSQL tests have passed. This
+validates the tested scenarios on one machine only and would not be a production-readiness claim.
+
+**Owner-supplied local PostgreSQL result (the VM did not run, repeat or observe it; no output is stored):** audit migration `0002` completed, the 15 audit events that existed remained after it, the 24 new PostgreSQL tests passed, the corrected schema-constraint test passed, and the selected PostgreSQL regression ran **342 tests, all passed, 80.063 s, exit code 0, dedicated test database destroyed**. The first run of the selected modules reported 342 tests with 341 passed and 1 failed (exit code 1): `SchemaTests.test_the_database_has_every_named_constraint` in
+`tests/test_review_postgres.py` still expected the old constraint name `audit_event_action_valid`; the new constraint existed, the failure was a
+stale test expectation, and one line in that test was corrected (commit `5398a1b`, test code only). The command line, the module list and the
+output were not supplied; for orientation only (the VM's arithmetic, not stated by the owner) 342 equals the 24 tests of
+`test_audit_vocabulary_postgres.py` plus the earlier 242 authorization, review and API tests plus the 76 intake tests.
+
+**What this supports (this environment and these scenarios only).** The migration applied to a database that already held audit events and left
+them in place (15 events, as reported; the PostgreSQL test additionally compares every column of every pre-existing row before and after in the
+test database); the new action-shape CHECK (`audit_event_action_shape`) and the extended subject-type CHECK exist and behave as the tests expect
+(well-formed actions and the `module` subject accepted, malformed ones refused by the database, PostgreSQL and Python agreeing on the fixed
+corpus); the forward and the reverse migration with and without events that only the new vocabulary allows (the reverse refused, nothing
+deleted, when such events exist); a module action recorded through the one recorder; rollback of the business operation when the audit write
+fails; and the unchanged review, API and intake audit behaviour in the regression. **What it does not show:** that the database enforces the
+allowlist (it does not: raw SQL can still store any well-formed action, a test pins this); tamper protection of audit events (ORM-level
+immutability only, no hash chain or trigger); any module-driven behaviour (no module is registered, nothing installs a module vocabulary, and
+there is no `ModuleState` or enable/disable); behaviour with many or large audit tables (the constraint is added with a table scan under a brief
+exclusive lock); another PostgreSQL version or machine; or that no other race exists. Not a production-readiness claim. Record:
+[local-validation-record.md](../development/local-validation-record.md).
+
 ## 4. Versioning
 
 ### 4.1 The SemVer subset
@@ -483,6 +659,9 @@ every raised code is declared) and a message that never echoes a submitted value
 no setting with dotted paths, no entry points, no import by name. In MOD-1a the tuple is empty. Because a future module's manifest
 will live in the module's own package, which imports Django models, the exact loading mechanism (a function that imports lazily,
 after Django's app registry is ready) is decided in MOD-2.
+
+Since S3 there is a second, separate composition root, `config/audit_vocabulary.py` (section 3.10). It reads a registry (the built-in one by
+default) and builds the audit vocabulary; it names no module itself, and nothing in the application calls it yet.
 
 ### 5.5 Direct dependency inspection
 
@@ -590,8 +769,9 @@ An update manager does not exist and is **not** part of MOD-1a. When it is desig
 - No module is registered; `BUILTIN_MODULES` is empty and nothing calls `build_registry`.
 - No activation, enablement state, database table, model or migration for modules.
 - No handler registration with the worker, no permission seeding, no API or UI mounting, no endpoint listing modules.
-- The audit vocabulary, run states and permission constants in Core are still shaped by Request Intake
-  (`apps/audit/events.py`, `apps/cases/run_state.py`, `apps/accounts/roles.py`); the contract does not change them.
+- Run states and permission constants in Core are still shaped by Request Intake (`apps/cases/run_state.py`, `apps/accounts/roles.py`); the
+  contract does not change them. The audit vocabulary is extensible since S3 (section 3.10): Core's seven actions stay Request-Intake-shaped
+  and fixed, and modules add their own.
 - No configuration storage or value validation (only schema declarations), no secrets store, no document storage, no AI gateway.
 - No license enforcement, no signatures, no package format, no installer, no update manager, no marketplace.
 - No sandbox; see section 7.
@@ -617,12 +797,20 @@ An update manager does not exist and is **not** part of MOD-1a. When it is desig
 - No capability facade exists (`task.enqueue` and the others are names a manifest may require, nothing a module can call).
 - Request Intake has no manifest in the application; the synthetic one in `tests/module_support.py` exists only for the golden test.
 - Only manifest version 1; no pre-release versions.
+- **S3 (audit vocabulary), pushed and not merged:** no module is registered and nothing installs a module vocabulary in the application (no entry point,
+  `ready()` or command calls `install_audit_vocabulary`), so no module action can be recorded in any running process yet. The database checks the
+  shape of an action only; membership is Python's rule, bypassable by raw SQL, a migration or a database administrator. A module action stored in
+  the table prevents reversing migration `0002` (by design: events are never deleted). The migration and its PostgreSQL behaviour passed the
+  24 PostgreSQL tests and a 342-test regression in the owner's local run (owner-supplied, section 3.10), for the tested scenarios on one machine
+  only. Owner decision: installing a module vocabulary in a running
+  process is deferred to MOD-2. No production-readiness claim.
 
 ## 11. Open decisions (for later slices)
 
 1. **Loading mechanism** for module manifests that live in packages importing Django models (lazy import after app loading).
-2. **Audit vocabulary:** relax the database CHECK constraints on audit actions and subject types to a prefix pattern plus a registry
-   allowlist, or add a Core migration per new action.
+2. **Audit vocabulary:** decided and implemented in S3 (section 3.10, on `feat/module-audit-vocabulary`, pushed and not merged): the database CHECK is a
+   bounded shape pattern, the allowlist is the Python vocabulary composed from the registry. Owner decision: the process-start installation
+   call is deferred to MOD-2 (where it belongs is still open), and any database-level protection of the table.
 3. **Run-state vocabulary:** keep the Core set fixed with modules mapping onto it, or make it extensible; the name `extracting` is
    intake-shaped.
 4. **Run snapshots:** when `WorkflowRun` gains `workflow_key` and `workflow_version`
@@ -663,3 +851,9 @@ From S2 (section 3.9): pure and Django-runner `tests/test_tasks_gating.py` (DB-f
 `tests/test_tasks_gating_postgres.py` (owner-run locally, section 3.9; the VM did not run it). Source: `backend/apps/tasks/policy.py` (`normalize_allowed_kinds`),
 `backend/apps/tasks/services.py` (`claim_next_task`) and `backend/apps/tasks/worker.py` (`MaintenanceHook`, `Composition`, the kind gate) (changed).
 `config/task_registry.py` and `runworker` are unchanged.
+
+From S3 (section 3.10): DB-free `tests/test_audit_vocabulary.py` (pure and Django-runner classes; passes in the VM) with the helper
+`tests/audit_support.py`; PostgreSQL `tests/test_audit_vocabulary_postgres.py` (24 tests; owner-run locally, section 3.10; the VM did not run them). Source:
+`backend/apps/audit/vocabulary.py` (new), `backend/apps/audit/events.py` and `backend/apps/audit/models.py` (changed),
+`backend/apps/audit/migrations/0002_extensible_audit_vocabulary.py` (new) and `backend/config/audit_vocabulary.py` (new). `apps/modules`,
+`config/modules.py`, the recorder, `apps/tasks` and Request Intake are unchanged.

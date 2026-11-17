@@ -180,7 +180,7 @@ class PureModuleTests(SimpleTestCase):
         self.assertEqual(imported_modules(INTAKE / "editing.py") & {"django", "psycopg", "rest_framework"}, set())
 
     def test_audit_events_and_roles_are_standard_library_only(self):
-        self.assertEqual(imported_modules(AUDIT / "events.py") - {"re", "uuid", "dataclasses", "types"}, set())
+        self.assertEqual(imported_modules(AUDIT / "events.py") - {"re", "threading", "uuid", "dataclasses", "types"}, set())  # threading: the vocabulary install lock (MOD-1b S3)
         self.assertEqual(imported_modules(ACCOUNTS / "roles.py") - {"types"}, set())
 
     def test_no_new_module_executes_code_by_name_or_uses_the_network(self):

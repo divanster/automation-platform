@@ -12,6 +12,10 @@ Rows carry identifiers, state names, counts, hashes and reason codes only (see `
 ``actor_public_id`` is ``User.public_id``; there is no foreign key to the user, so an event outlives its
 user, and ``case_id`` and ``run_id`` are plain UUIDs for the same reason. An event is written by
 ``apps.audit.recorder.record_event`` inside the transaction of the operation it describes.
+
+The database checks the SHAPE of ``action`` (a bounded, anchored pattern) and the subject type against a fixed list that includes ``module``; it
+does not know which actions are declared. That allowlist is ``apps.audit.vocabulary`` (Core's actions plus the actions modules declare) and is
+enforced in Python when an event is built. Raw SQL can store any well-formed action; nothing here detects it.
 """
 
 from django.db import models
@@ -19,7 +23,8 @@ from django.db.models import Q
 
 from apps.cases.models import ImmutableRecord
 
-from .events import ACTIONS, ACTOR_KINDS, ACTOR_SYSTEM, ACTOR_USER, SUBJECT_TYPES
+from .events import ACTOR_KINDS, ACTOR_SYSTEM, ACTOR_USER, SUBJECT_TYPES
+from .vocabulary import ACTION_SHAPE_PATTERN
 
 
 class AuditEvent(ImmutableRecord):
@@ -38,7 +43,8 @@ class AuditEvent(ImmutableRecord):
         default_permissions = ("view",)  # no add, change or delete permission exists for audit events
         indexes = [models.Index(fields=["run_id", "id"], name="audit_event_run_idx")]
         constraints = [
-            models.CheckConstraint(condition=Q(action__in=list(ACTIONS)), name="audit_event_action_valid"),
+            # The SHAPE of the action only (migration 0002). Which actions are allowed is the Python vocabulary's rule, not the database's.
+            models.CheckConstraint(condition=Q(action__regex=ACTION_SHAPE_PATTERN), name="audit_event_action_shape"),
             models.CheckConstraint(condition=Q(subject_type__in=list(SUBJECT_TYPES)), name="audit_event_subject_type_valid"),
             models.CheckConstraint(condition=Q(actor_kind__in=list(ACTOR_KINDS)), name="audit_event_actor_kind_valid"),
             models.CheckConstraint(
