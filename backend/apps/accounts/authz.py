@@ -5,7 +5,8 @@ then reloads the row by primary key, so a user deactivated, demoted, or removed 
 object was loaded is judged by what is stored NOW. The returned ``Actor`` is the only source of the actor's
 ``public_id`` for the review services: a caller can never supply one.
 
-The decision itself (which permission an action needs, and what scope it has) is pure and lives in
+The decision itself is pure and lives in two places: the generic own / any / superuser algorithm is
+``apps.accounts.access`` (Core), and the table of which permission each Request Intake action needs is
 ``apps.intake.access``. This module only gathers facts, so the rules can be tested without a database.
 
 LOGGING. A refusal is logged with the action, the stable reason code, and the actor's ``public_id`` (a

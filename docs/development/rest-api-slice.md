@@ -166,7 +166,8 @@ vocabulary's restricted object (identifiers, state names, counts, hashes, reason
 | `POST .../approve/`, `.../reject/` | no (403) | yes (not own work, for approve) | no (403) | yes (not own work, for approve) |
 | `GET .../audit/` | no (403) | no (403) | yes | yes |
 
-These are the rules of `apps.accounts.roles` and `apps.intake.access`; the API adds none. A user with no role
+These are the rules of `apps.accounts.roles`, `apps.intake.access` (the action table) and `apps.accounts.access` (the generic own / any /
+superuser algorithm it delegates to); the API adds none. A user with no role
 gets `403 permission_denied` everywhere above.
 
 ## 7. Examples (synthetic data only)

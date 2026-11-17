@@ -10,7 +10,14 @@
 > default role grants, the `permissions.check` Core capability, maintenance hook **declarations**, read-only direct dependency
 > inspection, a pure derivation of the default role permission sets, and a pure namespace-continuity check (sections 3.4 to 3.7,
 > 5.5, 5.6). **Nothing here is enforced or executed**: `setup_roles`, `/api/auth/me/`, the worker and every authorization service
-> are unchanged, there is no `apps/module_host` yet, and Request Intake is still not a module.
+> are unchanged, there is no `apps/module_host` yet, and Request Intake is still not a module. S1a is merged into `main`.
+>
+> **MOD-1b / S1b (generic authorization refactor)** moves the own / any / superuser algorithm out of `apps/intake/access.py` into Core
+> (`apps/accounts/access.py`) with no change in any authorization outcome (section 3.8). Request Intake delegates to it. It is a
+> refactor, not a contract change: no module uses Core's rule, no manifest is turned into rules, and the behaviour-preservation
+> evidence is DB-free in the development VM, plus an owner-supplied local PostgreSQL run (242 tests, exit code 0; section 3.8 and
+> [local-validation-record.md](../development/local-validation-record.md)). Still absent: `ModuleState`, runtime module permissions,
+> enable/disable and a capability facade. No production-readiness claim.
 
 ## 1. Purpose and scope
 
@@ -147,7 +154,7 @@ to the existing services unchanged; no capability can be called today):
 | `case.run` | Create cases and runs for workflows the module declares, and move them through the Core run states | `apps.cases.services` (`create_case`, `create_run`, `transition_run`) |
 | `audit.record` | Record events whose actions the module declares, inside the operation's transaction | `apps.audit.recorder.record_event` |
 | `revision.approval` | Create revisions and record approvals and rejections through the Core policy | `apps.cases.services` and the pure `workflows.revision_approval` policy |
-| `permissions.check` | Ask whether a user may act, using permissions the module itself declares (or Core's listed ones), with the own/any/superuser rules | `apps.accounts.authz.load_actor` and the access rules (today in `apps.intake.access`) |
+| `permissions.check` | Ask whether a user may act, using permissions the module itself declares (or Core's listed ones), with the own/any/superuser rules | `apps.accounts.authz.load_actor` and the Core access rule `apps.accounts.access` (section 3.8; Request Intake's action table is `apps.intake.access`) |
 
 `permissions.check` belongs to Core: the `permissions` namespace is reserved, so no module can provide it, and a module cannot
 provide any of the five either (it would need to own a reserved namespace). Requiring an unknown capability is `missing_capability`;
@@ -207,6 +214,81 @@ be a deeper, import-path-shaped string), unique across the registry, and nothing
 attaches the real callable through the composition root, by id. `while_disabled` says whether the worker keeps running the hook while
 the module is disabled (true for bookkeeping that must not stall). The registry lists hooks as `RegisteredHook(module_id, hook_id,
 while_disabled)`, deterministically: modules in registration order, then hook id. `worker.py` is not changed.
+
+### 3.8 The Core authorization rule (MOD-1b / S1b)
+
+**What moved.** The generic own / any / superuser algorithm, which was inside `apps/intake/access.py`, is now `apps/accounts/access.py`:
+pure Python, standard library only (a test pins that its only import is `dataclasses`), no Django, no database, no logging, and no
+word about requests. This is a **behaviour-preserving refactor**: no permission, role, group, migration, endpoint or outcome changed.
+
+**The Core interface.** `AccessRule(any_permissions, own_permissions)` is a frozen description of one action: the permissions that allow
+it on any record and those that allow it only on the actor's own records (each normalized to a `frozenset` of text; anything else is a
+`TypeError`). Three functions take a rule and facts the caller already read (`load_actor` reads them; Core reads nothing), all with
+keyword-only arguments: `permission_problem(rule, *, is_superuser, permissions)`, `scope_problem(rule, *, is_superuser, permissions,
+actor_pk, owner_pk)` and `access_problem(rule, *, is_superuser, permissions, actor_pk, owner_pk=None)`. They return a stable code or
+`None`: `missing_permission` and `out_of_scope` (constants `MISSING_PERMISSION`, `OUT_OF_SCOPE`).
+
+**The exact algorithm** (moved unchanged):
+
+1. A superuser passes both parts: it bypasses role membership and the own-record scope. Core has no other rule for it to bypass.
+2. Permission part: not a superuser and holding none of the rule's any or own permissions is `missing_permission`.
+3. Scope part: not a superuser; holding an *any* permission passes; otherwise holding an *own* permission passes only when `owner_pk` is
+   not `None` and equals `actor_pk` (pk `0` is a real owner, an unknown owner never matches); holding an own permission for another
+   user's record is `out_of_scope`; holding none is `missing_permission`, so the scope part alone never lets anyone through.
+4. `access_problem` is the permission part first, then the scope part. A user with no permission therefore gets the same answer for
+   their own record, somebody else's and an unknown one.
+
+**What stays in Request Intake.** `apps/intake/access.py` keeps the `Action` vocabulary and the table that says which permission each
+action needs (`_ANY`, `_OWN`, unchanged), builds one `AccessRule` per action from it, and its three functions keep their names,
+signatures, `submitter_pk` argument and `ValueError` for an unknown action; each is now a single call into Core (a test pins that
+they hold no logic of their own, and that the algorithm exists once in the application). `apps/intake/authorization.py`
+(`require_permission` before any lookup, `authorize` after the run lock, with the single refusal log line), `review.py`,
+`submission.py`, `queries.py`, `load_actor`, `log_refusal` and `AuthorizationError` are **unchanged**, so error codes, refusal
+precedence, inactive and deleted user handling, logging and transaction boundaries are those of the code before. **Business rules did not
+move:** self-approval ban, state guards, stale revision and content-hash checks, warning acknowledgement and workflow transitions remain
+in `apps/intake/review_rules.py` and the services; none of them takes a superuser flag.
+
+**Behaviour-preservation evidence** (all DB-free, run in the development VM):
+
+- `tests/authz_oracle.py` is a frozen copy of the old algorithm (it imports nothing from `apps`). The truth table of the old code over every
+  combination of 6 actions x 512 permission subsets (the seven known permissions plus two they must not match) x 2 superuser flags x 6
+  actor/submitter scenarios (same user, other user, no submitter, pk 0, nothing known, a value of another type) = **36 864 rows, three
+  functions each**, was recorded **before the refactor** as a SHA-256 digest (`tests/authz_truth_table.py`,
+  `BASELINE_DIGEST` in `tests/test_authz_core_access.py`). The oracle, the refactored `apps.intake.access` and Core called directly with
+  rules built from the oracle's tables all reproduce the digest, and every row is compared one by one.
+- Every role, a user with two roles, and a superuser, on own, other and unknown records; the exceptions (`ValueError` for an unknown action
+  even for a superuser, `TypeError` for a bad permission collection); keyword-only arguments; the public signatures.
+- `tests/test_authz_glue_equivalence.py` runs the unchanged glue with a fabricated actor, over all 512 permission subsets, both superuser
+  flags and every scenario, and compares the decision, the stable code, the single log line (action, reason, public id) and the returned
+  actor with the oracle; it also pins the precedence (an unauthenticated or inactive user is refused before the action is even looked at) and, by AST, that
+  the services still require permission before any lookup or lock and re-check scope after the lock, inside the transaction.
+- 15 deliberate mutations of Core and of the Request Intake table (for example removing the superuser bypass, inverting the owner
+  comparison, swapping the order of the two parts, swapping any and own) were each caught by these tests.
+
+**What the VM cannot show, and the PostgreSQL tests that cover it.** The VM has no PostgreSQL and ran none of these. The new
+`tests/test_authz_core_postgres.py` compares the real `load_actor`, real groups made by `setup_roles` and real users
+(every role, role pairs, superuser, inactive, deleted, stale objects) with the oracle. The existing suites cover the rest and must
+still pass unchanged: `tests/test_review_postgres.py` (`AuthorizationTests`, `SubmitAsTests`, `EditServiceTests`, `ApprovalServiceTests`,
+`RejectionServiceTests`, `ReadServiceTests`, `ConcurrencyTests`) and `tests/test_api_postgres.py` (`IsolationApiTests`, the approval,
+rejection, edit and audit API classes). Intended command, from `backend\`, with the runbook's database set up:
+`python manage.py test tests.test_authz_core_postgres tests.test_review_postgres tests.test_api_postgres --tag requires_postgres -v 2`.
+
+**Owner-supplied local PostgreSQL result (2026-11-17; not run, repeated or observed by the VM).** The project owner ran the PostgreSQL
+authorization, review and API integration tests on the local Windows computer for the S1b commit `962d6ab` and reported: **242 tests
+passed, runtime 55.659 seconds, exit code 0, and the test database `test_automation_dev` destroyed successfully.** The reported
+scenarios include Django users and groups, authorization equivalence, the review services, API permissions, concurrent edits and
+approvals, and the end-to-end API workflow. The output is not stored in the repository, and the exact command line and module list were
+not supplied. This validates the tested scenarios on the owner's local PostgreSQL only: the refactor changed no outcome in them. It does
+not prove that no other race or authorization path exists, it says nothing about module-driven permissions (none exist yet), and it is
+not a production-readiness claim. Record: [local-validation-record.md](../development/local-validation-record.md).
+
+**Not done here, by design.** Core does not know which module owns a permission, does not read `ModuleState` (there is none), and
+nothing derives `AccessRule` objects from manifests: the permission scopes of section 3.5 are still declarations, and the table of
+Request Intake is still written in code. A later slice will build rules from a registered module's declarations (scope `own` to
+`own_permissions`, `any` and `global` to `any_permissions`) and put the generic read-actor-then-decide-then-log sequence behind the
+`permissions.check` facade; a golden test will then have to show that rules built from the manifest equal the table above. A disabled
+module's actions are blocked by a separate gate, never by changing who holds a permission. `apps/modules` does not import Core's
+rule (a test pins it), and `setup_roles`, `/api/auth/me/` and `profile.py` are untouched.
 
 ## 4. Versioning
 
@@ -415,6 +497,15 @@ An update manager does not exist and is **not** part of MOD-1a. When it is desig
 - Capability and permission declarations are not enforced at run time. Permission scopes are declarations; the default scope is `any`.
 - Default role grants are not wired: `setup_roles`, `/api/auth/me/` and `apps/accounts/profile.py` still use `apps/accounts/roles.py`,
   and nothing calls `derive_role_permissions`. Roles are fixed to the existing three.
+- Core's access rule (`apps/accounts/access.py`, section 3.8) is used only by Request Intake's own table. Nothing builds `AccessRule`
+  objects from manifest permission scopes, no module can use it, and the generic "read actor, decide, log, refuse" sequence is still
+  Request Intake's glue (`apps/intake/authorization.py`), to be generalized behind the `permissions.check` facade (S6). One characteristic
+  carried over unchanged: `access_problem` evaluates `permissions` twice, so a one-shot iterator (a generator) would be exhausted by the
+  first part; every caller passes a `frozenset` and the tests use re-iterable collections only.
+- The behaviour-preservation tests for S1b are DB-free in the VM. The PostgreSQL comparison (`tests/test_authz_core_postgres.py`) and the
+  existing review and API suites passed in the owner's local run (242 tests, owner-supplied, section 3.8); the VM never ran them.
+- Still absent after S1b: `ModuleState`, runtime module permissions (no module permission is checked at run time; no manifest becomes
+  an `AccessRule`), enable/disable, and the capability facade. Request Intake is not a module.
 - Maintenance hooks are declarations: `apps/tasks/worker.py` still has its single `after_iteration` hook and does not read them.
   A hook id is not resolved to code anywhere.
 - No `ModuleState`, no `apps/module_host`, no enable/disable, no persisted namespace history; the continuity check is not called.
@@ -455,3 +546,9 @@ reference `apps.modules`). Shared helpers: `tests/module_support.py`. Source:
 `backend/apps/modules/{__init__,manifest,versions,registry,errors,roles,continuity}.py` and `backend/config/modules.py`. Existing
 Request Intake, worker, API and frontend code is unchanged. All of these were run in the development VM without a database; the
 PostgreSQL-backed suite was not run there.
+
+From S1b (section 3.8): pure `tests/test_authz_core_access.py` (36 864-row truth table against the recorded baseline digest, Core
+generic behaviour, structure and delegation); Django-runner `tests/test_authz_glue_equivalence.py` (the unchanged glue with a
+fabricated actor, refusal precedence, service order); PostgreSQL, `tests/test_authz_core_postgres.py` (owner-run locally, section 3.8; the VM did not run it); helpers
+`tests/authz_oracle.py` (the frozen old algorithm) and `tests/authz_truth_table.py`. Source: `backend/apps/accounts/access.py` (new),
+`backend/apps/intake/access.py` and a docstring in `backend/apps/accounts/authz.py` (changed).
