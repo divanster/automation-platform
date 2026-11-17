@@ -9,7 +9,8 @@
 > "Evidence status"). The VM never ran the PostgreSQL tests. This slice does not connect the
 > request-intake workflow, performs **no external effect**, authorizes none, and registers no Windows service.
 > (A later slice, [request-intake orchestration](request-intake-orchestration-slice.md), connects the queue to
-> the workflow through an explicit composition point; this document describes the queue slice as it was.)
+> the workflow through an explicit composition point; this document describes the queue slice as it was. Section 11 records the
+> later MOD-1b / S2 change to the claim, the hooks and the gate seam.)
 
 ## 1. Scope
 
@@ -230,3 +231,38 @@ try {
   [orchestration slice](request-intake-orchestration-slice.md) later connects them (composition point in `worker.py` and
   `runworker`; `HANDLERS` itself is unchanged); no endpoint or UI exists.
 * Task rows hold business payloads in plain JSON in the database; nothing here encrypts or access-controls them, and there is no authorization on enqueueing. Do not enqueue sensitive data until that is designed.
+
+## 11. MOD-1b / S2: claim filter, maintenance hooks and kind gate (not yet merged; PostgreSQL tests not run)
+
+A later, small change to `apps/tasks`; the design and the guarantees of sections 2 to 4 stand. The full contract is
+[module-contract.md](../architecture/module-contract.md) section 3.9; in short:
+
+* **Claim filter.** `claim_next_task(..., allowed_kinds=None)`. `None` is unrestricted (the same statement as before). An empty set, list or tuple
+  claims nothing and runs no query. A non-empty one adds `kind IN (...)` to the same `SELECT ... FOR UPDATE SKIP LOCKED ... ORDER BY available_at,
+  created_at, id LIMIT 1`, so other kinds (an unknown kind too) are never locked or changed and stay `queued`. Order, lease token, attempt
+  numbering, retries, recovery, cancellation and fencing do not read it. A bare string, a mapping, a generator or a bad member is refused.
+* **Hooks.** `Composition` gained `maintenance_hooks` (a tuple of `MaintenanceHook(hook_id, run)`, ids `<namespace>.<name>`, no duplicates,
+  `core.after_iteration` reserved). After every iteration the legacy `after_iteration` runs first, then the hooks in the order written. A hook
+  failure other than a database error is logged (id and exception class only) and does not stop the later hooks; a `DatabaseError` is re-raised
+  for the worker loop's existing connection recovery, so the hooks after it wait for the next iteration.
+* **Kind gate.** `Composition.kind_gate` (optional callable) is asked once per iteration after lease recovery. Its answer, narrowed to the kinds
+  this worker has a handler for, becomes the claim filter; an empty answer, an exception or an invalid answer (including `None`) means nothing is
+  claimed (fail closed), while recovery and the hooks still run. A database error from the gate is re-raised before any claim. Held tasks stay
+  queued and are claimed as attempt 1 once the gate opens.
+* **Compatibility.** `config/task_registry.py` and `runworker` are unchanged: no gate and no extra hook are installed, so the worker claims every
+  kind and runs its one hook exactly as in sections 2 to 7. The signatures of `process_one` and `run_until_stopped` (wrapped by the real-process
+  recovery tests) are unchanged. `apps/tasks` still imports nothing from `apps.modules`, `apps.intake` or `workflows`.
+* **Deferred.** The gate that reads module state, `while_disabled`, and any enable/disable are S4. Nothing here decides which kinds belong to a
+  module.
+* **Validation.** `tests/test_tasks_gating.py` (DB-free, 72 tests) passes in the development VM. `tests/test_tasks_gating_postgres.py`
+  (`FilteredClaimTests`, `FilteredRetryAndRecoveryTests`, `FilteredClaimConcurrencyTests`, `GatedWorkerTests`) is written and **has not been run by
+  anyone**; the existing `test_tasks_postgres.py` and `test_tasks_recovery_postgres.py` have not been rerun since S2 and must pass unchanged. From
+  `backend\` with the setup of section 9.3 (no `--keepdb`, no `--noinput`, flag removed afterwards):
+
+```powershell
+try {
+    $env:AP_RUN_DB_TESTS = "1"
+    & $Py manage.py test tests.test_tasks_gating_postgres tests.test_tasks_postgres tests.test_tasks_recovery_postgres --tag requires_postgres -v 2
+    "exit code: $LASTEXITCODE"
+} finally { Remove-Item Env:AP_RUN_DB_TESTS -ErrorAction SilentlyContinue }
+```

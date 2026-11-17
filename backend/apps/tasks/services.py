@@ -53,6 +53,7 @@ from .policy import (
     decide_retry,
     lease_expiry,
     lease_problem,
+    normalize_allowed_kinds,
     request_fingerprint,
     validate_aware,
     validate_idempotency_key,
@@ -161,7 +162,9 @@ class ClaimedTask:
     lease_expires_at: datetime
 
 
-def claim_next_task(*, worker_id: str, lease_seconds: int, now: datetime | None = None) -> ClaimedTask | None:
+def claim_next_task(
+    *, worker_id: str, lease_seconds: int, now: datetime | None = None, allowed_kinds=None
+) -> ClaimedTask | None:
     """Claim the oldest eligible task in one short transaction, or return None when there is none.
 
     Eligible: ``queued``, ``available_at <= now``, attempts remaining. Order: ``available_at``,
@@ -169,19 +172,28 @@ def claim_next_task(*, worker_id: str, lease_seconds: int, now: datetime | None 
     takes a different task or none. In the same transaction: state -> running, a NEW lease token,
     the lease expiry, ``attempt_count + 1``, and a ``TaskAttempt`` row. Committed before return,
     i.e. before the handler runs.
+
+    ``allowed_kinds`` is the claim filter. ``None`` (the default) is no restriction: the query is
+    exactly the one callers have always had. A non-empty set, list or tuple adds ``kind IN (...)`` to
+    that same locking query, so a task of another kind is never locked, claimed or changed and stays
+    queued (an unknown kind included). An EMPTY collection claims nothing and runs no query. The
+    filter is a WHERE condition, not a check after the claim: no task is claimed and then put back.
     """
     if not isinstance(worker_id, str) or not 1 <= len(worker_id) <= MAX_WORKER_ID_LENGTH:
         raise QueuePolicyError(f"worker_id must be 1 to {MAX_WORKER_ID_LENGTH} characters")
+    kinds = normalize_allowed_kinds(allowed_kinds)
     claimed_at = _instant(now)
     expires_at = lease_expiry(claimed_at, lease_seconds)
+    if kinds is not None and not kinds:
+        return None
 
     with transaction.atomic():
-        task = (
-            Task.objects.select_for_update(skip_locked=True)
-            .filter(state=TaskState.QUEUED.value, available_at__lte=claimed_at, attempt_count__lt=F("max_attempts"))
-            .order_by("available_at", "created_at", "id")
-            .first()
+        candidates = Task.objects.select_for_update(skip_locked=True).filter(
+            state=TaskState.QUEUED.value, available_at__lte=claimed_at, attempt_count__lt=F("max_attempts")
         )
+        if kinds is not None:
+            candidates = candidates.filter(kind__in=sorted(kinds))
+        task = candidates.order_by("available_at", "created_at", "id").first()
         if task is None:
             return None
         token = uuid.uuid4()

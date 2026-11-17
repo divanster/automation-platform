@@ -47,6 +47,13 @@
   safe by idempotence (a repeat returns the existing outcome), not by atomicity. The lease token does not fence the
   handler's domain write, only the queue's bookkeeping.
 
+- **Claim filter, maintenance hooks and kind gate (MOD-1b / S2; not yet merged).** `claim_next_task` takes an optional allowed-kind filter
+  inside its single `FOR UPDATE SKIP LOCKED` statement, and the worker composition takes ordered named maintenance hooks and an optional
+  kind gate that fails closed ([module-contract.md](module-contract.md) section 3.9 and
+  [persistent-worker-slice.md](../development/persistent-worker-slice.md) section 11). Nothing installs a gate or an extra hook, so the
+  worker behaves as before. A gate would hold tasks of other kinds in `queued` rather than fail them. The new PostgreSQL tests are written
+  and not run.
+
 ## 1. Proposal
 
 Run background work with a **separate, persistent worker process** that uses a
