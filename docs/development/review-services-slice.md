@@ -289,7 +289,7 @@ change or remove events, and nothing detects it (no hash chain). A PostgreSQL te
 row with raw SQL. `audit.view_auditevent` is the only permission Django creates for the model (no add,
 change or delete permission exists). Open questions 2.5 and 2.18.
 
-**MOD-1b S3 change (not merged; its PostgreSQL tests are not run).** The action list above is Core's. Since S3 the allowed actions are Core's
+**MOD-1b S3 change (pushed, not merged; its PostgreSQL tests passed in the owner's local run, owner-supplied).** The action list above is Core's. Since S3 the allowed actions are Core's
 seven plus the actions that registered modules declare, checked in Python when an event is built (`apps/audit/vocabulary.py`, installed vocabulary
 in `apps/audit/events.py`); no module is registered, so nothing changes in practice. The database CHECK on `action` no longer lists names: audit
 migration `0002` replaces it with a bounded, anchored shape pattern and adds `module` to the subject types. The shape check does not know which
@@ -305,7 +305,7 @@ section 3.10.
 | `accounts/0003_backfill_user_public_id` | `RunPython` | Section 3. |
 | `accounts/0004_user_public_id_constraints` | `AlterField` | Section 3. |
 | `audit/0001_initial` | `CreateModel` `AuditEvent` | Table with CHECK constraints on action, subject type, actor kind, and "a user actor has a public id, the system has none"; index on `(run_id, id)`. No dependency. |
-| `audit/0002_extensible_audit_vocabulary` (MOD-1b S3) | `RemoveConstraint` x2, `AddConstraint` x2, `RunPython` (reverse guard) | Replaces the fixed action list with a shape CHECK; adds the `module` subject type; reverse refused if new-vocabulary events exist. Depends on `audit/0001_initial` only. Not applied or run on PostgreSQL by anyone yet. |
+| `audit/0002_extensible_audit_vocabulary` (MOD-1b S3) | `RemoveConstraint` x2, `AddConstraint` x2, `RunPython` (reverse guard) | Replaces the fixed action list with a shape CHECK; adds the `module` subject type; reverse refused if new-vocabulary events exist. Depends on `audit/0001_initial` only. Applied and tested on PostgreSQL in the owner's local run (owner-supplied; [module-contract.md](../architecture/module-contract.md) section 3.10). |
 | `cases/0005_rejection` | `CreateModel` `Rejection` | Immutable; FK to `ResultRevision` (PROTECT); CHECK: hash is 64 lowercase hex, reason code shape `^[a-z][a-z0-9_]{0,39}$`. |
 | `intake/0002_revisionedit_request_permissions` | `AlterModelOptions`, `CreateModel` | `RequestSource` gets the six request permissions and loses its default permissions (options only, no DDL); `RevisionEdit` is new (immutable; one per revision; nullable base; author FK to the user, PROTECT; CHECK: a revision is not its own base). |
 

@@ -469,3 +469,62 @@ implemented and nothing can be enabled or disabled at run time**: no gate is ins
 claimable and no task is held. The **gate race window remains** (a kind gated off between the gate read and the claim can still be claimed by
 that one claim, section 3.9 of the module contract), `while_disabled` is read by nothing, and the gate that reads module state is S4. The tests
 run on one machine and operating system. This is **not a production-readiness claim**: the other limits recorded above are unchanged.
+
+## MOD-1b / S3 extensible audit vocabulary: owner-supplied local PostgreSQL results
+
+> **Scope.** S3 lets modules declare audit actions that Core's one recorder accepts (implementation commit `ba4060a`, test-expectation fix
+> `5398a1b`, branch `feat/module-audit-vocabulary`; see [module-contract.md](../architecture/module-contract.md), section 3.10). It adds audit
+> migration `audit.0002_extensible_audit_vocabulary`: the fixed list of action names is replaced by a bounded, anchored action-**shape** CHECK
+> (`audit_event_action_shape`) and the subject-type CHECK gains `module`. The project owner ran the migration and the PostgreSQL tests **locally
+> on the Windows computer**. **These are owner-supplied results.** The development VM has no PostgreSQL, never connected to one, and did not run,
+> repeat or observe any of it. No output or log is stored in this repository.
+
+**Reported by the owner:**
+
+| Item | Reported result |
+| --- | --- |
+| Migration `audit.0002_extensible_audit_vocabulary` | Completed successfully |
+| Existing audit events | **15 existing audit events remained** after the migration |
+| New PostgreSQL audit vocabulary tests (`tests/test_audit_vocabulary_postgres.py`) | **24 passed** |
+| Corrected schema-constraint test (`tests.test_review_postgres.SchemaTests.test_the_database_has_every_named_constraint`) | Passed |
+| Full selected PostgreSQL regression | **342 tests passed, 80.063 seconds, exit code 0** |
+| Test database | The dedicated test database was destroyed successfully |
+
+**An earlier run of the same selection** reported 342 tests with 341 passed and 1 failed (exit code 1). The failing test was
+`SchemaTests.test_the_database_has_every_named_constraint`, which still expected the old constraint name `audit_event_action_valid` while the
+migration intentionally replaces it with `audit_event_action_shape`. The new constraint existed in PostgreSQL; the failure was a **stale test
+expectation**, corrected in `5398a1b` (one line, test code only, no model or migration change). The VM's DB-free suite did not show it because
+the test needs PostgreSQL.
+
+**What was not supplied:** the command line, the list of test modules, whether the 15 events were on the development database, and any output. For
+orientation only (the VM's arithmetic, not something the owner stated): 342 equals the 24 tests of `test_audit_vocabulary_postgres.py`, the
+135 of `test_review_postgres.py`, the 100 of `test_api_postgres.py`, the 7 of `test_authz_core_postgres.py` and the 76 of `test_intake_postgres.py`.
+The section "Pending: REST API slice" above is **not changed** by this entry, because the owner did not name the modules.
+
+**What this supports (this environment and these scenarios only):**
+
+- **The migration on existing data.** It applied to a database that held audit events and left them in place (15, as reported). The new test also
+  compares every column of every pre-existing row, before and after, in the throwaway test database.
+- **The new constraints.** `audit_event_action_shape` exists and the extended subject-type CHECK accepts the existing types plus `module`;
+  well-formed actions (every Core action and module-shaped ones) are accepted and malformed ones are refused by the database; PostgreSQL's reading of the
+  shape pattern agreed with Python's on the test's fixed corpus.
+- **Forward and reverse migration.** The tests cover the forward migration with existing rows, the reverse without events that only the new
+  vocabulary allows (old constraints restored, every row kept), and the reverse **with** such events, which is refused before any constraint is touched,
+  deleting nothing. The owner's report did not itemize the tests, so this rests on the 24 passing.
+- **The recorder and Core behaviour.** A declared module action recorded through the one recorder inside a transaction, an unknown but well-formed
+  action refused by Python, rollback of the business operation when the audit write fails, and the unchanged review, API and intake audit behaviour
+  in the regression.
+
+**What it does not validate, and what does not exist.**
+
+- **The database does not enforce the allowlist.** The CHECK validates syntax only; raw SQL, a privileged migration or an administrator can store any
+  well-formed action, and a test pins this. Audit events remain append-only at the ORM and service boundary only: no hash chain, trigger or insert-only
+  role. Namespace declarations are naming rules, not a sandbox.
+- **No module uses it.** `BUILTIN_MODULES` is empty, nothing installs a module vocabulary in a running process (deferred to MOD-2), and there is no
+  `ModuleState`, enable/disable or S4. Request Intake emits Core events only.
+- **Rollback limits.** Once a module action or a `module`-subject event is stored, migration `0002` cannot be reversed; events are never deleted to make
+  it succeed.
+- Not shown: a large audit table (the constraints are added with a table scan under a brief exclusive lock), another PostgreSQL version, operating system
+  or machine, or that no other race exists.
+- **This is not a production-readiness claim.** The other limits recorded above (`listen_addresses`, per-process login throttling, undecided TLS and
+  HSTS, ORM-level immutability) are unchanged.

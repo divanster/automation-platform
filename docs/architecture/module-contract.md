@@ -30,15 +30,17 @@
 > observe them; section 3.9 and [local-validation-record.md](../development/local-validation-record.md)). Supported for the tested scenarios
 > only; no production-readiness claim.
 >
-> **MOD-1b / S3 (extensible audit vocabulary)** is implemented on `feat/module-audit-vocabulary` and is **not committed or merged**. A module can
+> **MOD-1b / S3 (extensible audit vocabulary)** is implemented on `feat/module-audit-vocabulary` (implementation commit `ba4060a`, test-expectation fix `5398a1b`; pushed, **not merged**). A module can
 > declare audit actions and Core's one recorder accepts them, without a migration per action (section 3.10): an immutable `AuditVocabulary`
 > (Core's seven actions, their detail keys and subject types unchanged, plus validated module declarations) is checked in Python whenever an event
 > is built, and audit migration `0002` replaces the fixed list of action names with a bounded, anchored **shape** check and adds the `module`
 > subject type. **The database checks syntax only; the Python vocabulary is the allowlist.** Raw SQL can still store any well-formed action, and
 > nothing here is tamper protection or a sandbox. `BUILTIN_MODULES` is still empty, nothing in the application installs a module vocabulary yet,
-> and there is no `ModuleState`, enable/disable or S4. The DB-free tests pass in the development VM. The 24 new PostgreSQL tests (and the
-> migration against a real server) are **written and NOT RUN**: the PostgreSQL behaviour is unproven until the owner runs them. No
-> production-readiness claim.
+> and there is no `ModuleState`, enable/disable or S4. The DB-free tests pass in the development VM. The owner reports, from a local run that the VM
+> did not observe (no output is stored): migration `0002` completed, the 15 audit events that existed remained after it, the 24 new PostgreSQL
+> tests passed, the corrected schema-constraint test passed, and the selected PostgreSQL regression ran **342 tests, all passed, 80.063 s, exit
+> code 0, dedicated test database destroyed** (section 3.10 and [local-validation-record.md](../development/local-validation-record.md)).
+> Supported for the tested scenarios only. No production-readiness claim.
 >
 > S3 review (owner decisions): the runtime installation of a module vocabulary is deferred to MOD-2; `request` is now a reserved Core namespace in
 > the manifest; and the manifest and the audit vocabulary apply the same detail-key restrictions (sections 3.2 and 3.10).
@@ -468,8 +470,8 @@ module actions: that fails loudly, not silently. Tests restore state with `mock.
 
 The pattern accepts every action a manifest may declare (a test compares it with the manifest on a large generated sample) and every Core action.
 Its repetition is bounded (the column holds 32 characters and a segment plus its dot takes at least two, so at most 16 segments). It uses only
-anchors, character classes and one bounded group, so PostgreSQL and Python should read it alike; **that is an expectation until the PostgreSQL
-test compares them on a fixed corpus (not run yet)**.
+anchors, character classes and one bounded group, so PostgreSQL and Python should read it alike; **the PostgreSQL test that compares them on a fixed
+corpus passed in the owner's local run (below), for that corpus only**.
 
 **What this does not protect.** Because the database checks syntax only, raw SQL, a privileged migration or a database administrator can store any
 well-formed action, declared or not, and nothing detects it (a PostgreSQL test pins this so nobody claims more). Namespace ownership and the
@@ -507,13 +509,13 @@ isolation, the composition root (and that it needs no Django), shape agreement w
 requirement, "one recorder", and the import boundaries. Pinned older tests changed narrowly because the design changed: `test_review_audit.py`
 (the action constraint is now the shape, by a new name), `test_review_boundaries.py` (`events.py` may import `threading` for the install lock) and
 `test_module_boundaries.py` (`config/audit_vocabulary.py` is the second, and only other, importer of `apps.modules` and of `config.modules`).
-PostgreSQL (`tests/test_audit_vocabulary_postgres.py`, **24 tests, written and NOT RUN**): the forward migration with existing rows (unchanged),
+PostgreSQL (`tests/test_audit_vocabulary_postgres.py`, **24 tests; passed in the owner's local run, see below**; the VM never ran them): the forward migration with existing rows (unchanged),
 the constraints as PostgreSQL stores them, PostgreSQL's reading of the pattern against Python's, a valid module action and the `module` subject
 through the recorder, an unknown well-formed action refused by Python but accepted by the database, malformed actions refused by the database,
 rollback of the business operation when the audit write fails (database-level, Python-level and a Core service), Core's history unchanged and the
 audit API unchanged with a module vocabulary installed, and the reverse migration with and without events only the new vocabulary allows.
 
-**Local PostgreSQL validation (owner-run; none of it has been run).** From `backend\`, with the database set up as in the runbook (section 6) and
+**Local PostgreSQL validation (owner-run; the commands, and the result recorded after them).** From `backend\`, with the database set up as in the runbook (section 6) and
 `AP_RUN_DB_TESTS` unset in the window before and after:
 
 ```powershell
@@ -544,6 +546,25 @@ Report the exact `Ran N tests` line (the new module contributes exactly 24) and 
 unchanged. Applying the migration to a development database that already holds audit events (`python manage.py migrate audit`) is a separate,
 optional step; take a backup first and do not run it against anything that is not disposable until the PostgreSQL tests have passed. This
 validates the tested scenarios on one machine only and would not be a production-readiness claim.
+
+**Owner-supplied local PostgreSQL result (the VM did not run, repeat or observe it; no output is stored):** audit migration `0002` completed, the 15 audit events that existed remained after it, the 24 new PostgreSQL tests passed, the corrected schema-constraint test passed, and the selected PostgreSQL regression ran **342 tests, all passed, 80.063 s, exit code 0, dedicated test database destroyed**. The first run of the selected modules reported 342 tests with 341 passed and 1 failed (exit code 1): `SchemaTests.test_the_database_has_every_named_constraint` in
+`tests/test_review_postgres.py` still expected the old constraint name `audit_event_action_valid`; the new constraint existed, the failure was a
+stale test expectation, and one line in that test was corrected (commit `5398a1b`, test code only). The command line, the module list and the
+output were not supplied; for orientation only (the VM's arithmetic, not stated by the owner) 342 equals the 24 tests of
+`test_audit_vocabulary_postgres.py` plus the earlier 242 authorization, review and API tests plus the 76 intake tests.
+
+**What this supports (this environment and these scenarios only).** The migration applied to a database that already held audit events and left
+them in place (15 events, as reported; the PostgreSQL test additionally compares every column of every pre-existing row before and after in the
+test database); the new action-shape CHECK (`audit_event_action_shape`) and the extended subject-type CHECK exist and behave as the tests expect
+(well-formed actions and the `module` subject accepted, malformed ones refused by the database, PostgreSQL and Python agreeing on the fixed
+corpus); the forward and the reverse migration with and without events that only the new vocabulary allows (the reverse refused, nothing
+deleted, when such events exist); a module action recorded through the one recorder; rollback of the business operation when the audit write
+fails; and the unchanged review, API and intake audit behaviour in the regression. **What it does not show:** that the database enforces the
+allowlist (it does not: raw SQL can still store any well-formed action, a test pins this); tamper protection of audit events (ORM-level
+immutability only, no hash chain or trigger); any module-driven behaviour (no module is registered, nothing installs a module vocabulary, and
+there is no `ModuleState` or enable/disable); behaviour with many or large audit tables (the constraint is added with a table scan under a brief
+exclusive lock); another PostgreSQL version or machine; or that no other race exists. Not a production-readiness claim. Record:
+[local-validation-record.md](../development/local-validation-record.md).
 
 ## 4. Versioning
 
@@ -776,17 +797,18 @@ An update manager does not exist and is **not** part of MOD-1a. When it is desig
 - No capability facade exists (`task.enqueue` and the others are names a manifest may require, nothing a module can call).
 - Request Intake has no manifest in the application; the synthetic one in `tests/module_support.py` exists only for the golden test.
 - Only manifest version 1; no pre-release versions.
-- **S3 (audit vocabulary), not committed:** no module is registered and nothing installs a module vocabulary in the application (no entry point,
+- **S3 (audit vocabulary), pushed and not merged:** no module is registered and nothing installs a module vocabulary in the application (no entry point,
   `ready()` or command calls `install_audit_vocabulary`), so no module action can be recorded in any running process yet. The database checks the
   shape of an action only; membership is Python's rule, bypassable by raw SQL, a migration or a database administrator. A module action stored in
-  the table prevents reversing migration `0002` (by design: events are never deleted). The migration and every PostgreSQL behaviour of it are
-  **unproven**: the 24 PostgreSQL tests were written and not run. Owner decision: installing a module vocabulary in a running
+  the table prevents reversing migration `0002` (by design: events are never deleted). The migration and its PostgreSQL behaviour passed the
+  24 PostgreSQL tests and a 342-test regression in the owner's local run (owner-supplied, section 3.10), for the tested scenarios on one machine
+  only. Owner decision: installing a module vocabulary in a running
   process is deferred to MOD-2. No production-readiness claim.
 
 ## 11. Open decisions (for later slices)
 
 1. **Loading mechanism** for module manifests that live in packages importing Django models (lazy import after app loading).
-2. **Audit vocabulary:** decided and implemented in S3 (section 3.10, on `feat/module-audit-vocabulary`, not merged): the database CHECK is a
+2. **Audit vocabulary:** decided and implemented in S3 (section 3.10, on `feat/module-audit-vocabulary`, pushed and not merged): the database CHECK is a
    bounded shape pattern, the allowlist is the Python vocabulary composed from the registry. Owner decision: the process-start installation
    call is deferred to MOD-2 (where it belongs is still open), and any database-level protection of the table.
 3. **Run-state vocabulary:** keep the Core set fixed with modules mapping onto it, or make it extensible; the name `extracting` is
@@ -831,7 +853,7 @@ From S2 (section 3.9): pure and Django-runner `tests/test_tasks_gating.py` (DB-f
 `config/task_registry.py` and `runworker` are unchanged.
 
 From S3 (section 3.10): DB-free `tests/test_audit_vocabulary.py` (pure and Django-runner classes; passes in the VM) with the helper
-`tests/audit_support.py`; PostgreSQL `tests/test_audit_vocabulary_postgres.py` (24 tests, **written and not run**). Source:
+`tests/audit_support.py`; PostgreSQL `tests/test_audit_vocabulary_postgres.py` (24 tests; owner-run locally, section 3.10; the VM did not run them). Source:
 `backend/apps/audit/vocabulary.py` (new), `backend/apps/audit/events.py` and `backend/apps/audit/models.py` (changed),
 `backend/apps/audit/migrations/0002_extensible_audit_vocabulary.py` (new) and `backend/config/audit_vocabulary.py` (new). `apps/modules`,
 `config/modules.py`, the recorder, `apps/tasks` and Request Intake are unchanged.
