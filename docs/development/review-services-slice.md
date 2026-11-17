@@ -122,8 +122,11 @@ The Auditor holds only `view` permissions. A user may hold several roles; permis
 **A Django permission is global, so the permission alone never authorizes an action.** The name carries the
 scope (`*_own_request`), and the service checks the stored record: `edit_request` loads the run's
 `RequestSource.submitted_by` under the run lock and refuses with `out_of_scope` when an own-scope user is not
-the submitter. The rules are pure functions (`apps/intake/access.py`), tested over every role, action and
-ownership combination without a database. The permission codenames are declared on the unmanaged model
+the submitter. The rules are pure functions, tested over every role, action and
+ownership combination without a database. Since MOD-1b / S1b the generic own / any / superuser algorithm is
+Core's (`apps/accounts/access.py`); `apps/intake/access.py` keeps only the action table (which permission each action
+needs) and delegates every decision to it, with identical outcomes (see
+[module-contract.md](../architecture/module-contract.md), section 3.8, for the evidence). The permission codenames are declared on the unmanaged model
 `intake.RequestSource` (Django creates a permission only for a model; the model's default
 add/change/delete/view permissions are switched off) and a test compares them with `apps/accounts/roles.py`.
 An unmanaged, table-less model was tried first and dropped: it made `manage.py dumpdata` fail. A database

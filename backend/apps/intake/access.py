@@ -18,14 +18,18 @@ An inactive user is refused before this module is reached.
 
 Reason codes: ``missing_permission`` (no permission for this action at all) and ``out_of_scope`` (the actor
 holds an own-record permission, but the request is somebody else's).
+
+WHAT LIVES WHERE (MOD-1b / S1b). The generic own / any / superuser algorithm is Core's: ``apps.accounts.access``. This module keeps
+only what is specific to Request Intake: the ``Action`` vocabulary and the table that says which permissions each action needs, and it
+DELEGATES every decision to Core. Its three functions keep their names, signatures, return values and exceptions (an unknown action is
+still a ``ValueError``), so ``apps.intake.authorization``, ``apps.intake.queries`` and the tests are unchanged.
 """
 
 import enum
 
+from apps.accounts import access as core
+from apps.accounts.access import MISSING_PERMISSION, OUT_OF_SCOPE, AccessRule
 from apps.accounts.roles import PERM_APPROVE, PERM_EDIT_OWN, PERM_REJECT, PERM_SUBMIT, PERM_VIEW_ANY, PERM_VIEW_AUDIT, PERM_VIEW_OWN
-
-MISSING_PERMISSION = "missing_permission"
-OUT_OF_SCOPE = "out_of_scope"
 
 
 class Action(str, enum.Enum):
@@ -56,18 +60,16 @@ _OWN = {
 }
 
 
+# The same table as Core rules, one per action. Built once from the two tables above, so there is a single source of truth.
+_RULES = {action: AccessRule(any_permissions=_ANY[action], own_permissions=_OWN[action]) for action in Action}
+
+
 def permission_problem(action: Action, *, is_superuser: bool, permissions) -> str | None:
     """``missing_permission`` when the actor holds no permission for ``action`` (any scope), else None.
 
     The check that needs no record: services run it first, before looking anything up.
     """
-    action = Action(action)
-    if is_superuser:
-        return None
-    held = frozenset(permissions)
-    if held & (_ANY[action] | _OWN[action]):
-        return None
-    return MISSING_PERMISSION
+    return core.permission_problem(_RULES[Action(action)], is_superuser=is_superuser, permissions=permissions)
 
 
 def scope_problem(action: Action, *, is_superuser: bool, permissions, actor_pk, submitter_pk) -> str | None:
@@ -75,19 +77,13 @@ def scope_problem(action: Action, *, is_superuser: bool, permissions, actor_pk, 
 
     Call it after ``permission_problem`` passed. ``submitter_pk`` is the user who submitted the request.
     """
-    action = Action(action)
-    if is_superuser:
-        return None
-    held = frozenset(permissions)
-    if held & _ANY[action]:
-        return None
-    if held & _OWN[action] and submitter_pk is not None and actor_pk == submitter_pk:
-        return None
-    return OUT_OF_SCOPE if held & _OWN[action] else MISSING_PERMISSION
+    return core.scope_problem(
+        _RULES[Action(action)], is_superuser=is_superuser, permissions=permissions, actor_pk=actor_pk, owner_pk=submitter_pk
+    )
 
 
 def access_problem(action: Action, *, is_superuser: bool, permissions, actor_pk, submitter_pk=None) -> str | None:
     """Both parts at once: the stable reason code, or None when the actor may do ``action`` to this request."""
-    return permission_problem(action, is_superuser=is_superuser, permissions=permissions) or scope_problem(
-        action, is_superuser=is_superuser, permissions=permissions, actor_pk=actor_pk, submitter_pk=submitter_pk
+    return core.access_problem(
+        _RULES[Action(action)], is_superuser=is_superuser, permissions=permissions, actor_pk=actor_pk, owner_pk=submitter_pk
     )
