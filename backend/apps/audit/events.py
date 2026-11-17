@@ -1,21 +1,26 @@
 """The audit event vocabulary and the shape of one event: pure, standard library only, no database.
 
 An event says WHO did WHAT to which subject, in which case and run. It never carries business content.
-``details`` is a small flat object whose keys are fixed per action (``DETAIL_KEYS``) and whose values are
-booleans, integers, ``None``, or short tokens made only of letters, digits and ``_ . : -`` (identifiers,
+``details`` is a small flat object whose keys are fixed per action (``DETAIL_KEYS`` for Core's actions, the owner's declaration for a
+module's) and whose values are booleans, integers, ``None``, or short tokens made only of letters, digits and ``_ . : -`` (identifiers,
 state names, counts, hashes, reason codes). A value with a space, a quote, or any other character is
 refused, so request text, extracted values, names, e-mail addresses, and exception messages cannot be
 stored by accident. Anything that needs more detail than that belongs on the business record the event
 points at, where access is controlled.
 
-The vocabulary is fixed: a database CHECK constraint lists the same actions, so a new action needs a
-migration (the same way a new run state does).
+The vocabulary is Core's fixed set (``ACTIONS``, ``DETAIL_KEYS``, ``SUBJECT_TYPES``, below) plus the actions modules have declared, composed once
+by ``config/audit_vocabulary.py`` and installed with ``install_vocabulary`` (``apps.audit.vocabulary``). An event is checked against the
+INSTALLED vocabulary, which is Core's alone until one is installed. The database CHECK constraint on the action only checks its shape
+(``apps.audit.vocabulary.ACTION_SHAPE_PATTERN``): which actions are allowed is a rule of this Python code, not of the database.
 """
 
 import re
+import threading
 import uuid
 from dataclasses import dataclass, field
 from types import MappingProxyType
+
+from .vocabulary import AuditVocabulary, AuditVocabularyError
 
 ACTION_REQUEST_SUBMITTED = "request.submitted"
 ACTION_REVISION_CREATED = "revision.created"
@@ -39,7 +44,8 @@ SUBJECT_RUN = "run"
 SUBJECT_REVISION = "revision"
 SUBJECT_APPROVAL = "approval"
 SUBJECT_REJECTION = "rejection"
-SUBJECT_TYPES = (SUBJECT_RUN, SUBJECT_REVISION, SUBJECT_APPROVAL, SUBJECT_REJECTION)
+SUBJECT_MODULE = "module"  # a module as a subject (enabling, disabling); no event of this subject exists yet
+SUBJECT_TYPES = (SUBJECT_RUN, SUBJECT_REVISION, SUBJECT_APPROVAL, SUBJECT_REJECTION, SUBJECT_MODULE)
 
 ACTOR_USER = "user"  # a login user, identified by ``User.public_id``
 ACTOR_SYSTEM = "system"  # the worker or the application itself; not a login user
@@ -59,6 +65,37 @@ DETAIL_KEYS = MappingProxyType(
 )
 
 _TOKEN = re.compile(r"[A-Za-z0-9_.:\-]{1,100}")
+
+# Core's vocabulary: exactly the constants above, no module in it. Never replaced; a module-aware vocabulary is built on top of it.
+CORE_VOCABULARY = AuditVocabulary.core(actions=ACTIONS, detail_keys=DETAIL_KEYS, subject_types=SUBJECT_TYPES)
+
+_installed: AuditVocabulary | None = None
+_install_lock = threading.Lock()
+
+
+def current_vocabulary() -> AuditVocabulary:
+    """The vocabulary events are checked against: the installed one, or Core's alone when nothing has been installed."""
+    installed = _installed
+    return CORE_VOCABULARY if installed is None else installed
+
+
+def install_vocabulary(vocabulary: AuditVocabulary) -> AuditVocabulary:
+    """Make ``vocabulary`` the one events are checked against. Idempotent, and never a silent replacement.
+
+    Installing a vocabulary equal to the installed one (same fingerprint) changes nothing. Installing a different one when one is already
+    installed is refused (``vocabulary_conflict``), and so is one built on a different Core part. It is meant to be called once per process
+    by the composition root; the first installation may be any vocabulary built on this Core.
+    """
+    global _installed
+    if not isinstance(vocabulary, AuditVocabulary):
+        raise TypeError("vocabulary must be an apps.audit.vocabulary.AuditVocabulary")
+    if vocabulary.core_fingerprint != CORE_VOCABULARY.core_fingerprint:
+        raise AuditVocabularyError("vocabulary_conflict", "the vocabulary was not built on this Core's audit vocabulary")
+    with _install_lock:
+        if _installed is None or _installed == vocabulary:
+            _installed = vocabulary
+            return vocabulary
+        raise AuditVocabularyError("vocabulary_conflict", "a different audit vocabulary is already installed in this process")
 
 
 class AuditEventError(ValueError):
@@ -94,9 +131,10 @@ class NewAuditEvent:
                 raise AuditEventError("a user actor needs a public id (uuid.UUID)")
         elif self.actor_public_id is not None:
             raise AuditEventError("the system actor has no public id")
-        if self.action not in ACTIONS:
+        vocabulary = current_vocabulary()
+        if not vocabulary.allows_action(self.action):
             raise AuditEventError("unknown audit action")
-        if self.subject_type not in SUBJECT_TYPES:
+        if not vocabulary.allows_subject_type(self.subject_type):
             raise AuditEventError("unknown subject type")
         if not isinstance(self.subject_id, uuid.UUID):
             raise AuditEventError("subject_id must be a uuid.UUID")
@@ -106,7 +144,7 @@ class NewAuditEvent:
                 raise AuditEventError(f"{name} must be a uuid.UUID or None")
         if not isinstance(self.details, dict):
             raise AuditEventError("details must be an object")
-        unknown = set(self.details) - DETAIL_KEYS[self.action]
+        unknown = set(self.details) - vocabulary.detail_keys_of(self.action)
         if unknown:
             raise AuditEventError(f"details has keys the action does not allow: {sorted(unknown)}")
         for key, value in self.details.items():

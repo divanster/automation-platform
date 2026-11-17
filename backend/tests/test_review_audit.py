@@ -9,6 +9,7 @@ from apps.audit import events, recorder
 from apps.audit import models as audit_models
 from apps.audit.events import AuditEventError, NewAuditEvent, system_event, user_event
 from apps.audit.models import AuditEvent
+from apps.audit.vocabulary import ACTION_SHAPE_PATTERN, action_shape_ok
 from apps.cases.models import ImmutableRecord
 
 ACTOR, SUBJECT, CASE, RUN = (uuid.uuid4() for _ in range(4))
@@ -30,13 +31,16 @@ class VocabularyTests(SimpleTestCase):
     def test_every_action_has_a_detail_key_list_and_nothing_else_does(self):
         self.assertEqual(set(events.DETAIL_KEYS), set(events.ACTIONS))
 
-    def test_the_database_constraints_list_the_same_vocabulary(self):
+    def test_the_database_constraints_match_the_vocabulary(self):
         by_name = {c.name: c for c in AuditEvent._meta.constraints}
         self.assertEqual(
             set(by_name),
-            {"audit_event_action_valid", "audit_event_subject_type_valid", "audit_event_actor_kind_valid", "audit_event_actor_matches_kind"},
+            {"audit_event_action_shape", "audit_event_subject_type_valid", "audit_event_actor_kind_valid", "audit_event_actor_matches_kind"},
         )
-        self.assertEqual(by_name["audit_event_action_valid"].condition.children[0][1], list(events.ACTIONS))
+        # MOD-1b S3: the action constraint checks the SHAPE of the text (the allowlist is Python's); the subject types are still a list.
+        self.assertEqual(by_name["audit_event_action_shape"].condition.children[0], ("action__regex", ACTION_SHAPE_PATTERN))
+        for action in events.ACTIONS:
+            self.assertTrue(action_shape_ok(action), action)
         self.assertEqual(by_name["audit_event_subject_type_valid"].condition.children[0][1], list(events.SUBJECT_TYPES))
         self.assertEqual(by_name["audit_event_actor_kind_valid"].condition.children[0][1], list(events.ACTOR_KINDS))
 

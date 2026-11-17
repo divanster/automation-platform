@@ -88,13 +88,16 @@ class CoreStaysIndependentTests(SimpleTestCase):
     def test_only_the_composition_root_and_the_package_itself_import_the_module_package(self):
         importers = set(imports_of("apps.modules"))
         inside = {p for p in importers if p.startswith("apps/modules/")}
-        self.assertEqual(importers - inside, {"config/modules.py"})
+        # config/audit_vocabulary.py (MOD-1b S3) is the second composition root: it reads a registry and builds the audit vocabulary from it.
+        self.assertEqual(importers - inside, {"config/modules.py", "config/audit_vocabulary.py"})
 
     def test_nothing_in_the_application_imports_the_composition_root_yet(self):
         # MOD-1a activates nothing: no entry point, command, view or settings module calls build_registry.
-        self.assertEqual(imports_of("config.modules"), [])
+        # The only importer is the audit vocabulary composition root (S3), itself imported by nothing in the application.
+        self.assertEqual(imports_of("config.modules"), ["config/audit_vocabulary.py"])
+        self.assertEqual(imports_of("config.audit_vocabulary"), [])
         for path in non_test_sources():
-            if path.name != "modules.py":
+            if path.name not in ("modules.py", "audit_vocabulary.py"):
                 self.assertNotIn("build_registry", path.read_text(encoding="utf-8"), path.name)
 
     def test_the_composition_root_imports_only_the_module_package_and_the_standard_library(self):

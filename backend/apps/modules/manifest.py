@@ -32,11 +32,12 @@ MANIFEST_VERSION = 1
 SUPPORTED_MANIFEST_VERSIONS = frozenset({MANIFEST_VERSION})
 
 # Namespaces that belong to Core today (its audit vocabulary, run states, queue, capabilities, test fixtures) or are reserved for
-# it. No module may own one of these, as its id or as an extra namespace.
+# it. No module may own one of these, as its id or as an extra namespace. ``request`` is Core's because ``request.submitted`` and
+# ``request.edited`` are Core audit actions (a module's own ids such as ``request_intake`` are different namespaces).
 RESERVED_NAMESPACES = frozenset(
     {
         "core", "test", "platform", "module", "auth", "admin", "health",
-        "run", "revision", "approval", "rejection", "audit",
+        "run", "revision", "approval", "rejection", "request", "audit",
         "task", "case", "document", "documents", "ai", "secrets", "permissions",
     }
 )  # fmt: skip
@@ -52,6 +53,11 @@ MAX_ENTRIES = 100  # per collection: a sanity bound, not a business limit
 MAX_TASK_KIND_LENGTH = 64  # apps.tasks.models.Task.kind
 MAX_AUDIT_ACTION_LENGTH = 32  # apps.audit.models.AuditEvent.action
 MAX_LABEL_LENGTH = 80
+MAX_AUDIT_DETAIL_KEYS = 20  # per audit action
+# An audit detail key whose NAME suggests free content is refused. The same rule, with the same names, length and character set, is applied
+# by apps.audit.vocabulary when the audit vocabulary is composed. The two packages may not import each other (boundary tests), so the rule is
+# written twice and a test keeps the copies equal and behaving identically, so that a manifest that registers can always be composed.
+FORBIDDEN_AUDIT_DETAIL_KEYS = frozenset({"text", "name", "email", "contact", "notes", "description", "message", "excerpt", "reason", "error", "password", "username"})
 
 _NAMESPACE = re.compile(r"[a-z][a-z0-9_]{1,39}")
 _MODULE_ID = re.compile(r"[a-z][a-z0-9_]{2,39}")
@@ -308,10 +314,12 @@ class AuditActionDeclaration:
     def __post_init__(self):
         _identifier(self.action, "audit action", _DOTTED_2, MAX_AUDIT_ACTION_LENGTH)
         keys = _tuple_of(self.detail_keys, str, "audit detail_keys")
-        if len(keys) > 20:
-            raise ManifestError("too_many_entries", "audit detail_keys has more than 20 entries")
+        if len(keys) > MAX_AUDIT_DETAIL_KEYS:
+            raise ManifestError("too_many_entries", f"audit detail_keys has more than {MAX_AUDIT_DETAIL_KEYS} entries")
         for key in keys:
             _identifier(key, "audit detail key", _FIELD_NAME, 40)
+            if key in FORBIDDEN_AUDIT_DETAIL_KEYS:
+                raise ManifestError("forbidden_audit_detail_key", "an audit detail key must not be named for free content")
         _unique(keys, "invalid_identifier", "audit detail_keys")
         object.__setattr__(self, "detail_keys", keys)
 

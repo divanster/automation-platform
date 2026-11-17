@@ -217,7 +217,7 @@ class ManifestConstructionTests(ContractTestCase):
         self.assertCode("invalid_type", ManifestError, manifest, extra_namespaces="alpha")
 
     def test_the_reserved_namespaces_cover_the_core_vocabulary(self):
-        for name in ("run", "revision", "approval", "rejection", "audit", "task", "case", "documents", "ai", "secrets", "core", "test"):
+        for name in ("run", "revision", "approval", "rejection", "request", "audit", "task", "case", "documents", "ai", "secrets", "core", "test"):
             self.assertIn(name, RESERVED_NAMESPACES)
 
 

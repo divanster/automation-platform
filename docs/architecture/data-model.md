@@ -283,7 +283,7 @@ AuditEvent * --- 0..1 Case / WorkflowRun / other subject
 - **Responsibility:** append-only record of significant actions for
   accountability.
 - **Key attributes:** event id, timestamp, actor (user id or the `system`
-  actor), action name from a fixed vocabulary (for example `document.uploaded`,
+  actor), action name from a vocabulary (Core's fixed actions plus the actions registered modules declare, MOD-1b S3; for example `document.uploaded`,
   `run.state_changed`, `revision.created`, `approval.recorded`,
   `approval.invalidated`, `export.created`, `task.failed`), subject type and
   id, related case and run ids, a request or task correlation id, and a small

@@ -348,6 +348,11 @@ corrected; the corrected tests have not been rerun).** The slice adds no model, 
 dependency. New settings: `AP_SESSION_AGE_SECONDS`, `AP_NUM_PROXIES` (default 0), `AP_API_MAX_BODY_BYTES`. Commands:
 [rest-api-slice.md](rest-api-slice.md), section 14.
 
+MOD-1b S3 (extensible audit vocabulary; not merged) adds `backend/tests/test_audit_vocabulary_postgres.py` (**24** tests, tagged
+`requires_postgres`) and audit migration `0002`. The VM cannot run them and **no one has run them yet**. The migration replaces the audit
+table's fixed action CHECK with a shape CHECK, touches no existing row, and cannot be reversed once module actions are stored. Commands (preflight,
+`sqlmigrate`, the PostgreSQL run): [module-contract.md](../architecture/module-contract.md), section 3.10.
+
 Expected collection at the commit that added the persistence slice (re-check it, counts
 change as tests are added): **3** skeleton tests (`PostgresUserTests` 2, `PostgresReadinessTests` 1)
 plus **32** persistence tests (`SchemaTests` 5, `RevisionPersistenceTests` 12,
