@@ -354,8 +354,10 @@ of 342 tests passed, exit code 0** (owner-supplied; no output is attached; see t
 table's fixed action CHECK with a shape CHECK, touches no existing row, and cannot be reversed once module actions are stored. Commands (preflight,
 `sqlmigrate`, the PostgreSQL run): [module-contract.md](../architecture/module-contract.md), section 3.10.
 
-MOD-1b S4 (module host; **committed locally, not pushed**) adds `backend/tests/test_module_host_postgres.py` (**73** tests, tagged `requires_postgres`) and
-migration `module_host.0001_initial`. **Nobody has run them or the migration** (the VM has no PostgreSQL). The exact steps are in section 5.1 below.
+MOD-1b S4 (module host; pushed, PR not yet merged) adds `backend/tests/test_module_host_postgres.py` (**75** tests, tagged `requires_postgres`) and
+migration `module_host.0001_initial`. **The owner ran them locally: the 75 passed, together with the 15 recovery tests and the 25 audit tests, the migration applied
+successfully, and the full selected regression ran 567 tests, all passed, 153.186 s, exit code 0, test database destroyed** (owner-supplied; the VM did not run or
+observe them; no output is stored; see the [local validation record](local-validation-record.md)). Tested scenarios only. The steps are in section 5.1 below.
 
 Expected collection at the commit that added the persistence slice (re-check it, counts
 change as tests are added): **3** skeleton tests (`PostgresUserTests` 2, `PostgresReadinessTests` 1)
@@ -374,7 +376,8 @@ a DB-free equivalent is part of the test suite
 **What changes in a running installation.** One additive migration (`module_host.0001_initial`: three new tables; no existing table, row or migration is touched),
 and the worker now installs a kind gate. **No module is registered, so nothing is held and every existing behaviour, Request Intake's task included, is the one you
 have today.** (One difference: with the gate installed the worker claims only kinds it has a handler for; a task of a kind the worker cannot run is left queued
-instead of being claimed and failed as `unknown_kind`.) The commands below are for the owner; the VM never ran them.
+instead of being claimed and failed as `unknown_kind`.) The commands below are the ones the owner uses; the VM never ran them. The owner's passing run is recorded in the
+[local validation record](local-validation-record.md); to repeat it, use the commands below.
 
 ```powershell
 # From backend\, in the window where the project's .env and virtual environment are active. AP_RUN_DB_TESTS must be unset here.
@@ -389,7 +392,7 @@ if ($env:AP_RUN_DB_TESTS) { throw "AP_RUN_DB_TESTS is already set in this window
 & $Py manage.py sqlmigrate module_host 0001_initial --backwards     # three DROP TABLE
 
 # 2. DB-free tests, then the system checks
-& $Py manage.py test                                                # expect OK (1914 tests at the S4 review; re-check the number)
+& $Py manage.py test                                                # expect OK (1926 tests at the S4 checkpoint; re-check the number)
 & $Py manage.py check
 
 # 3. PostgreSQL tests: Django creates and destroys test_<AP_DB_NAME>; no --keepdb, no --noinput. The new module plus the suites that must pass UNCHANGED
@@ -403,7 +406,7 @@ try {
 }
 ```
 
-Report the exact `Ran N tests` line (the new module contributes exactly 73) and any failure. A failure in the new module is expected to be a defect in a test or in
+Report the exact `Ran N tests` line (the new module contributes exactly 75; the audit module 25; the whole selection was 567 in the owner's passing run) and any failure. A failure in the new module is expected to be a defect in a test or in
 the code, not a reason to skip it: report it rather than deleting or loosening a test.
 
 **Applying it to a development database (separate, optional; do it only after step 3 passed, with a backup).** Stop the worker and the API first.

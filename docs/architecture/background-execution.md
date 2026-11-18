@@ -52,11 +52,12 @@
   kind gate that fails closed ([module-contract.md](module-contract.md) section 3.9 and
   [persistent-worker-slice.md](../development/persistent-worker-slice.md) section 11). S2 itself installed neither a gate nor an extra hook. A gate holds tasks of other kinds in `queued` rather than failing them. The new PostgreSQL tests passed with
   the existing queue and recovery suites in the owner's local run (149 tests; tested scenarios only; the gate race window remains).
-- **Module gate (MOD-1b / S4; committed locally, not pushed).** The production composition now installs a kind gate built from the static module registry and the
+- **Module gate (MOD-1b / S4; pushed; owner-run PostgreSQL validation passed).** The production composition now installs a kind gate built from the static module registry and the
   stored `ModuleState` ([module-contract.md](module-contract.md) section 3.11; [persistent-worker-slice.md](../development/persistent-worker-slice.md) section 12).
   Queued tasks of a disabled, version-mismatched or stateless-after-sync module are held in `queued` (never failed), a running attempt finishes, and recovery and
   retry are unchanged. Request Intake's `request_intake.extract` and the test handler are legacy kinds that need no module state, so they run as before; no module is
-  registered, so nothing is held today. The new PostgreSQL tests are NOT RUN.
+  registered, so nothing is held today. The new PostgreSQL tests passed with the existing queue, recovery, intake, review and API suites in the owner's local run (567 tests, 153.186 s,
+  exit code 0; owner-supplied, tested scenarios only; the gate race window remains; no production-readiness claim).
 
 ## 1. Proposal
 

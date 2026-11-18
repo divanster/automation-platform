@@ -49,10 +49,10 @@ is no module endpoint, signature, license enforcement or update manager; modules
 plus MOD-1b slices S1a to S3 (pure permission and capability contracts, a generic authorization core, worker claim-filter and kind-gate
 seams, and an extensible audit vocabulary; merged), plus MOD-1b / S4 (`apps/module_host`: `ModuleState`, an initialization marker and append-only namespace
 claims, a repeatable `module_sync`, audited `module_enable`, `module_disable` and `module_status` administrator commands, and the
-worker kind gate installed in the production composition; see `docs/architecture/module-contract.md` section 3.11; **committed locally on `feat/module-runtime-state`, not pushed,
-awaiting the owner's PostgreSQL run: its DB-free tests pass in the development VM, its 73 PostgreSQL tests and its migration have NOT been run by
-anybody**; the registry is still empty so nothing is gated, Request Intake's task kind is a legacy ungated kind, and there is no
-enable/disable API). The source text in the UI, revision diffs, document upload, exports,
+worker kind gate installed in the production composition; see `docs/architecture/module-contract.md` section 3.11; on `feat/module-runtime-state` (pushed, PR not yet merged): its 1926 DB-free
+tests pass in the development VM, and the owner ran its 75 PostgreSQL tests, the migration and a 567-test PostgreSQL regression locally (all passed; owner-supplied, tested
+scenarios only; see `docs/development/local-validation-record.md`); the registry is still empty so nothing is gated, Request Intake is not a module (its task kind is a legacy
+ungated kind), there is no enable/disable API and no API-side write blocking, no capability facade, no installer or update manager, and the gate has the known S2 race window). The source text in the UI, revision diffs, document upload, exports,
 password reset, multi-factor authentication, an installer, and real AI adapters are not implemented. See `README.md` and
 `docs/architecture/README.md`. Do not describe planned components as existing.
 

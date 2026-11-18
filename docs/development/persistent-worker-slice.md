@@ -273,7 +273,7 @@ try {
 } finally { Remove-Item Env:AP_RUN_DB_TESTS -ErrorAction SilentlyContinue }
 ```
 
-## 12. MOD-1b / S4: the module gate is installed (committed locally, not pushed)
+## 12. MOD-1b / S4: the module gate is installed (pushed; owner-run PostgreSQL validation passed)
 
 S4 adds no code to `apps/tasks` (a test pins that it still imports nothing from `apps.modules`, `apps.module_host`, `apps.intake` or `workflows`). It **installs** the
 S2 kind gate in the production composition, `config/task_registry.py`. The contract is [module-contract.md](../architecture/module-contract.md) section 3.11; in short:
@@ -293,6 +293,11 @@ S2 kind gate in the production composition, `config/task_registry.py`. The contr
   worker); nothing is claimed in that iteration. Any other gate failure allows nothing and is logged by exception class only.
 * **Not done:** `while_disabled` (no module hook exists), blocking enqueue for a disabled module, and the race window of section 11.
 * **Validation.** DB-free: `tests/test_module_host_gate.py` (26, incl. the production gate with Request Intake's kind and the worker with a gate) passes in the VM.
-  PostgreSQL: `tests/test_module_host_postgres.py` (`GatedWorkerTests`, `RequestIntakeRegressionTests`, ...) **NOT RUN**. The unchanged `test_intake_postgres.py`
-  (it installs `COMPOSITION`, now with the gate, and runs the extraction end to end) and the queue suites are the regression. Commands:
-  [runbook.md](runbook.md) section 5.1.
+  PostgreSQL: `tests/test_module_host_postgres.py` (75 tests, `GatedWorkerTests`, `RequestIntakeRegressionTests`, ...), the unchanged `test_intake_postgres.py`
+  (it installs `COMPOSITION`, now with the gate, and runs the extraction end to end), the queue suites and the 15 process-level recovery tests were run by the project owner
+  locally: **the full selected regression passed, 567 tests, 153.186 s, exit code 0, test database destroyed** (owner-supplied; the VM did not run or observe it; no output
+  is stored; [record](local-validation-record.md)). For the tested scenarios only this supports held tasks staying `queued` and not failing, release after an enable, a running
+  attempt finishing, unchanged recovery and retry, and Request Intake's legacy kind staying ungated. It does not prove that no other race exists (the section 11 race window
+  remains), and there is no production-readiness claim. **Process-level recovery children:** they run the real `runworker`, hence the production gate; the child
+  (`tests/recovery_worker_child.py`) wraps `install_composition` so that the real gate's answer also contains the three `recovery.*` test kinds (a failing gate still allows
+  nothing, every other kind is still held). Commands: [runbook.md](runbook.md) section 5.1.

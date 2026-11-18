@@ -45,16 +45,18 @@
 > S3 review (owner decisions): the runtime installation of a module vocabulary is deferred to MOD-2; `request` is now a reserved Core namespace in
 > the manifest; and the manifest and the audit vocabulary apply the same detail-key restrictions (sections 3.2 and 3.10).
 >
-> **MOD-1b / S4 (persistent module state, enable/disable, worker gate)** is implemented on `feat/module-runtime-state` (**committed locally, not
-> pushed; PostgreSQL tests not run**). A new Django app, `apps/module_host`, stores a `ModuleState` row per registered module and an append-only `ModuleNamespaceClaim` per
+> **MOD-1b / S4 (persistent module state, enable/disable, worker gate)** is implemented and validated on `feat/module-runtime-state` (implementation commit `96efa2f`;
+> three test-only corrections `45bd0da`, `4ba709b` and `0f8e44d`; pushed; **PR not yet merged**). A new Django app, `apps/module_host`, stores a `ModuleState` row per registered module and an append-only `ModuleNamespaceClaim` per
 > namespace (additive migration `0001`), syncs them from the approved static registry (`module_sync`), enables and disables a module transactionally with
 > an audit event (`module_enable`, `module_disable`), and reports status (`module_status`) (section 3.11). The existing S2 `kind_gate` is now installed in the
 > production worker composition: it holds the queued tasks of a disabled, version-mismatched or stateless (after the first sync) module and lets
 > **legacy kinds, Request Intake's `request_intake.extract` included, through unchanged**. **`BUILTIN_MODULES` is still EMPTY, Request Intake is not a
 > module (that is MOD-2), no module is gated in practice, and there is no public enable/disable API.** The DB-free tests pass in the development VM
-> (198 new tests; 1914 in all). The 73 new PostgreSQL tests were written and **NOT RUN** (the VM has no PostgreSQL); the owner has not run them or the migration.
-> Two Core audit actions were added (`module.enabled`, `module.disabled`), which changes the S3 "seven Core actions" pin (section 3.11, "Audit").
-> No production-readiness claim.
+> (1926 in all; 198 of them in the five module host files). **Owner-supplied local PostgreSQL validation (the VM has no PostgreSQL and did not run, repeat or observe it;
+> no output is stored): the 75 module host PostgreSQL tests, the 15 process-level recovery tests and the 25 audit vocabulary tests passed, migration
+> `module_host.0001_initial` applied successfully, and the full selected PostgreSQL regression ran 567 tests, all passed, 153.186 s, exit code 0, test database
+> destroyed** (section 3.11, "Owner-supplied local PostgreSQL result"). That supports the tested scenarios on one machine only. Two Core audit actions were added
+> (`module.enabled`, `module.disabled`), which changes the S3 "seven Core actions" pin (section 3.11, "Audit"). No production-readiness claim.
 
 ## 1. Purpose and scope
 
@@ -579,8 +581,8 @@ exclusive lock); another PostgreSQL version or machine; or that no other race ex
 
 ### 3.11 The module host: persistent state, sync, enable/disable and the worker gate (MOD-1b / S4)
 
-**Status.** Implemented on `feat/module-runtime-state` (committed locally, not pushed). DB-free tests pass in the development VM; the PostgreSQL tests and the
-migration have **not been run by anybody**. `apps/modules` stays pure and gains no model; the runtime state is a separate Django app, `apps/module_host`
+**Status.** Implemented and validated on `feat/module-runtime-state` (pushed; the PR is not merged). DB-free tests pass in the development VM; the PostgreSQL tests
+and the migration were run **by the project owner locally** (section "Owner-supplied local PostgreSQL result" below), not by the VM. `apps/modules` stays pure and gains no model; the runtime state is a separate Django app, `apps/module_host`
 (label `module_host`), installed in `INSTALLED_APPS`. **No module is registered** (`BUILTIN_MODULES` is empty), Request Intake is **not** a module, there is **no
 public API** (no route, view or serializer), and nothing is installed, downloaded, imported by name or migrated by the host.
 
@@ -730,8 +732,8 @@ of that release starts, or its new modules' kinds stay held.
 
 **Remaining limitations.**
 
-* No module is registered; nothing is gated in practice. The gate, the sync and the enable/disable services have been exercised only by DB-free tests with the
-  database replaced, and by **PostgreSQL tests that nobody has run**.
+* No module is registered; nothing is gated in practice. The gate, the sync and the enable/disable services have been exercised by DB-free tests with the
+  database replaced and by the PostgreSQL tests the owner ran locally (tested scenarios only; no real module has ever been registered).
 * "Initialized" is the marker (above). Raw SQL, a migration or an administrator that deletes the marker AND every state row reopens the legacy window; nothing detects it.
   An empty-registry `module_sync` run before MOD-2 closes the window for the MOD-2 release (run the sync with that release).
 * No public API and no UI to enable or disable, and no API-side use of the state: **a disabled module is not "read-only" beyond held tasks**, because there is no
@@ -754,12 +756,41 @@ older pins: `test_audit_vocabulary.py`, `test_review_audit.py`, `test_module_bou
 `test_request_intake_django.py` (installed apps, callers of `config.modules`, the production gate, the nine Core actions). Each of 25 deliberate mutations of the
 implementation (8 of them aimed at the initialization marker) (fail-open missing state, version check removed, legacy kinds dropped, no idempotency, no audit event, dependents ignored, new modules always
 enabled, an empty-registry gate that answers nothing, a legacy overlap accepted, continuity skipped, a sync that enables, no gate in the composition, no row lock,
-and others) was caught by the focused set. PostgreSQL (`tests/test_module_host_postgres.py`, **73 tests, NOT RUN**): the stored constraints, the migration
+and others) was caught by the focused set. PostgreSQL (`tests/test_module_host_postgres.py`, **75 tests; passed in the owner's local run, below**): the stored constraints, the migration
 (applied, reversed and re-applied without touching other tables or rows), sync, namespace ownership that persists and cannot change, enable and disable
 against real rows, audit consistency, rollback when the audit write fails, concurrent syncs, enables and disables (including the dependent/dependency race), and
 the worker on committed data (tasks held, resumed, a running attempt finishing, recovery, retry, version mismatch, missing state, Request Intake end to end with
 the production composition). The unchanged `test_intake_postgres`, `test_api_postgres`, `test_tasks_*_postgres` and `test_audit_vocabulary_postgres` suites are
-the regression and must still pass. **Commands for the owner: [runbook.md](../development/runbook.md), section 5.1.**
+the regression. **Commands: [runbook.md](../development/runbook.md), section 5.1.**
+
+Three test-only corrections followed the owner's first runs, each in a test or its harness and none in production code, a model or a migration: `45bd0da` (a 41-character
+id overflows `varchar(40)` and PostgreSQL raises `DataError`, not the `IntegrityError` of a CHECK; the over-length case is asserted separately and two boundary tests were
+added, 73 to 75 tests), `4ba709b` (the process-level recovery children run the real `runworker`, so they run the production kind gate, which correctly held their
+`recovery.*` test kinds; the child now adds exactly those three kinds to the real gate's answer, and eight DB-free tests pin that it still fails closed and still holds
+every other kind) and `0f8e44d` (the audit migration tests built their audit `0001` rows from the live `events.ACTIONS`, which S4 extended with two actions the old schema
+refuses; they now use a frozen list of the seven original actions, four DB-free tests pin it to the migrations, and a new PostgreSQL test covers the reverse refusal
+after a `module.enabled` event is stored, 24 to 25 audit tests).
+
+**Owner-supplied local PostgreSQL result (2026-11-18; the VM did not run, repeat or observe it; no output is stored).** The project owner ran, on the local Windows
+computer, the 75 module host tests, the 15 process-level recovery tests and the 25 audit vocabulary tests, applied `module_host.0001_initial`, and ran the full
+selected PostgreSQL regression: **567 tests passed, 153.186 s, exit code 0, and the test database was destroyed successfully.** The command line, the module list and the
+output were not supplied (the intended list is runbook section 5.1). This supports, **for the tested scenarios only**:
+
+* the migration applying, and the stored constraints and the one-row marker behaving as the tests expect;
+* the initial sync, the marker written in the sync's transaction (an empty registry included), missing state failing closed once the marker exists, and namespace
+  ownership persisting and not being reassigned through the services;
+* idempotent, locked, audited enable and disable, including the concurrent sync, enable and disable scenarios and the rollback when the audit write fails;
+* the production worker composition with its gate: tasks of a disabled, version-mismatched or stateless module held in `queued` and not failed, resumed after an enable, a
+  running attempt finishing, and recovery and retry unchanged;
+* **Request Intake's legacy task kind staying ungated**: the extraction runs end to end through the production composition with no module state, with unrelated modules
+  disabled and with every state row gone but the marker present, and the unchanged `test_intake_postgres` and `test_api_postgres` suites are part of the intended selection (the exact module list of the 567-test run was not supplied);
+* the process-level recovery tests (real worker processes, a forced kill, shutdown with a task in progress) passing with the production gate in the loop.
+
+**What it does not show, and what remains.** It does not prove that no other race exists (the S2 gate race window remains; the threaded tests cover the scenarios written),
+it is one machine and one PostgreSQL, and the owner did not report a manual run of `module_sync`, `module_status`, `module_enable` or `module_disable` against a database
+(they are exercised by the tests through the services and, DB-free, through the commands). Request Intake is **not** registered as a module; there is **no** API-side
+write blocking for a disabled module; there is **no** capability facade and no `ModuleContext`; there is **no** module installation and no Update Manager; the gate reads
+state once per iteration; and nothing here is a production-readiness claim. Record: [local-validation-record.md](../development/local-validation-record.md).
 
 ## 4. Versioning
 
@@ -998,8 +1029,8 @@ An update manager does not exist and is **not** part of MOD-1a. When it is desig
   the legacy kinds and holds nothing today. The S2 PostgreSQL tests passed in the owner's local run (section 3.9) for the tested scenarios
   only; the gate race window remains.
 - S4 (section 3.11) adds `apps/module_host`, `ModuleState`, the sync and enable/disable administrator commands and the persisted namespace history
-  (the continuity check runs in every sync). **Its PostgreSQL tests and migration have NOT been run by anybody**; the limitations of S4 are listed in
-  section 3.11, "Remaining limitations".
+  (the continuity check runs in every sync). Its PostgreSQL tests and migration passed in the owner's local run (section 3.11, tested scenarios only); the limitations
+  of S4 are listed in section 3.11, "Remaining limitations".
 - No capability facade exists (`task.enqueue` and the others are names a manifest may require, nothing a module can call).
 - Request Intake has no manifest in the application; the synthetic one in `tests/module_support.py` exists only for the golden test.
 - Only manifest version 1; no pre-release versions.
@@ -1028,7 +1059,7 @@ An update manager does not exist and is **not** part of MOD-1a. When it is desig
    model), versus a Core permission registry table. Built-ins keep `Meta.permissions`.
 7. **Disabling a module:** decided as read-only mode (section 8); the worker claim filter and kind gate seam exist since S2 (section 3.9; its PostgreSQL
    tests passed in the owner's local run); S4 built the state storage, the gate that reads it and the enable/disable commands (section 3.11; its
-   PostgreSQL tests are NOT RUN). Still open: how the API process learns the enabled set (there is no API use yet; the proposal is the same
+   PostgreSQL tests passed in the owner's local run). Still open: how the API process learns the enabled set (there is no API use yet; the proposal is the same
    `ModuleState` rows plus a registry-fingerprint comparison), blocking new writes through a disabled module, and honouring `while_disabled`.
 8. **Trust model:** first-party modules only, third-party in-process Python, or external isolated services.
 9. **What "Core API v1" contains** and how it is versioned.
@@ -1066,8 +1097,10 @@ From S3 (section 3.10): DB-free `tests/test_audit_vocabulary.py` (pure and Djang
 `config/modules.py`, the recorder, `apps/tasks` and Request Intake are unchanged.
 
 From S4 (section 3.11): DB-free `tests/test_module_host_rules.py` (pure), `tests/test_module_host_services.py`, `tests/test_module_host_gate.py`,
-`tests/test_module_host_cli.py` and `tests/test_module_host_boundaries.py` (198 tests; pass in the VM); PostgreSQL `tests/test_module_host_postgres.py` (73 tests;
-**NOT RUN**). Source: `backend/apps/module_host/{apps,models,errors,rules,services,gate,cli}.py`, `backend/apps/module_host/management/commands/module_{sync,status,enable,disable}.py`
+`tests/test_module_host_cli.py` and `tests/test_module_host_boundaries.py` (198 tests; pass in the VM); PostgreSQL `tests/test_module_host_postgres.py` (75 tests;
+owner-run locally, section 3.11); the recovery harness (`tests/recovery_support.py`, `tests/recovery_worker_child.py`, `tests/test_tasks_recovery_support.py`, 8 new DB-free
+tests) and the audit migration fixtures (`tests/test_audit_vocabulary.py`, 4 new DB-free tests, and `tests/test_audit_vocabulary_postgres.py`, 25 tests) were corrected
+(test-only). Source: `backend/apps/module_host/{apps,models,errors,rules,services,gate,cli}.py`, `backend/apps/module_host/management/commands/module_{sync,status,enable,disable}.py`
 and `backend/apps/module_host/migrations/0001_initial.py` (all new), `backend/apps/audit/events.py` (two Core actions added), `backend/config/task_registry.py`
 (the gate and `LEGACY_UNGATED_KINDS`) and `backend/config/settings/base.py` (the app). `apps/modules`, `config/modules.py`, `apps/tasks`, the recorder, the existing
 migrations and Request Intake are unchanged.

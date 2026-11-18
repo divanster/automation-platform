@@ -37,7 +37,7 @@ implementation plan for the Automation Platform.
    they are needed.
 9. [module-contract.md](module-contract.md): the module manifest, versioning, the static
    registry (MOD-1a, a foundation with no registered module), the persistent module state, sync and
-   enable/disable and the worker gate (MOD-1b / S4, committed locally, PostgreSQL tests not run), trust boundaries, and the
+   enable/disable and the worker gate (MOD-1b / S4, pushed; owner-run PostgreSQL validation passed for the tested scenarios), trust boundaries, and the
    future lifecycle and update-manager requirements.
 
 What currently exists and how to run it: [../development/runbook.md](../development/runbook.md).

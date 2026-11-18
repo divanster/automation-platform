@@ -529,22 +529,66 @@ The section "Pending: REST API slice" above is **not changed** by this entry, be
 - **This is not a production-readiness claim.** The other limits recorded above (`listen_addresses`, per-process login throttling, undecided TLS and
   HSTS, ORM-level immutability) are unchanged.
 
-## MOD-1b / S4 module host (persistent module state, enable/disable, worker gate): PENDING, NOT RUN
+## MOD-1b / S4 module host (persistent module state, enable/disable, worker gate): owner-supplied local PostgreSQL results
 
-> **Scope.** S4 adds `apps/module_host` (`ModuleState`, the append-only `ModuleNamespaceClaim`, migration `module_host.0001_initial`), a module sync,
-> audited enable and disable administrator commands, a status command, and installs the S2 kind gate in the production worker composition (branch
-> `feat/module-runtime-state`, **committed locally, not pushed**; see [module-contract.md](../architecture/module-contract.md), section 3.11).
+> **Scope.** S4 adds `apps/module_host` (`ModuleState`, the append-only `ModuleNamespaceClaim`, the append-only one-row `ModuleHostMarker`, migration
+> `module_host.0001_initial`), a module sync, audited enable and disable administrator commands, a status command, and installs the S2 kind gate in the production
+> worker composition (branch `feat/module-runtime-state`: implementation `96efa2f`, test-only corrections `45bd0da`, `4ba709b` and `0f8e44d`; see
+> [module-contract.md](../architecture/module-contract.md), section 3.11). The project owner ran the migration and the PostgreSQL tests **locally on the Windows
+> computer**. **These are owner-supplied results.** The development VM has no PostgreSQL, never connected to one, and did not run, repeat or observe any of it. No
+> output or log is stored in this repository.
 
-**Nothing in this entry was run on PostgreSQL by anybody.** The development VM has no PostgreSQL and no result has been supplied by the owner.
+**Reported by the owner:**
 
-| Item | Status |
+| Item | Reported result |
 | --- | --- |
-| DB-free tests (198 new; 1914 in all), Django system checks, migration-state check without a database, `compileall`, `git diff --check` | Pass in the development VM |
-| Migration `module_host.0001_initial` applied to a PostgreSQL database | **NOT RUN** (the DDL was previewed without a connection: three `CREATE TABLE`s and three `CREATE INDEX`es) |
-| `tests/test_module_host_postgres.py` (73 tests) | **NOT RUN** |
-| The existing PostgreSQL suites with the gate installed (`test_intake_postgres` end to end, `test_tasks_*_postgres`, `test_audit_vocabulary_postgres`, `test_authz_core_postgres`, `test_review_postgres`, `test_api_postgres`) | **NOT RUN after the S4 change** |
-| A manual run of `module_status`, `module_sync`, `module_enable`, `module_disable` against a database | **NOT RUN** |
+| Module host PostgreSQL tests (`tests/test_module_host_postgres.py`) | **75 passed** |
+| Process-level recovery tests (`tests/test_tasks_recovery_postgres.py`) | **15 passed** |
+| Audit vocabulary PostgreSQL tests (`tests/test_audit_vocabulary_postgres.py`) | **25 passed** |
+| Migration `module_host.0001_initial` | Applied successfully |
+| Full selected PostgreSQL regression | **567 tests passed, 153.186 seconds, exit code 0** |
+| Test database | The dedicated test database was destroyed successfully |
+| DB-free regression in the development VM | 1926 tests passed (198 of them in the five module host files) |
 
-The commands for the owner are in [runbook.md](runbook.md), section 5.1. Record the result here only when the owner supplies it, as the earlier entries do. Until then
-nothing about the behaviour of the module host on PostgreSQL (the locks, the constraints, concurrent operation, rollback, the worker holding and resuming tasks,
-Request Intake with the gate installed) is claimed.
+**The path to the passing run (reported by the owner, with tracebacks only where supplied).** Every failure was a test or harness defect; **no production code, model or
+migration changed in any of the corrections**.
+
+1. First module host run: 73 tests, 72 passed, 1 error (`DataError`, `StringDataRightTruncation`) in
+   `SchemaTests.test_malformed_ids_versions_and_fingerprints_are_refused_by_the_database`, for a 41-character module id. The contract allows 3 to 40 characters and the column is
+   `varchar(40)`, so the column width refuses the value before any CHECK runs; Django reports that as `DataError`, while CHECK, unique and NOT NULL violations are
+   `IntegrityError`. Corrected in `45bd0da` (the over-length case asserted separately, two boundary tests added: 75 tests). The focused run then passed, 75 tests.
+2. First combined regression: 566 tests, 6 failures and 3 errors, exit code 1; only one traceback was supplied
+   (`RecoveryRaceTests.test_two_worker_processes_released_together_run_one_task_once`: state `queued`, attempt count 0, both workers "No task available."). Cause: the
+   process-level children run the real `runworker`, which installs the production composition with the S4 kind gate; their `recovery.*` kinds are neither legacy kinds nor a
+   module's, so the gate correctly held them. Corrected in `4ba709b` (the child adds exactly the three test kinds to the real gate's answer; the gate still fails closed
+   and still holds every other kind; eight DB-free tests). The 15 recovery tests then passed. The individual tracebacks of the other reported failures were not supplied; by the
+   code, the six process-level recovery tests share that cause.
+3. Second combined regression: 567 tests, 3 errors (`IntegrityError`, constraint `audit_event_action_valid`, action `module.enabled`). Cause: three audit migration tests built
+   their audit `0001` rows from the live `events.ACTIONS`, to which S4 added two actions the old fixed list refuses. Corrected in `0f8e44d` (a frozen `OLD_ACTIONS` of the
+   seven original actions, four DB-free tests pinning it to the migrations, one new PostgreSQL test for the reverse refusal after a `module.enabled` event: 25 audit tests).
+4. Final run: the combined selection passed, **567 tests, 153.186 s, exit code 0**.
+
+**What was not supplied:** the command lines and module lists of the runs, the output, which database the migration was applied to and whether a backup was taken, and any
+manual run of `module_status`, `module_sync`, `module_enable` or `module_disable` against a database (**not reported; not claimed**). The intended selection is the one in
+[runbook.md](runbook.md), section 5.1.
+
+**What this supports (this environment and these scenarios only):**
+
+- **The migration and the constraints.** `module_host.0001_initial` applied; the stored shape checks, the unique module id and namespace, and the one-row marker behave as the tests expect.
+- **Initialization.** The first sync writes the marker in its own transaction (an empty registry included); a refused or failed sync writes none; after it, missing module state fails closed.
+- **Namespace ownership.** Claims persist and are not reassigned through the services; a changed or released namespace is refused and nothing is written.
+- **Enable and disable.** Idempotent (no write, no event), locked, dependency-checked and audited in the change's transaction; concurrent syncs, enables and disables left rows and events consistent.
+- **The worker gate.** Tasks of a disabled, version-mismatched or stateless module stayed `queued` untouched and were not failed, ran after an enable in their original order, a running attempt finished, and recovery,
+  retry and fencing behaved as before; the real-process recovery tests passed with the production gate in the loop.
+- **Legacy Request Intake compatibility.** `request_intake.extract` ran end to end through the production composition with no module state, with every unrelated module disabled and with the state rows gone but the marker present; the unchanged
+  `test_intake_postgres` and `test_api_postgres` suites are part of the intended selection (the exact module list of the 567-test run was not supplied, so their pass is inferred from the
+  all-passed result, not itemized).
+
+**What it does not validate, and what does not exist.**
+
+- It does not prove that no other concurrency race exists. The S2 gate race window (a kind gated off between the gate's read and the claim can be claimed by that one claim) remains, and the state is read once per iteration.
+- Request Intake is **not** registered as a module (`BUILTIN_MODULES` is empty); nothing is gated in practice. MOD-2 must remove its kind from the legacy set when it registers it.
+- There is **no API-side write blocking** for a disabled module, no `while_disabled` handling, no capability facade or `ModuleContext`, no module installation and no Update Manager; a version mismatch has no remedy yet.
+- Integrity is ORM and service level only (no trigger, no revoked privilege); raw SQL that deletes the marker and every state row reopens the legacy window. The audit table is not tamper-protected.
+- If `module_sync` runs before MOD-2, the marker exists and the MOD-2 release's modules stay held until `module_sync` runs with that release (the upgrade routine).
+- One machine, one operating system, one PostgreSQL. **This is not a production-readiness claim.**
