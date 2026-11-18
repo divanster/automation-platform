@@ -628,6 +628,9 @@ class ConcurrencyTests(DedicatedTestDatabaseMixin, TransactionTestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
         self.ctx = ModuleContext.open(self.registry, CTX, handler_registry=HANDLERS)
+        # A second, real module context over the same synced registry (``ContextDbCase`` builds it for the TestCase classes; this class is a
+        # TransactionTestCase and does not derive from it). Tests that need a run owned by another module create it through this context.
+        self.other = ModuleContext.open(self.registry, OTHER, handler_registry=HANDLERS)
 
     def test_concurrent_enqueues_with_one_key_create_one_task(self):
         results = run_threads(self, [lambda: self.ctx.tasks.enqueue(kind=KIND, payload={"n": 1}, idempotency_key="ctx_mod.work:race") for _ in range(6)])
