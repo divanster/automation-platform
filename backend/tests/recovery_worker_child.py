@@ -2,14 +2,19 @@
 
 Started by ``tests.recovery_support.WorkerProcesses``; it runs the REAL ``manage.py runworker``
 command (real claim, lease, recovery, signal handling, console output, exit codes) in a separate
-operating-system process, with exactly two test-only differences, both applied through parameters the
+operating-system process, with exactly three test-only differences, all applied through parameters the
 production code already has (nothing in ``apps.tasks`` is modified):
 
 * ``worker.process_one`` is wrapped so that it receives ``registry=`` (the production allowlist plus
   the test handlers of ``recovery_support``) and ``clock=`` (the real clock plus
   ``--clock-offset-seconds``, so a test can make a lease look expired without waiting);
 * ``worker.run_until_stopped`` is wrapped so that it uses that process function and so that the test
-  handler can see the worker's stop flag.
+  handler can see the worker's stop flag;
+* ``worker.install_composition`` is wrapped so that the production composition's REAL kind gate (MOD-1b S4: the legacy kinds, plus the
+  kinds of enabled modules) is installed with exactly the three test kinds of ``recovery_support`` added to its answer. Without this the
+  production gate holds every ``recovery.*`` task in ``queued`` (they are neither legacy nor a module's kinds), the worker reports "No task
+  available" and no process-level test can run. The gate stays in the loop: any other kind is still held, and a gate that fails or answers
+  badly still allows nothing (the wrapper raises on a non-collection answer, which the worker treats as a failed gate).
 
 Safety: it refuses to start unless the configured database name starts with ``test_`` (the database
 Django creates for tests), it exits by itself after ``--max-seconds`` (a watchdog), and every wait in
@@ -19,6 +24,7 @@ This file is ASCII only.
 """
 
 import argparse
+import dataclasses
 import os
 import sys
 import threading
@@ -80,8 +86,25 @@ def install_patches(clock_offset_seconds: int):
         recovery_support.STOP = kwargs["stop"]
         return original_run_until_stopped(process=process_one, **kwargs)
 
+    original_install_composition = worker.install_composition
+    test_kinds = frozenset(recovery_support.TEST_KINDS)
+
+    def install_composition(composition):
+        production_gate = composition.kind_gate
+        if production_gate is not None:
+
+            def gate_with_test_kinds():
+                answer = production_gate()  # the production gate itself: it may raise (a DatabaseError included), which the worker handles as before
+                if not isinstance(answer, (set, frozenset, list, tuple)):
+                    raise TypeError("the production gate answered with something that is not a collection of kinds")
+                return frozenset(answer) | test_kinds
+
+            composition = dataclasses.replace(composition, kind_gate=gate_with_test_kinds)
+        original_install_composition(composition)
+
     worker.process_one = process_one
     worker.run_until_stopped = run_until_stopped
+    worker.install_composition = install_composition
     return clock
 
 
