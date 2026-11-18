@@ -38,6 +38,7 @@ from apps.cases.errors import (
     StoredDataError,
 )
 from apps.cases.models import Approval, Case, ResultRevision, WorkflowRun
+from tests.attribution_support import DEMO_ATTRIBUTION
 from workflows.revision_approval import (
     ApprovalRecord,
     ExportDenialReason,
@@ -97,7 +98,7 @@ JOIN_TIMEOUT = 60
 
 def new_run(reference):
     case = services.create_case(reference=reference)
-    return services.create_run(case_id=case.pk)
+    return services.create_run(case_id=case.pk, attribution=DEMO_ATTRIBUTION)
 
 
 @tag("requires_postgres")
@@ -401,8 +402,8 @@ class PersistedEligibilityTests(DedicatedTestDatabaseMixin, TestCase):
 
     def test_an_approval_from_another_run_with_equal_case_payload_and_hash_is_denied(self):
         case = services.create_case(reference="cross-run-db")
-        run_one = services.create_run(case_id=case.pk)
-        run_two = services.create_run(case_id=case.pk)  # the same case, two runs
+        run_one = services.create_run(case_id=case.pk, attribution=DEMO_ATTRIBUTION)
+        run_two = services.create_run(case_id=case.pk, attribution=DEMO_ATTRIBUTION)  # the same case, two runs
         one = revision_for(run_one, 1)
         two = revision_for(run_two, 1)
         self.assertEqual(one.content_hash, two.content_hash)

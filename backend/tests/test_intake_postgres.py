@@ -50,7 +50,7 @@ from apps.intake.policy import (
     extraction_payload,
 )
 from apps.intake.registry import PRODUCTION_REGISTRY
-from apps.intake.submission import submit_request
+from apps.intake.submission import REQUEST_INTAKE_ATTRIBUTION, submit_request
 from apps.tasks import worker
 from apps.tasks.handlers import TaskHandler
 from apps.tasks.models import Task, TaskAttempt
@@ -209,7 +209,7 @@ class SchemaTests(DedicatedTestDatabaseMixin, TestCase):
         self.assertIn(["run_id", "step", "generation"], unique)
 
     def test_the_run_state_constraints_reject_bad_rows(self):
-        run = case_services.create_run(case_id=case_services.create_case(reference="constraints").pk)
+        run = case_services.create_run(case_id=case_services.create_case(reference="constraints").pk, attribution=REQUEST_INTAKE_ATTRIBUTION)
         self.assertEqual((run.state, run.failed_step), ("queued", ""))  # the default for a run made the old way
         for fields in ({"state": "bogus"}, {"failed_step": "extract"}, {"state": "failed"}, {"state": "failed", "failed_step": "other"}, {"state": "queued", "failed_step": "export"}):
             with self.subTest(fields=fields), self.assertRaises(IntegrityError), transaction.atomic():
@@ -221,7 +221,7 @@ class SchemaTests(DedicatedTestDatabaseMixin, TestCase):
         result = submit(make_user())
         base = dict(submitted_by=result.source.submitted_by, text="x", text_sha256="a" * 64, byte_length=1)
         for fields in ({"text_sha256": "A" * 64}, {"text_sha256": "a" * 63}, {"byte_length": 0}, {"byte_length": MAX_REQUEST_TEXT_BYTES + 1}):
-            other = case_services.create_run(case_id=case_services.create_case(reference=f"src-{uuid.uuid4()}").pk)
+            other = case_services.create_run(case_id=case_services.create_case(reference=f"src-{uuid.uuid4()}").pk, attribution=REQUEST_INTAKE_ATTRIBUTION)
             with self.subTest(fields=fields), self.assertRaises(IntegrityError), transaction.atomic():
                 RequestSource.objects.create(run=other, **{**base, **fields})
         with self.assertRaises(IntegrityError), transaction.atomic():  # a second source for the same run
@@ -280,7 +280,7 @@ class SchemaTests(DedicatedTestDatabaseMixin, TestCase):
 @requires_postgres
 class TransitionServiceTests(DedicatedTestDatabaseMixin, TestCase):
     def setUp(self):
-        self.run = case_services.create_run(case_id=case_services.create_case(reference="transitions").pk)
+        self.run = case_services.create_run(case_id=case_services.create_case(reference="transitions").pk, attribution=REQUEST_INTAKE_ATTRIBUTION)
 
     def test_an_allowed_transition_is_saved(self):
         run = case_services.transition_run(self.run.pk, to=RunState.EXTRACTING)
@@ -559,7 +559,7 @@ class ExtractionServiceTests(DedicatedTestDatabaseMixin, TestCase):
         self.assertEqual((counts()["outcomes"], counts()["revisions"]), (0, 0))
 
     def test_a_run_without_a_stored_source_is_refused_and_not_moved(self):
-        run = case_services.create_run(case_id=case_services.create_case(reference="no-source").pk)
+        run = case_services.create_run(case_id=case_services.create_case(reference="no-source").pk, attribution=REQUEST_INTAKE_ATTRIBUTION)
         with self.assertRaises(RequestSourceMissingError):
             services.run_extraction(run.pk)
         self.assertEqual(self.refreshed(run).state, "queued")
@@ -1005,6 +1005,14 @@ class RunStateMigrationTests(DedicatedTestDatabaseMixin, TransactionTestCase):
         self.latest = executor.loader.graph.leaf_nodes()
         self.addCleanup(lambda: MigrationExecutor(connection).migrate(MigrationExecutor(connection).loader.graph.leaf_nodes()))
 
+    # The state before the workflow attribution migrations (cases 0006 to 0009). The runs this test inserts have no Request Intake source, so
+    # the attribution migrations would, correctly, refuse them (tests/test_workflow_attribution_postgres.py covers that); this test stops before them.
+    BEFORE_ATTRIBUTION = [("cases", "0005_rejection"), ("intake", "0002_revisionedit_request_permissions")]
+
+    def empty_cases_tables(self):
+        with connection.cursor() as cursor:
+            cursor.execute("TRUNCATE TABLE cases_case CASCADE")  # the test database only; lets the cleanup migrate to the latest state
+
     def test_existing_runs_survive_and_get_a_consistent_state(self):
         executor = self.migrate([("intake", None), ("cases", "0001_initial")])
         old = executor.loader.project_state([("cases", "0001_initial")]).apps
@@ -1016,16 +1024,19 @@ class RunStateMigrationTests(DedicatedTestDatabaseMixin, TransactionTestCase):
             id=uuid.uuid4(), run=with_revision, revision_number=1, canonical_format_version=1, canonical_bytes=b"{}", content_hash="a" * 64, findings=[]
         )
         OldRun.objects.filter(pk=with_revision.pk).update(current_revision=revision)
+        self.addCleanup(self.empty_cases_tables)  # registered after the migration cleanup of setUp, so it runs first
 
-        self.migrate(self.latest)
+        executor = self.migrate(self.BEFORE_ATTRIBUTION)
+        new = executor.loader.project_state(self.BEFORE_ATTRIBUTION).apps
+        NewCase, NewRun, NewRevision = new.get_model("cases", "Case"), new.get_model("cases", "WorkflowRun"), new.get_model("cases", "ResultRevision")
 
-        runs = {run.pk: run for run in WorkflowRun.objects.all()}
+        runs = {run.pk: run for run in NewRun.objects.all()}
         self.assertEqual(len(runs), 2)  # nothing was deleted
         self.assertEqual((runs[without.pk].state, runs[without.pk].failed_step), ("queued", ""))
         self.assertEqual((runs[with_revision.pk].state, runs[with_revision.pk].failed_step), ("needs_review", ""))
         self.assertEqual(runs[with_revision.pk].current_revision_id, revision.pk)  # untouched
-        self.assertEqual(Case.objects.count(), 1)
-        self.assertEqual(ResultRevision.objects.count(), 1)
+        self.assertEqual(NewCase.objects.count(), 1)
+        self.assertEqual(NewRevision.objects.count(), 1)
 
     def column_names(self):
         with connection.cursor() as cursor:

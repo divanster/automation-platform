@@ -45,6 +45,10 @@ class ImmutableRecordError(PersistenceError):
     """A write was attempted that would modify or delete an immutable record."""
 
 
+class ImmutableAttributionError(ImmutableRecordError):
+    """A write was attempted that would change a run's workflow attribution (module id, workflow key or workflow version)."""
+
+
 class InvalidTransitionError(PersistenceError):
     """A workflow-run state change that the transition table does not allow.
 

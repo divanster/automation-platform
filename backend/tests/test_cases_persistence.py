@@ -32,6 +32,7 @@ from apps.cases.errors import (
     StoredDataError,
 )
 from apps.cases.models import Approval, Case, ResultRevision, WorkflowRun
+from tests.attribution_support import DEMO_ATTRIBUTION
 from tests.test_request_intake_boundaries import imported_modules
 from workflows.revision_approval import (
     ApprovalRecord,
@@ -578,7 +579,9 @@ class WriteValidationTests(SimpleTestCase):
         with self.assertRaises(InvalidIdentifierError):
             services.create_case(reference="R", case_id=str(CASE))
         with self.assertRaises(InvalidIdentifierError):
-            services.create_run(case_id=str(CASE))
+            services.create_run(case_id=str(CASE), attribution=DEMO_ATTRIBUTION)
+        with self.assertRaises(InvalidIdentifierError):
+            services.create_run(case_id=CASE, attribution=DEMO_ATTRIBUTION, run_id=str(RUN))
 
     def test_an_inconsistent_revision_is_refused_before_any_write(self):
         broken = domain_revision()

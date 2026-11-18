@@ -41,6 +41,7 @@ from workflows.revision_approval import (
 from workflows.revision_approval import ResultRevision as DomainRevision
 
 from .adapters import StoredApproval, findings_to_json, to_domain_revision, to_stored_approval
+from .attribution import WorkflowAttribution
 from .errors import (
     ApprovalMismatchError,
     BindingMismatchError,
@@ -98,8 +99,16 @@ def create_case(*, reference: str, case_id: UUID | None = None) -> Case:
     return Case.objects.create(id=case_id or uuid.uuid4(), reference=reference)
 
 
-def create_run(*, case_id: UUID, run_id: UUID | None = None) -> WorkflowRun:
-    """Create a run for an existing case, with no current revision yet."""
+def create_run(*, case_id: UUID, attribution: WorkflowAttribution, run_id: UUID | None = None) -> WorkflowRun:
+    """Create a run for an existing case, with no current revision yet, stamped with its workflow attribution.
+
+    ``attribution`` is required and has no default: a run is always created under an explicit module, workflow and
+    workflow definition version, and it never changes afterwards (``apps.cases.attribution``). Anything that is not exactly a
+    ``WorkflowAttribution`` (a subclass included) is a ``TypeError``; the value is validated again here, so one altered after construction is refused too.
+    """
+    if type(attribution) is not WorkflowAttribution:  # exactly the value class: a subclass could override how its values are read
+        raise TypeError("attribution must be an apps.cases.attribution.WorkflowAttribution")
+    stamp = attribution.fields()
     validate_uuid(case_id, "case_id")
     if run_id is not None:
         validate_uuid(run_id, "run_id")
@@ -107,7 +116,7 @@ def create_run(*, case_id: UUID, run_id: UUID | None = None) -> WorkflowRun:
         case = Case.objects.get(pk=case_id)
     except Case.DoesNotExist as error:
         raise RecordNotFoundError("The case does not exist.") from error
-    return WorkflowRun.objects.create(id=run_id or uuid.uuid4(), case=case)
+    return WorkflowRun.objects.create(id=run_id or uuid.uuid4(), case=case, **stamp)
 
 
 # --- writes ---------------------------------------------------------------------------------------

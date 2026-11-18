@@ -453,11 +453,18 @@ class ModelMetadataTests(SimpleTestCase):
     def test_the_task_tables_gained_no_run_or_business_column(self):
         self.assertEqual({f.name for f in Task._meta.local_fields} & {"run", "run_id", "case", "revision"}, set())
 
-    def test_the_run_gained_exactly_the_state_columns(self):
+    def test_the_run_gained_exactly_the_state_and_attribution_columns(self):
+        # MOD-1b S5 added the three attribution columns and their constraints (tests/test_workflow_attribution.py); nothing else changed.
         fields = {f.name for f in WorkflowRun._meta.local_fields}
-        self.assertEqual(fields, {"id", "case", "current_revision", "state", "failed_step", "created_at"})
+        self.assertEqual(fields, {"id", "case", "current_revision", "state", "failed_step", "module_id", "workflow_key", "workflow_version", "created_at"})
         self.assertEqual(WorkflowRun._meta.get_field("state").default, "queued")
-        self.assertEqual({c.name for c in WorkflowRun._meta.constraints}, {"cases_run_state_valid", "cases_run_failed_step_valid", "cases_run_failed_step_matches_state"})
+        self.assertEqual(
+            {c.name for c in WorkflowRun._meta.constraints},
+            {
+                "cases_run_state_valid", "cases_run_failed_step_valid", "cases_run_failed_step_matches_state",
+                "cases_run_module_id_shape", "cases_run_workflow_key_shape", "cases_run_workflow_version_positive",
+            },
+        )  # fmt: skip
 
 
 class MigrationTests(SimpleTestCase):

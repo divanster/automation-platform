@@ -49,10 +49,13 @@ is no module endpoint, signature, license enforcement or update manager; modules
 plus MOD-1b slices S1a to S3 (pure permission and capability contracts, a generic authorization core, worker claim-filter and kind-gate
 seams, and an extensible audit vocabulary; merged), plus MOD-1b / S4 (`apps/module_host`: `ModuleState`, an initialization marker and append-only namespace
 claims, a repeatable `module_sync`, audited `module_enable`, `module_disable` and `module_status` administrator commands, and the
-worker kind gate installed in the production composition; see `docs/architecture/module-contract.md` section 3.11; on `feat/module-runtime-state` (pushed, PR not yet merged): its 1926 DB-free
+worker kind gate installed in the production composition; see `docs/architecture/module-contract.md` section 3.11; merged into `main` (PR #15): its 1926 DB-free
 tests pass in the development VM, and the owner ran its 75 PostgreSQL tests, the migration and a 567-test PostgreSQL regression locally (all passed; owner-supplied, tested
 scenarios only; see `docs/development/local-validation-record.md`); the registry is still empty so nothing is gated, Request Intake is not a module (its task kind is a legacy
-ungated kind), there is no enable/disable API and no API-side write blocking, no capability facade, no installer or update manager, and the gate has the known S2 race window). The source text in the UI, revision diffs, document upload, exports,
+ungated kind), there is no enable/disable API and no API-side write blocking, no capability facade, no installer or update manager, and the gate has the known S2 race window), plus MOD-1b / S5 (workflow attribution: `WorkflowRun.module_id`, `workflow_key` and `workflow_version`, set once at creation and refused afterwards at the ORM level, with additive migrations
+`cases.0006` to `0009` whose backfill attributes only runs that have a Request Intake source and stops with a count at any other; see `docs/architecture/module-contract.md` section 3.12; on `feat/module-workflow-attribution`, implementation `e2a4c55`, PR not yet merged: its 1998 DB-free tests pass in the
+development VM, and the owner ran the migrations, saw four historical runs attributed, and ran its 37 PostgreSQL tests and a 604-test PostgreSQL regression locally, all passed; owner-supplied, tested scenarios only, see
+`docs/development/local-validation-record.md`; Request Intake is still not a module and nothing reads the attribution). The source text in the UI, revision diffs, document upload, exports,
 password reset, multi-factor authentication, an installer, and real AI adapters are not implemented. See `README.md` and
 `docs/architecture/README.md`. Do not describe planned components as existing.
 

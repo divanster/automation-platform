@@ -16,6 +16,14 @@ from datetime import datetime
 
 MAX_REQUEST_TEXT_BYTES = 65_536  # provisional
 
+# The stable identity of this workflow, stamped on every run it creates (``apps.cases.attribution``). Never renamed or reused. They are
+# the identifiers the synthetic Request Intake manifest declares (``tests/module_support.py``: module id, workflow key and definition
+# version 1), so MOD-2 can register the module without changing a stored value; a test keeps them equal. The definition version is the
+# workflow's own and is unrelated to the canonical format version of its revisions.
+MODULE_ID = "request_intake"
+WORKFLOW_KEY = "request_intake"
+WORKFLOW_VERSION = 1
+
 KIND_EXTRACT = "request_intake.extract"  # the task kind (handler allowlist key)
 STEP_EXTRACT = "extract"  # the step name used in StepTask and in the idempotency key
 FIRST_GENERATION = 1

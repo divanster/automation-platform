@@ -173,7 +173,7 @@ pure policy. **The generic `revision_approval` modules import no Django or datab
 | Model | Holds | Notes |
 | --- | --- | --- |
 | `Case` | UUID id, unique `reference`, `created_at` | Minimal: the entity from [data-model.md](../architecture/data-model.md), not a parallel one |
-| `WorkflowRun` | UUID id, `case` (PROTECT), `current_revision` (nullable, PROTECT), `created_at` | Minimal: state, definition and configuration snapshots are added by later migrations to this table |
+| `WorkflowRun` | UUID id, `case` (PROTECT), `current_revision` (nullable, PROTECT), `created_at`; later migrations added `state`, `failed_step` and (MOD-1b S5) `module_id`, `workflow_key`, `workflow_version` | Minimal: configuration snapshots are still to be added by later migrations to this table; the attribution is written once and never read by the revision and approval rules |
 | `ResultRevision` | UUID id (caller-supplied), `run` (PROTECT), `revision_number`, `canonical_format_version`, `canonical_bytes`, `content_hash`, `findings` (JSON), `created_at` | Immutable. Case comes from `run.case` |
 | `Approval` | UUID id, `revision` (PROTECT), `content_hash`, `approver_id` (UUID), `acknowledged_warnings` (JSON), `created_at` | Immutable. Decision "approved" only. Case and run come from the revision |
 

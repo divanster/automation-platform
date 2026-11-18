@@ -5,7 +5,8 @@
 > and `Approval` (approved decisions only), in `apps/cases`, plus the `accounts.User`
 > skeleton model, plus `RequestSource`, `StepTask` and `ExtractionOutcome` in `apps/intake` and a run
 > `state` and `failed_step` on `WorkflowRun` (see
-> [request-intake-orchestration-slice.md](../development/request-intake-orchestration-slice.md)), plus
+> [request-intake-orchestration-slice.md](../development/request-intake-orchestration-slice.md)), plus the workflow attribution
+> columns `module_id`, `workflow_key` and `workflow_version` on `WorkflowRun` (MOD-1b S5, section 8 below; its migrations and PostgreSQL tests passed in the owner's local run, tested scenarios only), plus
 > `RevisionEdit` in `apps/intake`, `Rejection` in `apps/cases`, `AuditEvent` in `apps/audit`, and a stable
 > `User.public_id` (see [review-services-slice.md](../development/review-services-slice.md)). The PostgreSQL tests
 > of all of these models passed in the owner's local run (tested scenarios only, see the [local validation record](../development/local-validation-record.md)). Everything else here is
@@ -175,6 +176,13 @@ AuditEvent * --- 0..1 Case / WorkflowRun / other subject
   versions are immutable, references to them are sufficient; the `ModelProfile`
   settings are copied because profiles may be edited. Later changes to current
   configuration do not alter a run's recorded history or its validation rules.
+- **Built so far (MOD-1b S5): the workflow attribution.** Three NOT NULL columns, `module_id`, `workflow_key` and
+  `workflow_version`, record the module, the workflow and the workflow definition version the run was created under
+  (the manifest's `module_id`, `workflow_key` and integer `definition_version`; see
+  [module-contract.md](module-contract.md) section 3.12). They are written once, by `apps.cases.services.create_run`, and
+  refused afterwards at the ORM level (not by a trigger). There is no `WorkflowDefinition` table: the key and version are
+  plain values, with no foreign key and no index, and the module's own release is not recorded. The configuration and
+  model-profile snapshots above are not built.
 - **Snapshot versus enforcement.** The snapshot records *what was used* and
   makes results explainable. It is **not** a permission. The data-policy mode
   is evaluated against the company's *current* mode at execution time, so a
@@ -371,7 +379,9 @@ AuditEvent * --- 0..1 Case / WorkflowRun / other subject
 
 - `WorkflowDefinition` versions and `ConfigurationVersion` versions are both
   immutable once saved.
-- A `WorkflowRun` stores references to the exact versions it used.
+- A `WorkflowRun` stores references to the exact versions it used. **Built (S5; owner-validated on PostgreSQL for the tested scenarios):** the module id, the workflow key and the
+  workflow definition version, as plain columns. Existing Request Intake runs were attributed to `request_intake` / `request_intake` / 1 by an
+  evidence-based backfill (a run with a Request Intake source); a run without one is not guessed at and stops the migration.
 - Upgrading a workflow package adds new definition versions. In-progress runs
   continue on their original version unless an explicit migration is defined.
 - Configuration is validated against the schema declared by the workflow

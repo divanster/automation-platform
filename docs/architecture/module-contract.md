@@ -45,8 +45,8 @@
 > S3 review (owner decisions): the runtime installation of a module vocabulary is deferred to MOD-2; `request` is now a reserved Core namespace in
 > the manifest; and the manifest and the audit vocabulary apply the same detail-key restrictions (sections 3.2 and 3.10).
 >
-> **MOD-1b / S4 (persistent module state, enable/disable, worker gate)** is implemented and validated on `feat/module-runtime-state` (implementation commit `96efa2f`;
-> three test-only corrections `45bd0da`, `4ba709b` and `0f8e44d`; pushed; **PR not yet merged**). A new Django app, `apps/module_host`, stores a `ModuleState` row per registered module and an append-only `ModuleNamespaceClaim` per
+> **MOD-1b / S4 (persistent module state, enable/disable, worker gate)** is implemented, validated and **merged into `main` (PR #15, merge commit `97cdc98`)** (implementation commit `96efa2f`;
+> three test-only corrections `45bd0da`, `4ba709b` and `0f8e44d`). A new Django app, `apps/module_host`, stores a `ModuleState` row per registered module and an append-only `ModuleNamespaceClaim` per
 > namespace (additive migration `0001`), syncs them from the approved static registry (`module_sync`), enables and disables a module transactionally with
 > an audit event (`module_enable`, `module_disable`), and reports status (`module_status`) (section 3.11). The existing S2 `kind_gate` is now installed in the
 > production worker composition: it holds the queued tasks of a disabled, version-mismatched or stateless (after the first sync) module and lets
@@ -57,6 +57,11 @@
 > `module_host.0001_initial` applied successfully, and the full selected PostgreSQL regression ran 567 tests, all passed, 153.186 s, exit code 0, test database
 > destroyed** (section 3.11, "Owner-supplied local PostgreSQL result"). That supports the tested scenarios on one machine only. Two Core audit actions were added
 > (`module.enabled`, `module.disabled`), which changes the S3 "seven Core actions" pin (section 3.11, "Audit"). No production-readiness claim.
+>
+> **MOD-1b / S5 (workflow attribution)** is implemented on `feat/module-workflow-attribution` (implementation commit `e2a4c55`; **owner-supplied local PostgreSQL validation: the migrations applied, four historical runs were attributed, the 37 attribution tests and a 604-test regression passed; the VM did not run or observe it**). Every `WorkflowRun` now records a `module_id`, a
+> `workflow_key` and a `workflow_version` (the workflow definition version), written once by `create_run` and refused afterwards at the ORM level; existing Request Intake runs are attributed to
+> `request_intake` / `request_intake` / 1 by an evidence-based, idempotent backfill that **stops, with a count, at any run it cannot attribute** (section 3.12). It changes no state transition, task, lease, approval,
+> audit event or canonical byte, exposes nothing through the REST API, and activates no module. Request Intake is still not a module. No production-readiness claim.
 
 ## 1. Purpose and scope
 
@@ -110,7 +115,7 @@ manifest cannot exist; it is frozen, and every collection is copied into a tuple
 | `extra_namespaces` | no | Further identifier prefixes the module owns (section 3.2) |
 | `dependencies` | no | `ModuleDependency(module_id, version_range)`: hard dependencies on other modules |
 | `capabilities_required` / `capabilities_provided` | no | Dotted capability ids of at least two segments (section 3.3) |
-| `workflows` | no | `WorkflowDeclaration(workflow_key, definition_version, task_kinds, description)`; `business` modules only; the task kinds must be declared by the same module |
+| `workflows` | no | `WorkflowDeclaration(workflow_key, definition_version, task_kinds, description)`; `definition_version` an integer from 1 to 2147483647 (a positive 32-bit integer, since S5); `business` modules only; the task kinds must be declared by the same module |
 | `task_handlers` | no | `TaskHandlerDeclaration(kind, handler=None, description)`; kind at most 64 characters (the `Task.kind` column) |
 | `permissions` | no | `PermissionDeclaration(permission_id, scope, description)`; `<namespace>.<codename>`; scope `global`, `own` or `any` (section 3.5) |
 | `role_grants` | no | `RoleGrant(role, permissions)`: default grants to `Operator`, `Approver` or `Auditor`, of permissions the module itself declares (section 3.6) |
@@ -581,7 +586,7 @@ exclusive lock); another PostgreSQL version or machine; or that no other race ex
 
 ### 3.11 The module host: persistent state, sync, enable/disable and the worker gate (MOD-1b / S4)
 
-**Status.** Implemented and validated on `feat/module-runtime-state` (pushed; the PR is not merged). DB-free tests pass in the development VM; the PostgreSQL tests
+**Status.** Implemented and validated, merged into `main` (PR #15, merge commit `97cdc98`). DB-free tests pass in the development VM; the PostgreSQL tests
 and the migration were run **by the project owner locally** (section "Owner-supplied local PostgreSQL result" below), not by the VM. `apps/modules` stays pure and gains no model; the runtime state is a separate Django app, `apps/module_host`
 (label `module_host`), installed in `INSTALLED_APPS`. **No module is registered** (`BUILTIN_MODULES` is empty), Request Intake is **not** a module, there is **no
 public API** (no route, view or serializer), and nothing is installed, downloaded, imported by name or migrated by the host.
@@ -792,6 +797,131 @@ it is one machine and one PostgreSQL, and the owner did not report a manual run 
 write blocking for a disabled module; there is **no** capability facade and no `ModuleContext`; there is **no** module installation and no Update Manager; the gate reads
 state once per iteration; and nothing here is a production-readiness claim. Record: [local-validation-record.md](../development/local-validation-record.md).
 
+### 3.12 Workflow attribution: which module, workflow and definition version a run belongs to (MOD-1b / S5)
+
+**Status.** Implemented and validated on `feat/module-workflow-attribution` (implementation commit `e2a4c55`, pushed; PR not yet merged). DB-free tests pass in the development VM (1998 in all). **The PostgreSQL tests and the four
+migrations were run by the project owner locally** (section "Owner-supplied local PostgreSQL result" below); the VM has no PostgreSQL and never connects to one. The owner's commands are in the [runbook](../development/runbook.md), section 5.2. **No module is registered, Request Intake is still not a module, and nothing
+is enabled or activated by this slice.** Nothing about a run's behaviour reads the new columns.
+
+**Goal.** Every `WorkflowRun` records, for good, the stable module identity, the workflow key and the workflow definition version it was created under, so that an update or an audit can later say which definition a run
+started on (the "runs stay pinned to their workflow definition version" intent of sections 4.4 and 8, and open decision 4 of section 11).
+
+**Schema (`cases.WorkflowRun`, three columns; migrations `cases.0006` to `0009`).**
+
+| Column | Type and rule | Manifest field it mirrors |
+| --- | --- | --- |
+| `module_id` | `varchar(40)` NOT NULL; CHECK `^[a-z][a-z0-9_]{2,39}$` (`cases_run_module_id_shape`) | `module_id` |
+| `workflow_key` | `varchar(64)` NOT NULL; CHECK `^[a-z][a-z0-9_]{0,39}(\.[a-z][a-z0-9_]{0,39})*$` (`cases_run_workflow_key_shape`) | `WorkflowDeclaration.workflow_key` |
+| `workflow_version` | `integer` NOT NULL; CHECK `1 <= value <= 2147483647` (`cases_run_workflow_version_positive`; Django's own `>= 0` check stays) | `WorkflowDeclaration.definition_version` |
+
+The column is called `workflow_version` (the name the contract and the data model already used) and holds the manifest's integer `definition_version`. It is the **workflow definition's** version, not the module's SemVer
+`module_version`: a run does not record which module release created it. There is no foreign key and no index: `module_id` is plain text (a module keeps its `ModuleState` row for ever, but nothing ties the two), and no
+query reads these columns yet.
+
+**Attribution rules (`apps/cases/attribution.py`, pure, standard library only).** `WorkflowAttribution(module_id, workflow_key, workflow_version)` is a frozen value that validates itself on construction and raises
+`WorkflowAttributionError` with a stable `code` (`invalid_type`, `invalid_module_id`, `invalid_workflow_key`, `reserved_namespace`, `invalid_workflow_version`); a message names the field and never repeats the value.
+
+* The **manifest's rules, written twice.** `apps.cases` is Core and may not import `apps.modules` (a boundary test pins it), so the module id pattern and length, the workflow key pattern and length (64) and the reserved
+  namespaces are repeated, as the audit vocabulary repeats the detail-key rule. `tests/test_workflow_attribution_pure.py` keeps the copies equal: the reserved set equals `RESERVED_NAMESPACES`, and on a seeded corpus of
+  about 2 500 generated and edge strings a module id is accepted exactly when a real `ModuleManifest` accepts it, and a workflow key exactly when a `WorkflowDeclaration` accepts it and its first segment is not reserved
+  (no module can own a reserved namespace, so such a key can never be declared).
+* **One version limit everywhere (owner decision: a positive 32-bit integer).** `WorkflowDeclaration.definition_version` must be an integer from 1 to 2 147 483 647 (`MAX_WORKFLOW_DEFINITION_VERSION` in
+  `apps/modules/manifest.py`; a larger one is refused with code `invalid_type`, like any other bad version; no existing manifest or fingerprint is affected). `WorkflowAttribution` (`invalid_workflow_version`), the `integer`
+  column and the CHECK `cases_run_workflow_version_positive` use the same range, and tests compare the four constants (manifest, attribution, model constraint, migrations 0008 and 0009). The first S5 draft left the
+  manifest unbounded; the review closed that gap, so a manifest that registers can always create a run.
+* **No arbitrary values.** The values come from a typed, validated object. `create_run` accepts only exactly a `WorkflowAttribution` (a subclass is refused: it could change how its values are read) and validates it
+  again (so one altered after construction through `object.__setattr__` is refused); the database checks the shape; the one creator passes a constant (below). No request, command line, file or environment variable
+  reaches these values, and there is no import by name and no discovery.
+* **What Core cannot check.** Whether a module is registered or enabled, and whether a module really declares a workflow key or that definition version, is the registry's knowledge. Core does not have it (Request
+  Intake is not a module yet), so the database and `create_run` check **shape and reserved names only**. A well-formed but unregistered pair is accepted (a PostgreSQL test pins that, so nobody claims more). When MOD-2
+  registers Request Intake, a golden test must show that its manifest declares exactly the constants below (the DB-free test already does so against the synthetic manifest).
+
+**Request Intake's identity.** `apps/intake/policy.py`: `MODULE_ID = "request_intake"`, `WORKFLOW_KEY = "request_intake"`, `WORKFLOW_VERSION = 1`, and `apps/intake/submission.py` builds the constant
+`REQUEST_INTAKE_ATTRIBUTION` from them. They are the identifiers the synthetic Request Intake manifest (`tests/module_support.py`) already declares (module id, workflow key, definition version 1) and the prefix of the task
+kind `request_intake.extract`, so MOD-2 can register the module without changing a stored value (a test keeps them equal and checks that the registry gives the module its own workflow key namespace). The workflow
+version is the workflow's own and is unrelated to the canonical format version of its revisions (still 1).
+
+**Every creation path (found by reading the code, and pinned by an AST test).** A run is created in exactly one production place: `apps.intake.submission.submit_request` calls `apps.cases.services.create_run`, which is
+the only call of `WorkflowRun.objects.create`. `submit_request_as`, the REST API and the UI all go through it. A replayed submission (same client request id) returns the existing run and creates nothing, so its
+attribution is the original one; a lost race reads the winner's row. No management command, signal, fixture, admin class or other service creates runs; every other call in the repository is a test. `create_run` now
+takes **`attribution` as a required keyword with no default** (a default would have attributed unknown workflows to Request Intake silently), so a future creation path cannot forget it. The existing test callers pass
+`REQUEST_INTAKE_ATTRIBUTION` (Request Intake tests) or a neutral `DEMO_ATTRIBUTION` (`tests/attribution_support.py`, Core persistence tests).
+
+**Immutability (ORM and service level only, like the immutable records of `apps/cases/models.py`).** The attribution is written once, by `create_run`, and then refused: `save()` and `save_base()` on an existing row refuse
+a changed value, and refuse any `update_fields` that names an attribution column (even with an unchanged value); a new object is always INSERTed, so an object that reuses an existing id cannot overwrite the row
+(`loaddata` included); `QuerySet.update()`, `bulk_update()` and `bulk_create(update_conflicts=True)` on the default manager refuse the three columns. The stored value is remembered when a row is loaded or inserted, and a
+partial `refresh_from_db(fields=...)` does not launder a value changed in memory. A run loaded without the attribution columns (`.only("state")`) can still be saved: Django then writes only the loaded columns. The error is
+`ImmutableAttributionError`, a subclass of `ImmutableRecordError`. Everything else on a run stays updatable exactly as before (`transition_run`, `record_revision`). **Not guarded:** raw SQL and `connection.cursor()`,
+`QuerySet.raw()`, private ORM internals, the `_base_manager`, a database administrator and a migration. **There is no trigger and no revoked privilege**: a PostgreSQL test pins that a raw `UPDATE` changes a value.
+
+**Migrations (additive, in four steps; data and schema never share a migration).**
+
+| Migration | Kind | What it does |
+| --- | --- | --- |
+| `0006_workflowrun_attribution_columns` | schema | adds the three columns, NULLABLE, no default; nothing else changes |
+| `0007_backfill_run_attribution` | data | attributes a run to Request Intake **only if it has a `RequestSource` row** and all three columns are still NULL |
+| `0008_validate_run_attribution` | read only | counts runs with a missing or malformed attribution and **raises** `UnattributedRunsError` (counts only, no identifier) if there is one |
+| `0009_workflowrun_attribution_constraints` | schema | `ALTER COLUMN ... SET NOT NULL` on the three columns and the three CHECK constraints |
+
+* **The evidence.** Before S5 the only creation path was `submit_request`, which creates the run and its one `RequestSource` row in one transaction. A run with a source row is a Request Intake run. A run **without**
+  one (a run created by the persistence slice's tests or by hand, as the note in migration `0003` says) is **not guessed at**: it stays unattributed and `0008` stops. This is the only way the migration can refuse; it never
+  deletes, never defaults and never attributes an unknown workflow to Request Intake. Migration `0007` depends on `intake.0001_initial` (the table that is the evidence); a migration cannot import application code, so
+  its three values are written in the file and a test keeps them equal to `apps/intake/policy.py`.
+* **Idempotent.** Only a run whose three columns are all NULL is touched, so running `0007` again, or after a manual fix, overwrites nothing (a PostgreSQL test pins it, including a run that already carries another
+  attribution). A partly filled row is neither completed nor overwritten: `0008` reports it.
+* **Preserved.** Run ids, states, failed steps, timestamps, cases and current-revision pointers; every revision (canonical bytes, hash, findings), approval, rejection, source, step task, queue task and audit event.
+  No canonical bytes or hash is recomputed (a DB-free golden test records the hash of the shared valid text, computed on `main` before this slice, 1113 bytes, and the PostgreSQL end-to-end test compares against it).
+* **If a run cannot be attributed.** `migrate` stops at `0008` with the count; steps `0006` and `0007` have committed on their own (they are harmless and repeatable), `0008` and `0009` are not applied, nothing
+  is deleted and no constraint exists yet. The owner decides what each such run is (runbook, "Workflow attribution", gives a read-only query to list them), attributes it explicitly, and runs `migrate` again.
+* **Reverse.** Reversing `0009` removes the constraints and makes the columns nullable; `0008` and `0007` do nothing in reverse; reversing `0006` drops the three columns (their values are the only thing lost, and they
+  can be derived again by `0007` for Request Intake runs). No existing migration was modified, and no run, revision or other row is touched in either direction.
+* **Lock.** `SET NOT NULL` and the CHECKs scan `cases_workflowrun` under an exclusive lock, once; fine for today's volume. Stop the worker and API during the upgrade as for any migration.
+* The DDL was previewed in the VM without a database (`schema_editor(collect_sql=True)`): three `ADD COLUMN`s, then three `SET NOT NULL` and three `ADD CONSTRAINT ... CHECK`. A DB-free test runs Django's autodetector against
+  the migration graph and finds no change.
+
+**Historical compatibility.** Existing Request Intake runs keep their meaning: they read back as module `request_intake`, workflow `request_intake`, version 1, with the same state, history and links. The REST API,
+`apps/intake/queries.py` and the frontend **do not expose** the new fields (a test fails if the words appear there), and Request Intake's own queries still select its runs by the existence of a source row, not by
+attribution. State transitions, the run-state table, task claiming, leases and recovery, approval rules, the audit vocabulary and the canonical format are untouched (an AST test fails if the worker, the audit app, the
+workflows, the transition and approval services or the run-state module mention the attribution).
+
+**Update Manager implications (design intent; nothing here is an update manager).**
+
+* A release may add a new `workflow_version` for the same key; runs already created keep the version they started on, and new ones get the new one. The columns are what a preflight needs for "which runs are mid-flight
+  on module X, workflow W, version N" (join with `state`); an index is not added until that query exists and its need is shown.
+* A stored `module_id` and `workflow_key` are now persisted history, as namespaces already are (section 9, "Namespace continuity"): a release must not hand a stored workflow key to another module id, nor drop a workflow key
+  or definition version that non-terminal runs still carry without an explicit, audited decision. The continuity check does not read runs yet.
+* The module's own version at creation is deliberately not recorded (owner decision); if an audit ever needs "which release created this run", that is a later decision.
+
+**Owner-supplied local PostgreSQL result (2026-11-18; the VM did not run, repeat or observe it; no output is stored).** The project owner took a PostgreSQL backup, applied `cases.0006` through `cases.0009` to the development
+database, and reported that **four historical `WorkflowRun` records were backfilled to `request_intake` / `request_intake` / 1**, that the **37 focused PostgreSQL attribution tests passed**, and that the full selected PostgreSQL
+regression ran **604 tests, all passed, 207.855 s, exit code 0, test database destroyed** (the command line, the module list and the output were not supplied; for orientation only, 604 is the 37 plus the 567 of the S4
+selection, the VM's arithmetic). This supports, **for the tested scenarios only**: the migrations applying to a database that held runs; the evidence-based backfill attributing the four existing Request Intake runs; the
+constraints, the ORM guard, a new run's attribution and concurrent creation as the tests expect; and Request Intake submission, extraction, review, approval, rejection, the worker and the audit history behaving as before with
+the attribution in place (the suites that create runs were edited only to pass an attribution). It does not show how the four runs were inspected, whether the migration ever stopped at `0008` (it completed), any manual
+smoke test, behaviour with many runs, another machine or PostgreSQL version, or that no other race exists. Request Intake is **not** registered as a module, there is no `ModuleContext` or capability facade, no module
+installation or Update Manager, and no real AI integration. Not a production-readiness claim. Record: [local-validation-record.md](../development/local-validation-record.md).
+
+**Remaining limitations.**
+
+* Shape is checked, registration is not (above). Nothing verifies that a stored pair belongs to a registered module.
+* ORM-level protection only; raw SQL, a migration or an administrator can change a value and nothing detects it.
+* An installation holding a run that Request Intake did not create cannot complete the migration until its owner attributes that run (by design).
+* The PostgreSQL validation is the owner's, on one machine (below); it covers the tested scenarios only.
+* No module activation, no capability facade (`case.run` is still only a name a manifest may require), and Request Intake is not a module.
+
+**Owner decisions (S5 review).** (1) Request Intake's identity is `request_intake` / `request_intake` / `1`. (2) The historical backfill is strict: a run is attributed only on evidence and unknown runs are never guessed at.
+(3) Immutability stays ORM-level: no database trigger in S5. (4) `workflow_version` is a positive 32-bit integer, in the manifest, the attribution and the database. (5) No index without a demonstrated need. (6) No
+`module_version` on `WorkflowRun`. (7) Canonical payload bytes and content hashes are preserved. One design choice remains the implementer's, open to review: the shape and reserved-namespace rules are repeated in Core
+rather than injected from the registry, because Core cannot import it (kept equal by tests).
+
+**Tests.** DB-free: `tests/test_workflow_attribution_pure.py` (14, runs with `python -m unittest`, no Django), `tests/test_workflow_attribution.py` (58: Request Intake's identity and the synthetic manifest, the model
+and queryset guard with the SQL method replaced, `create_run`, the migration structure, the backfill and validation functions with fake models, the one-creator AST test, and the boundaries including the unchanged canonical
+hash). Narrowly updated older pins: `test_intake_composition.py` (the run's columns and constraints), `test_review_models.py` (the cases migration names), `test_cases_persistence.py` (`create_run` needs an attribution).
+PostgreSQL, **owner-run locally, passed** (section 3.12): `tests/test_workflow_attribution_postgres.py` (37 tests: the migrations against existing rows, the refusal, the idempotency, the reverse, the constraints and PostgreSQL's reading of the patterns,
+what the database cannot know, the ORM guard on a real database, Request Intake end to end with the canonical hash, and concurrent creation). The existing PostgreSQL suites that create runs were edited only to pass an
+attribution (`test_cases_persistence_postgres.py`, `test_intake_postgres.py`), and `RunStateMigrationTests` now stops at `cases.0005` because the runs it inserts have no source (it empties the cases tables before the
+cleanup returns the test database to the latest migrations).
+
 ## 4. Versioning
 
 ### 4.1 The SemVer subset
@@ -830,7 +960,7 @@ of its versions; the registry checks that the dependency is registered (`missing
 | `module_version` | The module's own version | yes: format and dependency ranges |
 | `dependencies[].version_range` | Which versions of other modules it accepts | yes |
 | `update.data_schema_version` | Version of the module's own stored data, for a migration preflight | format only |
-| `workflows[].definition_version` | Version of a workflow definition, so runs can stay pinned to the version they started on | format only |
+| `workflows[].definition_version` | Version of a workflow definition, so runs can stay pinned to the version they started on | format (the manifest); since S5 a run stores it as `workflow_version` (section 3.12) |
 | `update.minimum_updater_protocol` | Lowest update-manager protocol that can install or upgrade the module | yes: refused if above `UPDATER_PROTOCOL_VERSION` |
 
 `UPDATER_PROTOCOL_VERSION` is `0`: **no update manager exists**, so a manifest that demands protocol 1 or higher is refused
@@ -1032,6 +1162,8 @@ An update manager does not exist and is **not** part of MOD-1a. When it is desig
   (the continuity check runs in every sync). Its PostgreSQL tests and migration passed in the owner's local run (section 3.11, tested scenarios only); the limitations
   of S4 are listed in section 3.11, "Remaining limitations".
 - No capability facade exists (`task.enqueue` and the others are names a manifest may require, nothing a module can call).
+- S5 (section 3.12) stamps runs with their module, workflow and definition version, but nothing reads the stamp: no query, preflight or continuity check uses it yet, the stored pair is checked for shape and reserved
+  names and not against a registry, and protection is ORM-level. Its PostgreSQL tests and migrations passed in the owner's local run (section 3.12, tested scenarios only).
 - Request Intake has no manifest in the application; the synthetic one in `tests/module_support.py` exists only for the golden test.
 - Only manifest version 1; no pre-release versions.
 - **S3 (audit vocabulary), merged into `main` (PR #14):** no module is registered and nothing installs a module vocabulary in the application (no entry point,
@@ -1050,8 +1182,8 @@ An update manager does not exist and is **not** part of MOD-1a. When it is desig
    call is deferred to MOD-2 (where it belongs is still open), and any database-level protection of the table.
 3. **Run-state vocabulary:** keep the Core set fixed with modules mapping onto it, or make it extensible; the name `extracting` is
    intake-shaped.
-4. **Run snapshots:** when `WorkflowRun` gains `workflow_key` and `workflow_version`
-   ([data-model.md](data-model.md), `WorkflowDefinition`).
+4. **Run snapshots:** `WorkflowRun` gained `module_id`, `workflow_key` and `workflow_version` in S5 (section 3.12; owner-validated on PostgreSQL). Still open: the configuration and model-profile snapshots
+   ([data-model.md](data-model.md)); by owner decision S5 adds neither the module's own version at creation nor an index (an index needs a demonstrated need), and `definition_version` is bounded to a positive 32-bit integer in the manifest.
 5. **Result schema versioning and the content hash** ([open-questions.md](open-questions.md), 2.14), before a second module
    produces revisions.
 6. **Permission model for installable modules:** namespaced permissions and the existing three roles are decided (owner,
@@ -1104,3 +1236,8 @@ tests) and the audit migration fixtures (`tests/test_audit_vocabulary.py`, 4 new
 and `backend/apps/module_host/migrations/0001_initial.py` (all new), `backend/apps/audit/events.py` (two Core actions added), `backend/config/task_registry.py`
 (the gate and `LEGACY_UNGATED_KINDS`) and `backend/config/settings/base.py` (the app). `apps/modules`, `config/modules.py`, `apps/tasks`, the recorder, the existing
 migrations and Request Intake are unchanged.
+
+From S5 (section 3.12): DB-free `tests/test_workflow_attribution_pure.py` and `tests/test_workflow_attribution.py`; PostgreSQL `tests/test_workflow_attribution_postgres.py` (37 tests; owner-run locally, passed). Source: `backend/apps/cases/attribution.py`,
+`backend/apps/cases/migrations/0006` to `0009` (new), `backend/apps/cases/{models,services,errors}.py`, `backend/apps/intake/{policy,submission}.py` (changed), `backend/apps/modules/manifest.py` (changed: only `MAX_WORKFLOW_DEFINITION_VERSION` and its check) and
+`backend/tests/attribution_support.py` (new). The rest of `apps/modules`, `config/`, `apps/tasks`,
+`apps/audit`, the REST API and the frontend are unchanged.

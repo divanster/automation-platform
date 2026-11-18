@@ -35,7 +35,7 @@ class MigrationTests(SimpleTestCase):
                 self.assertEqual({type(op).__name__ for op in loader().disk_migrations[key].operations}, expected)
 
     def test_no_existing_table_is_altered_by_this_slice_except_the_user_column(self):
-        for app, names in {"cases": {"0001_initial", "0002_workflowrun_state", "0003_backfill_run_state", "0004_workflowrun_state_constraints", "0005_rejection"}, "intake": {"0001_initial", "0002_revisionedit_request_permissions"}}.items():
+        for app, names in {"cases": {"0001_initial", "0002_workflowrun_state", "0003_backfill_run_state", "0004_workflowrun_state_constraints", "0005_rejection", "0006_workflowrun_attribution_columns", "0007_backfill_run_attribution", "0008_validate_run_attribution", "0009_workflowrun_attribution_constraints"}, "intake": {"0001_initial", "0002_revisionedit_request_permissions"}}.items():
             self.assertEqual({n for a, n in loader().disk_migrations if a == app}, names)
 
     def test_intake_0002_follows_the_orchestration_migration(self):
