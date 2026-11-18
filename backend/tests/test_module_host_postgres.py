@@ -25,7 +25,7 @@ from types import MappingProxyType
 from unittest import mock
 
 from django.contrib.auth import get_user_model
-from django.db import IntegrityError, OperationalError, connection, transaction
+from django.db import DataError, IntegrityError, OperationalError, connection, transaction
 from django.db.migrations.executor import MigrationExecutor
 from django.test import TestCase, TransactionTestCase, tag
 from django.test.utils import CaptureQueriesContext
@@ -130,7 +130,6 @@ class SchemaTests(base.DedicatedTestDatabaseMixin, TestCase):
             {"module_id": "Alpha_Host"},
             {"module_id": "ab"},
             {"module_id": "has space"},
-            {"module_id": "x" * 41},
             {"installed_version": "1.0"},
             {"installed_version": "01.0.0"},
             {"installed_version": "1.0.0-beta"},
@@ -144,10 +143,29 @@ class SchemaTests(base.DedicatedTestDatabaseMixin, TestCase):
             with self.subTest(changes=changes), self.assertRaises(IntegrityError), transaction.atomic():
                 ModuleState.objects.create(**valid_state_fields(**changes))
 
+    def test_an_id_longer_than_the_column_is_refused_by_the_column_width_not_by_a_check(self):
+        # The contract allows 3 to 40 characters (apps.modules.manifest), and the column is varchar(40). 41 characters never reach the CHECK:
+        # PostgreSQL raises StringDataRightTruncation (SQLSTATE 22001), which Django reports as DataError. CHECK, unique and NOT NULL
+        # violations are class 23 and are IntegrityError, so the two kinds of refusal are asserted separately.
+        with self.assertRaises(DataError), transaction.atomic():
+            ModuleState.objects.create(**valid_state_fields(module_id="x" * 41))
+        with self.assertRaises(DataError), transaction.atomic():
+            ModuleNamespaceClaim.objects.create(namespace="x" * 41, module_id="alpha_host", claimed_at=T0)
+        with self.assertRaises(DataError), transaction.atomic():
+            ModuleNamespaceClaim.objects.create(namespace="legacy_ns", module_id="x" * 41, claimed_at=T0)
+        self.assertEqual((ModuleState.objects.count(), ModuleNamespaceClaim.objects.count()), (0, 0))
+
     def test_valid_extremes_are_accepted(self):
         for index, version in enumerate(("0.0.0", "999999999.999999999.999999999", "1.10.0")):
             ModuleState.objects.create(**valid_state_fields(module_id=f"ext_host_{index}", installed_version=version))
         self.assertEqual(ModuleState.objects.count(), 3)
+
+    def test_the_longest_and_shortest_ids_the_contract_allows_are_accepted(self):
+        for module_id in ("abc", "a" + "b" * 39):  # 3 and 40 characters
+            ModuleState.objects.create(**valid_state_fields(module_id=module_id))
+        ModuleNamespaceClaim.objects.create(namespace="ab", module_id="a" + "b" * 39, claimed_at=T0)  # a namespace may be 2 characters
+        ModuleNamespaceClaim.objects.create(namespace="a" + "b" * 39, module_id="abc", claimed_at=T0)
+        self.assertEqual((ModuleState.objects.count(), ModuleNamespaceClaim.objects.count()), (2, 2))
 
     def test_a_namespace_can_be_claimed_once_whoever_asks(self):
         ModuleNamespaceClaim.objects.create(namespace="legacy_ns", module_id="alpha_host", claimed_at=T0)
