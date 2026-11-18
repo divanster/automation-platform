@@ -58,7 +58,7 @@
 > destroyed** (section 3.11, "Owner-supplied local PostgreSQL result"). That supports the tested scenarios on one machine only. Two Core audit actions were added
 > (`module.enabled`, `module.disabled`), which changes the S3 "seven Core actions" pin (section 3.11, "Audit"). No production-readiness claim.
 >
-> **MOD-1b / S5 (workflow attribution)** is implemented on `feat/module-workflow-attribution` (uncommitted; **PostgreSQL tests and migrations NOT RUN**). Every `WorkflowRun` now records a `module_id`, a
+> **MOD-1b / S5 (workflow attribution)** is implemented on `feat/module-workflow-attribution` (implementation commit `e2a4c55`; **owner-supplied local PostgreSQL validation: the migrations applied, four historical runs were attributed, the 37 attribution tests and a 604-test regression passed; the VM did not run or observe it**). Every `WorkflowRun` now records a `module_id`, a
 > `workflow_key` and a `workflow_version` (the workflow definition version), written once by `create_run` and refused afterwards at the ORM level; existing Request Intake runs are attributed to
 > `request_intake` / `request_intake` / 1 by an evidence-based, idempotent backfill that **stops, with a count, at any run it cannot attribute** (section 3.12). It changes no state transition, task, lease, approval,
 > audit event or canonical byte, exposes nothing through the REST API, and activates no module. Request Intake is still not a module. No production-readiness claim.
@@ -799,8 +799,8 @@ state once per iteration; and nothing here is a production-readiness claim. Reco
 
 ### 3.12 Workflow attribution: which module, workflow and definition version a run belongs to (MOD-1b / S5)
 
-**Status.** Implemented on `feat/module-workflow-attribution` (not committed, not pushed, no PR). DB-free tests pass in the development VM. **The PostgreSQL tests and the four migrations have NOT been run**
-(the VM has no PostgreSQL and never connects to one); the owner's commands are in the [runbook](../development/runbook.md), section 5.2. **No module is registered, Request Intake is still not a module, and nothing
+**Status.** Implemented and validated on `feat/module-workflow-attribution` (implementation commit `e2a4c55`, pushed; PR not yet merged). DB-free tests pass in the development VM (1998 in all). **The PostgreSQL tests and the four
+migrations were run by the project owner locally** (section "Owner-supplied local PostgreSQL result" below); the VM has no PostgreSQL and never connects to one. The owner's commands are in the [runbook](../development/runbook.md), section 5.2. **No module is registered, Request Intake is still not a module, and nothing
 is enabled or activated by this slice.** Nothing about a run's behaviour reads the new columns.
 
 **Goal.** Every `WorkflowRun` records, for good, the stable module identity, the workflow key and the workflow definition version it was created under, so that an update or an audit can later say which definition a run
@@ -892,12 +892,21 @@ workflows, the transition and approval services or the run-state module mention 
   or definition version that non-terminal runs still carry without an explicit, audited decision. The continuity check does not read runs yet.
 * The module's own version at creation is deliberately not recorded (owner decision); if an audit ever needs "which release created this run", that is a later decision.
 
+**Owner-supplied local PostgreSQL result (2026-11-18; the VM did not run, repeat or observe it; no output is stored).** The project owner took a PostgreSQL backup, applied `cases.0006` through `cases.0009` to the development
+database, and reported that **four historical `WorkflowRun` records were backfilled to `request_intake` / `request_intake` / 1**, that the **37 focused PostgreSQL attribution tests passed**, and that the full selected PostgreSQL
+regression ran **604 tests, all passed, 207.855 s, exit code 0, test database destroyed** (the command line, the module list and the output were not supplied; for orientation only, 604 is the 37 plus the 567 of the S4
+selection, the VM's arithmetic). This supports, **for the tested scenarios only**: the migrations applying to a database that held runs; the evidence-based backfill attributing the four existing Request Intake runs; the
+constraints, the ORM guard, a new run's attribution and concurrent creation as the tests expect; and Request Intake submission, extraction, review, approval, rejection, the worker and the audit history behaving as before with
+the attribution in place (the suites that create runs were edited only to pass an attribution). It does not show how the four runs were inspected, whether the migration ever stopped at `0008` (it completed), any manual
+smoke test, behaviour with many runs, another machine or PostgreSQL version, or that no other race exists. Request Intake is **not** registered as a module, there is no `ModuleContext` or capability facade, no module
+installation or Update Manager, and no real AI integration. Not a production-readiness claim. Record: [local-validation-record.md](../development/local-validation-record.md).
+
 **Remaining limitations.**
 
 * Shape is checked, registration is not (above). Nothing verifies that a stored pair belongs to a registered module.
 * ORM-level protection only; raw SQL, a migration or an administrator can change a value and nothing detects it.
 * An installation holding a run that Request Intake did not create cannot complete the migration until its owner attributes that run (by design).
-* The PostgreSQL tests (37) and the migrations are **not run**; until the owner runs them nothing about PostgreSQL behaviour of this slice is proven.
+* The PostgreSQL validation is the owner's, on one machine (below); it covers the tested scenarios only.
 * No module activation, no capability facade (`case.run` is still only a name a manifest may require), and Request Intake is not a module.
 
 **Owner decisions (S5 review).** (1) Request Intake's identity is `request_intake` / `request_intake` / `1`. (2) The historical backfill is strict: a run is attributed only on evidence and unknown runs are never guessed at.
@@ -908,7 +917,7 @@ rather than injected from the registry, because Core cannot import it (kept equa
 **Tests.** DB-free: `tests/test_workflow_attribution_pure.py` (14, runs with `python -m unittest`, no Django), `tests/test_workflow_attribution.py` (58: Request Intake's identity and the synthetic manifest, the model
 and queryset guard with the SQL method replaced, `create_run`, the migration structure, the backfill and validation functions with fake models, the one-creator AST test, and the boundaries including the unchanged canonical
 hash). Narrowly updated older pins: `test_intake_composition.py` (the run's columns and constraints), `test_review_models.py` (the cases migration names), `test_cases_persistence.py` (`create_run` needs an attribution).
-PostgreSQL, **not run**: `tests/test_workflow_attribution_postgres.py` (37 tests: the migrations against existing rows, the refusal, the idempotency, the reverse, the constraints and PostgreSQL's reading of the patterns,
+PostgreSQL, **owner-run locally, passed** (section 3.12): `tests/test_workflow_attribution_postgres.py` (37 tests: the migrations against existing rows, the refusal, the idempotency, the reverse, the constraints and PostgreSQL's reading of the patterns,
 what the database cannot know, the ORM guard on a real database, Request Intake end to end with the canonical hash, and concurrent creation). The existing PostgreSQL suites that create runs were edited only to pass an
 attribution (`test_cases_persistence_postgres.py`, `test_intake_postgres.py`), and `RunStateMigrationTests` now stops at `cases.0005` because the runs it inserts have no source (it empties the cases tables before the
 cleanup returns the test database to the latest migrations).
@@ -1154,7 +1163,7 @@ An update manager does not exist and is **not** part of MOD-1a. When it is desig
   of S4 are listed in section 3.11, "Remaining limitations".
 - No capability facade exists (`task.enqueue` and the others are names a manifest may require, nothing a module can call).
 - S5 (section 3.12) stamps runs with their module, workflow and definition version, but nothing reads the stamp: no query, preflight or continuity check uses it yet, the stored pair is checked for shape and reserved
-  names and not against a registry, protection is ORM-level, and its PostgreSQL tests and migrations have not been run.
+  names and not against a registry, and protection is ORM-level. Its PostgreSQL tests and migrations passed in the owner's local run (section 3.12, tested scenarios only).
 - Request Intake has no manifest in the application; the synthetic one in `tests/module_support.py` exists only for the golden test.
 - Only manifest version 1; no pre-release versions.
 - **S3 (audit vocabulary), merged into `main` (PR #14):** no module is registered and nothing installs a module vocabulary in the application (no entry point,
@@ -1173,7 +1182,7 @@ An update manager does not exist and is **not** part of MOD-1a. When it is desig
    call is deferred to MOD-2 (where it belongs is still open), and any database-level protection of the table.
 3. **Run-state vocabulary:** keep the Core set fixed with modules mapping onto it, or make it extensible; the name `extracting` is
    intake-shaped.
-4. **Run snapshots:** `WorkflowRun` gained `module_id`, `workflow_key` and `workflow_version` in S5 (section 3.12; PostgreSQL validation pending). Still open: the configuration and model-profile snapshots
+4. **Run snapshots:** `WorkflowRun` gained `module_id`, `workflow_key` and `workflow_version` in S5 (section 3.12; owner-validated on PostgreSQL). Still open: the configuration and model-profile snapshots
    ([data-model.md](data-model.md)); by owner decision S5 adds neither the module's own version at creation nor an index (an index needs a demonstrated need), and `definition_version` is bounded to a positive 32-bit integer in the manifest.
 5. **Result schema versioning and the content hash** ([open-questions.md](open-questions.md), 2.14), before a second module
    produces revisions.
@@ -1228,7 +1237,7 @@ and `backend/apps/module_host/migrations/0001_initial.py` (all new), `backend/ap
 (the gate and `LEGACY_UNGATED_KINDS`) and `backend/config/settings/base.py` (the app). `apps/modules`, `config/modules.py`, `apps/tasks`, the recorder, the existing
 migrations and Request Intake are unchanged.
 
-From S5 (section 3.12): DB-free `tests/test_workflow_attribution_pure.py` and `tests/test_workflow_attribution.py`; PostgreSQL `tests/test_workflow_attribution_postgres.py` (37 tests; **not run**). Source: `backend/apps/cases/attribution.py`,
+From S5 (section 3.12): DB-free `tests/test_workflow_attribution_pure.py` and `tests/test_workflow_attribution.py`; PostgreSQL `tests/test_workflow_attribution_postgres.py` (37 tests; owner-run locally, passed). Source: `backend/apps/cases/attribution.py`,
 `backend/apps/cases/migrations/0006` to `0009` (new), `backend/apps/cases/{models,services,errors}.py`, `backend/apps/intake/{policy,submission}.py` (changed), `backend/apps/modules/manifest.py` (changed: only `MAX_WORKFLOW_DEFINITION_VERSION` and its check) and
 `backend/tests/attribution_support.py` (new). The rest of `apps/modules`, `config/`, `apps/tasks`,
 `apps/audit`, the REST API and the frontend are unchanged.

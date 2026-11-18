@@ -6,7 +6,7 @@
 > skeleton model, plus `RequestSource`, `StepTask` and `ExtractionOutcome` in `apps/intake` and a run
 > `state` and `failed_step` on `WorkflowRun` (see
 > [request-intake-orchestration-slice.md](../development/request-intake-orchestration-slice.md)), plus the workflow attribution
-> columns `module_id`, `workflow_key` and `workflow_version` on `WorkflowRun` (MOD-1b S5, section 8 below; its PostgreSQL tests and migrations are **not run**), plus
+> columns `module_id`, `workflow_key` and `workflow_version` on `WorkflowRun` (MOD-1b S5, section 8 below; its migrations and PostgreSQL tests passed in the owner's local run, tested scenarios only), plus
 > `RevisionEdit` in `apps/intake`, `Rejection` in `apps/cases`, `AuditEvent` in `apps/audit`, and a stable
 > `User.public_id` (see [review-services-slice.md](../development/review-services-slice.md)). The PostgreSQL tests
 > of all of these models passed in the owner's local run (tested scenarios only, see the [local validation record](../development/local-validation-record.md)). Everything else here is
@@ -379,7 +379,7 @@ AuditEvent * --- 0..1 Case / WorkflowRun / other subject
 
 - `WorkflowDefinition` versions and `ConfigurationVersion` versions are both
   immutable once saved.
-- A `WorkflowRun` stores references to the exact versions it used. **Built (S5, tests pending on PostgreSQL):** the module id, the workflow key and the
+- A `WorkflowRun` stores references to the exact versions it used. **Built (S5; owner-validated on PostgreSQL for the tested scenarios):** the module id, the workflow key and the
   workflow definition version, as plain columns. Existing Request Intake runs were attributed to `request_intake` / `request_intake` / 1 by an
   evidence-based backfill (a run with a Request Intake source); a run without one is not guessed at and stops the migration.
 - Upgrading a workflow package adds new definition versions. In-progress runs

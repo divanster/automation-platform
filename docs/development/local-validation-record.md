@@ -592,3 +592,42 @@ manual run of `module_status`, `module_sync`, `module_enable` or `module_disable
 - Integrity is ORM and service level only (no trigger, no revoked privilege); raw SQL that deletes the marker and every state row reopens the legacy window. The audit table is not tamper-protected.
 - If `module_sync` runs before MOD-2, the marker exists and the MOD-2 release's modules stay held until `module_sync` runs with that release (the upgrade routine).
 - One machine, one operating system, one PostgreSQL. **This is not a production-readiness claim.**
+
+## MOD-1b / S5 workflow attribution: owner-supplied local PostgreSQL results (2026-11-18)
+
+> **Scope.** S5 gives every `WorkflowRun` a `module_id`, a `workflow_key` and a `workflow_version` (the workflow definition version), written once at creation and refused afterwards at the ORM level, through the additive
+> migrations `cases.0006` to `0009` (branch `feat/module-workflow-attribution`: implementation `e2a4c55`; see [module-contract.md](../architecture/module-contract.md), section 3.12, and [runbook.md](runbook.md),
+> section 5.2). The project owner ran the migrations and the PostgreSQL tests **locally on the Windows computer**. **These are owner-supplied results.** The development VM has no PostgreSQL, never connected to one,
+> and did not run, repeat or observe any of it. No output or log is stored in this repository.
+
+**Reported by the owner:**
+
+| Item | Reported result |
+| --- | --- |
+| PostgreSQL backup before the S5 migrations | Taken |
+| Migrations `cases.0006` through `cases.0009` | Applied successfully to the owner's development database |
+| Historical `WorkflowRun` records | **Four** existing runs were backfilled to `module_id = request_intake`, `workflow_key = request_intake`, `workflow_version = 1` |
+| Focused PostgreSQL attribution tests (`tests/test_workflow_attribution_postgres.py`) | **37 passed** |
+| Full selected PostgreSQL regression | **604 tests passed, 207.855 seconds, exit code 0** |
+| Test database | The dedicated test database was destroyed successfully |
+| DB-free regression in the development VM | 1998 tests passed |
+
+**What was not supplied:** the command lines and module lists of the runs, the output, how the four runs were checked (a query, the shell or the tests), whether `migrate` stopped at `cases.0008` at any point (the reported
+result is that the migrations completed), and any manual smoke test of Request Intake after the migration (**not reported; not claimed**). For orientation only (the VM's arithmetic, not stated by the owner): 604 equals the 37
+attribution tests plus the 567 tests of the S4 selection; the intended selection is the one in [runbook.md](runbook.md), section 5.2, which also includes the cases persistence suite.
+
+**What this supports (this environment and these scenarios only):**
+
+- **The migrations.** `cases.0006` to `0009` applied on the owner's development database that already held runs; the four existing runs, all of them Request Intake runs, read as `request_intake` / `request_intake` / 1.
+- **The tests.** The 37 PostgreSQL attribution tests passed: the migrations against existing rows (the backfill on evidence, the refusal of a run without a Request Intake source, idempotency, reverse and forward), the NOT NULL
+  and CHECK constraints as PostgreSQL stores them, a new run's attribution, the ORM guard on a real database, and concurrent creation.
+- **Existing Request Intake behaviour in the tested scenarios.** The selected regression, which includes the edited run-creating suites and the unchanged review, API and worker suites, passed with the attribution in place, so
+  submission, replay, extraction, edit, approval and rejection, task claiming and the audit history behaved as before in those scenarios. The canonical hash comparison (a hash recorded from `main` before S5) is part of
+  the attribution tests; the exact module list of the 604-test run was not supplied, so the pass of the individual existing suites is inferred from the all-passed result, not itemized.
+
+**What it does not validate, and what does not exist.**
+
+- Request Intake is **not** registered as a module (`BUILTIN_MODULES` is empty), nothing reads the attribution, and no module is activated.
+- There is no `ModuleContext` or capability facade, no module installation and no Update Manager, and no real AI integration.
+- The attribution is checked for shape and reserved names, not against a registry; protection is ORM and service level only (no trigger, no revoked privilege), so raw SQL can change a value.
+- It does not prove that no other race or edge case exists. One machine, one operating system, one PostgreSQL. **This is not a production-readiness claim.**
