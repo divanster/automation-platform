@@ -90,7 +90,8 @@ class CoreStaysIndependentTests(SimpleTestCase):
         inside = {p for p in importers if p.startswith("apps/modules/")}
         # config/audit_vocabulary.py (MOD-1b S3) is the second composition root: it reads a registry and builds the audit vocabulary from it.
         # apps/module_host (MOD-1b S4) is the module host: it is handed a registry and checks it (the type, the namespace continuity rule, the errors).
-        host = {"apps/module_host/cli.py", "apps/module_host/gate.py", "apps/module_host/services.py"}
+        # apps/module_host/context.py (MOD-1b S6) is the ModuleContext: it is handed a registry and checks its type.
+        host = {"apps/module_host/cli.py", "apps/module_host/context.py", "apps/module_host/gate.py", "apps/module_host/services.py"}
         self.assertEqual(importers - inside, {"config/modules.py", "config/audit_vocabulary.py"} | host)
 
     def test_nothing_in_the_application_imports_the_composition_root_yet(self):
@@ -103,6 +104,7 @@ class CoreStaysIndependentTests(SimpleTestCase):
             "apps/module_host/management/commands/module_status.py",
             "apps/module_host/management/commands/module_sync.py",
             "config/audit_vocabulary.py",
+            "config/module_context.py",  # MOD-1b S6: the ModuleContext composition root; nothing imports it yet (tests/test_module_context.py)
             "config/task_registry.py",
         ]
         self.assertEqual(sorted(imports_of("config.modules")), expected)

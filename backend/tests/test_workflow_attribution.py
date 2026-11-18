@@ -539,6 +539,9 @@ class BoundaryTests(SimpleTestCase):
             [
                 ("apps/cases/services.py", "WorkflowRun.objects.create", None),
                 ("apps/intake/submission.py", "create_run", "REQUEST_INTAKE_ATTRIBUTION"),
+                # MOD-1b S6: the ModuleContext's ``case.run`` facade is the second creator; it builds the attribution from the module's own declaration
+                # (tests/test_module_context.py: the caller cannot choose the module or the version). Request Intake is still the only business caller.
+                ("apps/module_host/context.py", "case_services.create_run", "attribution"),
             ],
         )
 
