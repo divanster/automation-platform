@@ -556,3 +556,11 @@ it differs.
 * `public_id` is in every audit event and approval; it is an identifier with no personal data, but anyone who
   can read the user table can map it to a person.
 * The rejection reason list and the self-approval rule are provisional (section 2).
+
+## 14. MOD-1b / S6: the authorization core behind a module facade (pushed, PR not yet opened; PostgreSQL tests passed in the owner's local run)
+
+Request Intake's authorization is **unchanged**: `apps/intake/access.py`, `authorization.py`, `review.py` and `submission.py` keep their own glue and table (a test pins that none of them mentions the module host). S6 makes the same Core rule
+(`apps/accounts/access.py`, the generic own / any / superuser algorithm) available to future modules through `ModuleContext.permissions` (`require(user, *permission_ids)` and `authorize(user, *permission_ids, owner_pk=None)`): the
+user is re-read by `load_actor`, the rule is built per call from the permissions the module declares (scope `own` to the own permissions, `any` and `global` to the any permissions) plus `audit.view_auditevent`, the permission part runs
+before the scope part so a user with no permission learns nothing about a record, and a refusal is logged by code and public id only. A PostgreSQL test compares the facade's decision with `apps.intake.authorization` for every user,
+role and owner; it passed in the owner's local run (72 focused S6 tests and a 676-test selected regression, all passed; owner-supplied, tested scenarios only). See [module-contract.md](../architecture/module-contract.md) section 3.13.

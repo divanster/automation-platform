@@ -273,7 +273,7 @@ try {
 } finally { Remove-Item Env:AP_RUN_DB_TESTS -ErrorAction SilentlyContinue }
 ```
 
-## 12. MOD-1b / S4: the module gate is installed (pushed; owner-run PostgreSQL validation passed)
+## 12. MOD-1b / S4: the module gate is installed (merged; owner-run PostgreSQL validation passed)
 
 S4 adds no code to `apps/tasks` (a test pins that it still imports nothing from `apps.modules`, `apps.module_host`, `apps.intake` or `workflows`). It **installs** the
 S2 kind gate in the production composition, `config/task_registry.py`. The contract is [module-contract.md](../architecture/module-contract.md) section 3.11; in short:
@@ -301,3 +301,12 @@ S2 kind gate in the production composition, `config/task_registry.py`. The contr
   remains), and there is no production-readiness claim. **Process-level recovery children:** they run the real `runworker`, hence the production gate; the child
   (`tests/recovery_worker_child.py`) wraps `install_composition` so that the real gate's answer also contains the three `recovery.*` test kinds (a failing gate still allows
   nothing, every other kind is still held). Commands: [runbook.md](runbook.md) section 5.1.
+
+## 13. MOD-1b / S6: enqueueing through a ModuleContext (pushed, PR not yet opened; PostgreSQL tests passed in the owner's local run)
+
+S6 changes nothing in `apps/tasks`, the worker or the composition (tests pin that no file of the queue or the worker mentions the context, and that `apps/tasks` still imports no module code). A future module enqueues through
+`ModuleContext.tasks.enqueue`, which calls the existing `enqueue_task` with the same arguments, result, idempotency and errors, after checking that the kind is one the module's manifest declares (never a legacy kind or
+another module's), that a given idempotency key starts with a namespace the module owns, and that the module is enabled, version-matched and has state (under a shared row lock, so `module_disable` waits for an in-flight enqueue
+and a later enqueue is refused). **Claiming, leases, retries, recovery and the kind gate are untouched**: a disabled module's already queued tasks are still held by the S4 gate, and enabling it releases them as before. The handler
+allowlist the facade validates against is the one `config/module_context.py` passes (the worker's `PRODUCTION_REGISTRY`). Nothing calls the facade outside tests: no module is registered and Request Intake still enqueues
+`request_intake.extract` itself, as a legacy kind. The owner's local PostgreSQL run (72 focused S6 tests and a 676-test selected regression, all passed; owner-supplied, tested scenarios only) included the unchanged queue, worker, gating and recovery suites, so claiming, leases, retries and recovery behaved as before in those scenarios. See [module-contract.md](../architecture/module-contract.md) section 3.13, [runbook.md](runbook.md) section 5.3 and the [local validation record](local-validation-record.md).

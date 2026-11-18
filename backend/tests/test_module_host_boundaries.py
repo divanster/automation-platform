@@ -100,22 +100,30 @@ class ImportBoundaryTests(SimpleTestCase):
             self.assertFalse({n for n in absolute_imports(path) if n.startswith("apps.module_host")}, path.name)
 
     def test_only_the_worker_composition_root_and_the_host_import_the_host(self):
-        self.assertEqual(importers_of("apps.module_host"), ["apps/module_host/management/commands/module_disable.py", "apps/module_host/management/commands/module_enable.py", "apps/module_host/management/commands/module_status.py", "apps/module_host/management/commands/module_sync.py", "config/task_registry.py"])
+        self.assertEqual(importers_of("apps.module_host"), ["apps/module_host/management/commands/module_disable.py", "apps/module_host/management/commands/module_enable.py", "apps/module_host/management/commands/module_status.py", "apps/module_host/management/commands/module_sync.py", "config/module_context.py", "config/task_registry.py"])
 
     def test_the_host_imports_only_what_it_may(self):
         allowed_prefixes = ("django", "apps.module_host", "apps.audit", "apps.cases", "apps.modules", "config.modules")
+        # MOD-1b S6: context.py (the ModuleContext, section 3.13) is the one host file that reaches the queue and the authorization core, because the
+        # capabilities it exposes delegate to them. Nothing else in the host does (the next test).
+        context_extra = ("apps.accounts", "apps.tasks")
         for path in sources(HOST):
+            allowed = allowed_prefixes + (context_extra if path.name == "context.py" else ())
             for name in absolute_imports(path):
                 top = name.split(".")[0]
                 with self.subTest(file=path.relative_to(BACKEND).as_posix(), imported=name):
-                    self.assertTrue(top in STDLIB or any(name == a or name.startswith(a + ".") for a in allowed_prefixes), f"{path.name} imports {name}")
+                    self.assertTrue(top in STDLIB or any(name == a or name.startswith(a + ".") for a in allowed), f"{path.name} imports {name}")
 
     def test_the_host_never_imports_the_task_queue_request_intake_the_api_or_a_workflow(self):
         forbidden = ("apps.tasks", "apps.intake", "apps.api", "apps.accounts", "workflows", "rest_framework")
         for path in sources(HOST):
+            if path.name == "context.py":  # S6: may import the queue's services and policy and the authorization core, never the rest
+                forbidden_here = ("apps.intake", "apps.api", "workflows", "rest_framework")
+            else:
+                forbidden_here = forbidden
             for name in absolute_imports(path):
                 with self.subTest(file=path.name, imported=name):
-                    self.assertFalse(any(name == f or name.startswith(f + ".") for f in forbidden), f"{path.name} imports {name}")
+                    self.assertFalse(any(name == f or name.startswith(f + ".") for f in forbidden_here), f"{path.name} imports {name}")
 
     def test_the_services_and_the_gate_name_no_task_model_and_touch_no_task(self):
         for name in ("services.py", "gate.py", "rules.py"):
@@ -160,8 +168,10 @@ class NoDynamicBehaviourTests(SimpleTestCase):
                     self.assertNotIn(word, code)
             if "execute(" in code:
                 sql_users[path.name] = code.count("execute(")
-        self.assertEqual(sql_users, {"services.py": 1})
+        # services.py: the one advisory lock; context.py (S6): the one shared row lock (``FOR SHARE``), a fixed statement over the state table.
+        self.assertEqual(sql_users, {"services.py": 1, "context.py": 1})
         self.assertIn("pg_advisory_xact_lock", code_only(HOST / "services.py"))
+        self.assertIn("FOR SHARE", code_only(HOST / "context.py"))
 
     def test_the_services_change_state_only_inside_one_atomic_block_and_audit_in_it(self):
         text = (HOST / "services.py").read_text(encoding="utf-8")

@@ -62,6 +62,11 @@
 > `workflow_key` and a `workflow_version` (the workflow definition version), written once by `create_run` and refused afterwards at the ORM level; existing Request Intake runs are attributed to
 > `request_intake` / `request_intake` / 1 by an evidence-based, idempotent backfill that **stops, with a count, at any run it cannot attribute** (section 3.12). It changes no state transition, task, lease, approval,
 > audit event or canonical byte, exposes nothing through the REST API, and activates no module. Request Intake is still not a module. No production-readiness claim.
+>
+> **MOD-1b / S6 (the ModuleContext capability facade)** is implemented on `feat/module-capability-facade` (implementation `ee4198d`, test fix `5b61298`; pushed, PR not yet opened; **owner-supplied local PostgreSQL validation passed**: 72 focused tests and a 676-test selected regression, tested scenarios only, see section 3.13). `apps/module_host/context.py` gives a registered module one controlled door to Core
+> (`ModuleContext.open(registry, module_id)`): immutable identity, and `tasks.enqueue`, `cases.create_case` / `create_run` / `transition_run`, `audit.record` and `permissions.require` / `authorize`, each only if the manifest declares the capability,
+> each delegating to the existing Core service unchanged after checking the module's own declarations, ownership and (for the state-changing calls) its `ModuleState` under a shared row lock (section 3.13). No queue, worker, state-machine,
+> audit or authorization code changed, nothing uses it outside tests, Request Intake is still legacy, and it is a naming and authority boundary, not a sandbox. No production-readiness claim.
 
 ## 1. Purpose and scope
 
@@ -188,10 +193,10 @@ capability, not just the first. It does not apply to capabilities Core provides.
 defined and that a module cannot start to "work" because an unrelated dependency happens to pull a provider in; if that dependency
 later changed, the failure would otherwise appear in the wrong place.
 
-Capabilities are declarations used for validation and ordering; MOD-1a enforces nothing at run time.
+Capabilities are declarations used for validation and ordering. MOD-1a enforced nothing at run time; since S6 four of the five Core capabilities have a facade, the `ModuleContext` (section 3.13), which lets a module use a capability only if its manifest declares it.
 
-**The five Core capabilities and what each will mean** (the contract names them; a later slice, S6, adds a thin facade that delegates
-to the existing services unchanged; no capability can be called today):
+**The five Core capabilities and what each means** (the contract names them; S6 added a thin facade for four of them, `ModuleContext`, section 3.13, that delegates
+to the existing services unchanged; `revision.approval` still has no facade; nothing outside tests calls a facade yet, because no module is registered):
 
 | Capability | Meaning for a module | Existing service it will delegate to |
 | --- | --- | --- |
@@ -332,7 +337,7 @@ not a production-readiness claim. Record: [local-validation-record.md](../develo
 nothing derives `AccessRule` objects from manifests: the permission scopes of section 3.5 are still declarations, and the table of
 Request Intake is still written in code. A later slice will build rules from a registered module's declarations (scope `own` to
 `own_permissions`, `any` and `global` to `any_permissions`) and put the generic read-actor-then-decide-then-log sequence behind the
-`permissions.check` facade; a golden test will then have to show that rules built from the manifest equal the table above. A disabled
+`permissions.check` facade (built in S6, section 3.13: the rule is built per call from the declared scope; the golden comparison with Request Intake's table is a PostgreSQL test over every user and owner, which passed in the owner's local run, not in the VM); a disabled
 module's actions are blocked by a separate gate, never by changing who holds a permission. `apps/modules` does not import Core's
 rule (a test pins it), and `setup_roles`, `/api/auth/me/` and `profile.py` are untouched.
 
@@ -907,7 +912,7 @@ installation or Update Manager, and no real AI integration. Not a production-rea
 * ORM-level protection only; raw SQL, a migration or an administrator can change a value and nothing detects it.
 * An installation holding a run that Request Intake did not create cannot complete the migration until its owner attributes that run (by design).
 * The PostgreSQL validation is the owner's, on one machine (below); it covers the tested scenarios only.
-* No module activation, no capability facade (`case.run` is still only a name a manifest may require), and Request Intake is not a module.
+* No module activation, and Request Intake is not a module. (`case.run` has a facade since S6, section 3.13; it is what stamps a module's runs.)
 
 **Owner decisions (S5 review).** (1) Request Intake's identity is `request_intake` / `request_intake` / `1`. (2) The historical backfill is strict: a run is attributed only on evidence and unknown runs are never guessed at.
 (3) Immutability stays ORM-level: no database trigger in S5. (4) `workflow_version` is a positive 32-bit integer, in the manifest, the attribution and the database. (5) No index without a demonstrated need. (6) No
@@ -921,6 +926,135 @@ PostgreSQL, **owner-run locally, passed** (section 3.12): `tests/test_workflow_a
 what the database cannot know, the ORM guard on a real database, Request Intake end to end with the canonical hash, and concurrent creation). The existing PostgreSQL suites that create runs were edited only to pass an
 attribution (`test_cases_persistence_postgres.py`, `test_intake_postgres.py`), and `RunStateMigrationTests` now stops at `cases.0005` because the runs it inserts have no source (it empties the cases tables before the
 cleanup returns the test database to the latest migrations).
+
+### 3.13 The ModuleContext: the controlled capability facade (MOD-1b / S6)
+
+**Status.** Implemented on `feat/module-capability-facade` (implementation `ee4198d`, test-only fix `5b61298`; pushed, PR not yet opened). DB-free tests pass in the development VM (131 new ones; 2129 in all). **PostgreSQL validation was run locally by the owner, not by the VM** (the VM has no PostgreSQL and never connects to one): the 72 focused PostgreSQL tests passed, and the full selected PostgreSQL regression passed, 676 tests in 191.518 s, exit code 0, test database destroyed. These are owner-supplied results; no output is stored in this repository (see the [local validation record](../development/local-validation-record.md)). The owner's commands are in the [runbook](../development/runbook.md), section 5.3. **No module is registered, Request Intake is still not a module (MOD-2) and does not
+use a context, nothing calls the composition root, and no real AI integration exists.** No migration, no model and no existing service changed.
+
+**Goal.** One controlled interface through which a future module reaches Core: `ModuleContext`, built for one registered module from the approved static registry, exposing up to four facades, each only if the manifest
+lists the capability in `capabilities_required`. Every facade **delegates to the existing Core service unchanged**, after the checks that belong to the module (its declarations, its state). No queue, state-machine,
+audit or authorization rule is written again.
+
+**Where it lives.** `apps/modules` stays pure and unchanged. The Django runtime part is `apps/module_host/context.py` (the context and the four facades) over `apps/module_host/context_rules.py` (the decisions as pure
+functions over a manifest and a registry: standard library plus the host's own rules, tested without Django). `ModuleContextError` and its codes are in `apps/module_host/errors.py`. The composition root is
+`config/module_context.py`: `module_context(module_id)` opens a context over `config.modules` and the production task handler allowlist. Nothing imports it yet (a test pins that).
+
+**The API.**
+
+| Call | Delegates to | What the context adds |
+| --- | --- | --- |
+| `ModuleContext.open(registry, module_id, *, handler_registry=None)` | none (reads no database) | identity from the registry only; `invalid_registry`, `invalid_module_id`, `unknown_module` |
+| `.module_id`, `.module_version`, `.registry_fingerprint`, `.capabilities`, `.manifest`, `.has_capability(c)` | none | immutable metadata; `capabilities` is the declared capabilities that have a facade |
+| `.tasks.enqueue(*, kind, payload, idempotency_key=None, max_attempts=..., available_at=None, now=None)` | `apps.tasks.services.enqueue_task` | the kind must be the module's own declared kind; a given key must start with an owned namespace; the module must be available |
+| `.cases.create_case(*, reference, case_id=None)` | `apps.cases.services.create_case` | the module must be available |
+| `.cases.create_run(*, case_id, workflow_key, run_id=None)` | `apps.cases.services.create_run` | the workflow must be declared; the attribution is built here from the module's id, the key and the DECLARED definition version |
+| `.cases.transition_run(run_id, *, to, failed_step="", allowed_from=None)` | `apps.cases.services.transition_run` | the module must be available; the run must have been created under this module (checked by an unlocked read of its immutable attribution) |
+| `.audit.record(*, actor, action, subject_type, subject_id, case_id=None, run_id=None, **details)` | `apps.audit.recorder.record_event` | declared action only, declared detail keys only, restricted subject types, own runs only, the caller's transaction required |
+| `.permissions.require(user, *permission_ids)` and `.authorize(user, *permission_ids, owner_pk=None)` | `apps.accounts.access` (`permission_problem`, `access_problem`) over `apps.accounts.authz.load_actor` | only declared permissions (by their declared scope) and the permitted Core permissions |
+
+The context and its facades are immutable (`__slots__`, assignment and deletion refused), cannot be constructed directly (a private token; `ModuleContext.open` is the only way in), and expose no connection, cursor, registry,
+model or filesystem handle. `revision.approval` stays a capability name with **no facade**: declaring it gives nothing (`capability_not_available`), as does a capability another module provides.
+
+**Capability rules (each enforced by code and tests).**
+
+* **Declared only.** Reaching `tasks`, `cases`, `audit` or `permissions` without the capability in the manifest is `capability_not_declared`.
+* **Namespace ownership.** A task kind belongs to the module only if its manifest declares it (a kind another module owns is `task_kind_not_owned`, any other is `task_kind_not_declared`: `test.add_numbers` and
+  `request_intake.extract` included). An idempotency key, when given, must start with a namespace the module owns followed by a dot (`idempotency_key_not_namespaced`); no key is allowed, as in the queue. A workflow must
+  be declared (`workflow_not_declared`). Ownership is exact, never a prefix.
+* **Attribution is the module's.** `create_run` accepts no module id, version or attribution from the caller (a test pins that passing one is a `TypeError`); the stored attribution is the manifest's declaration.
+* **Other modules' runs, and no existence disclosure.** A transition, and an audit event naming a run, are refused on a run created under another module. **A run that does not exist, a malformed id and another module's run are
+  refused identically** (`run_not_owned`, one message), so a module with no authority over a run cannot tell whether it exists; an actor that is refused (`AuthorizationError`) and a module that is disabled are told nothing about any run either
+  (the state check and the actor check come before the run is read). The ownership check is an **unlocked** read of the run's module id (the attribution is immutable): the context never takes a row lock on a run that is not its
+  own, so a module cannot hold up another module's run. For an authorized module the Core services behave exactly as before (an own run with an illegal transition is the service's own `InvalidTransitionError`). Request Intake's runs
+  belong to `request_intake`, so no context can move them. Historical runs are never touched. **Cases are not module-owned**, so `create_run` with an unknown case is still the service's `RecordNotFoundError`: the existence of a case id is
+  not hidden.
+* **Audit.** Only an action the module declares (a Core action is `audit_action_core_owned`, an unknown one `audit_action_not_declared`), only the declaration's detail keys (`audit_detail_key_not_declared`), only the run, revision,
+  approval and rejection subject types (`audit_subject_type_not_allowed`: `module` is the host's own). The audit vocabulary's value rules and the content restraint apply unchanged. `record` **opens no transaction**: it needs the caller's
+  (`AuditTransactionError` otherwise, the recorder's own error), so the event commits or rolls back with the operation. The facade logs nothing.
+* **Permissions.** Only the module's declared permissions and `audit.view_auditevent` (`context_rules.PERMITTED_CORE_PERMISSIONS`); anything else, another module's permission and every other Core permission included, is
+  `permission_not_declared`, even for a superuser. Scopes map as section 3.8 said they would: `own` to the rule's own permissions, `any` and `global` to its any permissions. The decision is Core's rule, unchanged: superuser
+  passes, `any` passes, `own` passes only for the actor's own record (`out_of_scope`), none is `missing_permission`. **Refusal precedence and no existence leak:** `require` is the permission part alone, to be called before the record
+  is looked up (the order Request Intake's services use); `authorize` runs both parts, permission first, so a user with no permission gets the same answer whoever owns the record or whether it exists. The caller supplies
+  `owner_pk`; the context never reads a record. A refusal is logged by Core's `log_refusal` (the label `<module>:<permissions>`, the code and the actor's public id; never a name or a value).
+
+**Explicit actors, no ambient identity.** Nothing reads a request, a thread-local or a setting. Every method that records or decides about a person takes the user as an argument, and Core re-reads the user from the database
+(`load_actor`): a caller can never supply a public id, a stale object is judged by what is stored now, and an inactive or deleted user is refused (`AuthorizationError`). `audit.record` needs `actor=`: a user or the
+explicit sentinel `SYSTEM_ACTOR` (one instance, copies are itself); `None` is `actor_required`, and a string or a made-up object that is not a user is refused by `load_actor`.
+
+**Module state enforcement.**
+
+| Call | Gated by module state? |
+| --- | --- |
+| `tasks.enqueue`, `cases.create_case`, `cases.create_run`, `cases.transition_run`, `audit.record` | **yes** (state-changing) |
+| `permissions.require`, `permissions.authorize` | **no** (they only decide; they read no state and take no lock) |
+
+The rule is the host's one rule (`rules.assess_modules`, section 3.11): registered, state present once the first sync has completed (the durable marker), enabled, version-matched, direct dependencies available. The refusals are
+`unknown_module` (at `open`), `module_disabled`, `module_version_mismatch`, `module_state_missing` and `module_dependency_unavailable`. **Before the first sync a registered module counts as enabled** (the documented
+backward-compatibility transition, reason `legacy_unsynced`). Each state-changing call does, in this order: the pure checks (declarations, ownership: no database), then inside a transaction (the facade opens one, which joins the
+caller's; `audit.record` uses the caller's) it takes a **shared row lock on every `ModuleState` row** (`SELECT module_id FROM module_host_modulestate ORDER BY module_id FOR SHARE`, the context's one statement of raw SQL), reads the
+state, and only then delegates. Consequences: concurrent capability calls never block each other (shared locks); `module_enable`, `module_disable` and `module_sync` (which lock the rows `FOR UPDATE`, in the same order, so there is no
+deadlock) **wait for an in-flight call to commit**; a call that starts after a disable has committed is refused. So no capability write by a disabled module can commit after `module_disable` returns, except through a transaction
+that took its lock before. The lock is held until the outermost transaction ends, which is the caller's: a long caller transaction delays an administrator's disable. Held tasks, queued work and every record stay exactly as the host
+(section 3.11) leaves them; the worker's kind gate, claim, leases, retries and recovery are not touched (a test pins that no file of the queue or the worker mentions the context).
+
+**Error codes.** `ModuleContextError.code` (stable; the message names the rule and identifiers that already passed validation, never a payload, a detail value or business content; a test checks it does not echo values):
+`invalid_registry`, `invalid_module_id`, `unknown_module`, `capability_not_declared`, `capability_not_available`, `module_disabled`, `module_version_mismatch`, `module_state_missing`, `module_dependency_unavailable`,
+`task_kind_not_owned`, `task_kind_not_declared`, `idempotency_key_not_namespaced`, `workflow_not_declared`, `run_not_owned`, `audit_action_core_owned`, `audit_action_not_declared`, `audit_detail_key_not_declared`,
+`audit_subject_type_not_allowed`, `permission_not_declared`, `no_permission_requested`, `actor_required`. Everything the Core services raise (`IdempotencyConflictError`, `InvalidPayloadError`, `InvalidTransitionError`,
+`RecordNotFoundError`, `AuditEventError`, `AuditTransactionError`, `AuthorizationError`) passes through unchanged.
+
+**Request Intake stays legacy.** Its registry is empty, so `module_context("request_intake")` is `unknown_module`; its submission path, the API and the worker composition do not mention the context (a test scans them), its task kind
+stays a legacy ungated kind, and a submission takes no state lock and reads no module state (a PostgreSQL test captures the SQL). The synthetic Request Intake manifest of `tests/module_support.py` opens a context in a test, which is what MOD-2
+will do for real: MOD-2 must remove the kind from the legacy set, register the manifest, route its code through the facades and install the audit vocabulary in each process (nothing in S6 installs it; `audit.record` then fails
+loudly with `AuditEventError` for a declared action, which is the S3 design).
+
+**Trust limits (read with section 7).** A context is a **naming and authority boundary inside one process, not a sandbox.** Code admitted to the process can import the Core services directly, open its own database connection,
+read files or forge anything Python allows; the context cannot stop that, it only gives a well-behaved module one door that checks its manifest and its state. What the facades do guarantee is mechanical: the checks above run
+before any delegation, in the order above, and a refusal changes nothing. Module authors are first-party (section 11, decision 8). Other limits: the context trusts the registry it is given (the composition root's static tuple); the
+registry fingerprint is carried, not compared with the worker's; `audit.record` cannot check that a revision or approval subject belongs to the module (only runs are checked); the state is read per call, not cached, and the S2 gate
+race window for the worker's claim is unchanged.
+
+**Review and hardening (S6 review).** Two defects were confirmed and fixed, and the rest of the review found nothing to change.
+
+* *Existence disclosure and a cross-module lock (fixed).* `cases.transition_run` took the service's `lock_run` (`SELECT ... FOR UPDATE`) on the run first and compared its module afterwards, so (a) a missing run raised the service's
+  `RecordNotFoundError` while another module's run raised `run_not_owned`, which let a module with no authority probe whether a run id exists, and (b) a module took a **row lock on another module's run** until its transaction ended. The
+  ownership check is now an unlocked read of the immutable attribution (`_check_own_run`), after the state check; a missing run, a malformed id and a foreign run raise the same error with the same message; the service's own lock is taken
+  only for an own run, inside `transition_run`. The audit path already answered both cases alike; a test now pins it and pins that a refused actor never reaches the run table.
+* *Identity could be re-read by a subclass (fixed).* `ModuleContext` and the facades were immutable but not final: a subclass could override `module_id` or a capability property. They now refuse subclassing from outside the module
+  (`TypeError`); this is accident-proofing, not a sandbox (code in the process can still call `object.__setattr__`).
+* *Transactions and locks (reviewed, no defect).* Every state-changing facade call checks the state **inside a transaction after taking the shared lock**, and delegates only afterwards; `enqueue` and the case calls open their own
+  `transaction.atomic()` (a savepoint inside the caller's), so the lock is held exactly until the outermost transaction ends, which is the end of the operation when the caller has none; `audit.record` uses the caller's and opens none. The
+  host's `FOR UPDATE` over all rows in module-id order and the context's `FOR SHARE` in the same order cannot deadlock, and a disable cannot slip between a call's state check and its write: it waits for every in-flight kind of call
+  (`enqueue`, `create_case`, `create_run`, `transition_run`, `audit.record`: PostgreSQL tests) and a call that meets an uncommitted disable waits and is then refused. This relies on PostgreSQL's default READ COMMITTED isolation (the
+  project sets none; under REPEATABLE READ a row changed since the snapshot would make `FOR SHARE` fail with a serialization error, which also fails closed). A `DatabaseError` from the lock, the state read or a service propagates unchanged and
+  nothing is delegated (DB-free tests, and a lock-timeout test on PostgreSQL); it is never turned into a module refusal. The context introduces no long-running transaction of its own, but a caller's long transaction delays an
+  administrator's `module_enable`, `module_disable` or `module_sync`, and a call waits behind a disable in progress for as long as `lock_timeout` allows (none is set by default).
+* *Audit and permissions (reviewed, no defect).* An action must be declared and namespaced by the module (a Core action is refused first), only its detail keys and the vocabulary's value rules apply, a transaction is required, no identity is
+  inferred (`actor` is required; `None` is refused; a made-up object goes to `load_actor`), the permission part runs before the scope part, and the only Core permission a module may check is the explicit allowlist
+  `{audit.view_auditevent}`. Known and accepted: `case_id` on an audit event is not checked against the run's case, and revision, approval and rejection subjects are not checked for ownership.
+
+**Remaining limitations.**
+
+* No module is registered and Request Intake is not a module, so nothing uses the context outside tests; the four facades are validated by tests with a synthetic module only.
+* `revision.approval` has no facade (a module cannot create revisions or approvals through Core yet), there is no configuration or secret access, no document access and no AI access.
+* The PostgreSQL behaviour (the shared lock, the transaction joining, real users and roles, concurrency) passed the 72 focused tests and the 676-test selected regression in the owner's local run (owner-supplied; the VM did not run or observe them). That supports the tested scenarios on one machine only: it does not prove that no other race or edge case exists.
+* `permissions.authorize` is a Core decision only; Request Intake's own `apps/intake/authorization.py` is unchanged and still its own glue (they agree, by a PostgreSQL test over every user and owner).
+* No public API, no UI and no administrator command use the context; no sandbox, installer or Update Manager.
+
+**Design choices open to owner review.** (1) The context lives in `apps/module_host` with one `FOR SHARE` statement of raw SQL, which narrowed the S4 boundary pins (the host may reach the queue and the authorization core from
+`context.py` only; `services.py`, `gate.py` and `rules.py` still may not). (2) `permissions.*` is not gated by module state. (3) `revision.approval` has no facade. (4) `permissions.authorize(user, *ids, owner_pk=)` with a separate `require`
+instead of one call. (5) Audit subject types are limited to run, revision, approval and rejection, and only run ownership is verified. (6) *Resolved in the review:* a missing run and a foreign run are now indistinguishable (see "Other modules' runs"). (7) An idempotency key is optional, as in the queue. (8) The explicit `SYSTEM_ACTOR` sentinel rather than a `None` default. (9) `config/module_context.py`
+as the composition root, importing `config.modules` (the pinned importer lists were extended). (10) The S5 one-creator test now lists the context as the second creator of runs.
+
+**Tests.** DB-free: `tests/test_module_context_rules.py` (33, pure: they run with `python -m unittest` and no Django), `tests/test_module_context.py` (98: construction and identity, immutability, capability gating, state enforcement and
+its order, delegation arguments, explicit actors, permission scopes against Core's rule, the Request Intake compatibility and the architecture boundaries), with the helper `tests/module_context_support.py`. Each of 19 deliberate
+mutations of the implementation was caught by the focused set. Narrowly updated older pins: `test_module_boundaries.py` (the importers of `apps.modules` and of `config.modules`), `test_module_host_boundaries.py` (what `context.py` may import,
+the one extra statement of raw SQL, the importers of the host) and `test_workflow_attribution.py` (the creators of runs). PostgreSQL, **passed in the owner's local run** (owner-supplied; not run by the VM): `tests/test_module_context_postgres.py` (72 tests: real task enqueue and the unchanged queue,
+real runs with attribution and the state machine, audit inside and rolled back with the transaction and the ORM immutability of events, permission checks with real users and roles against Request Intake's own authorization,
+disable, enable, version mismatch, missing state and the pre-sync transition against real rows, concurrency including a disable that waits for an in-flight call, and the legacy Request Intake path). Commands: runbook section 5.3.
+
+**Owner-supplied PostgreSQL validation (S6).** The owner ran the S6 tests on the local Windows computer: the 72 focused PostgreSQL tests passed, and the full selected PostgreSQL regression passed (676 tests, 191.518 s, exit code 0; the test database was destroyed successfully). The VM ran only the 2129 DB-free tests; it did not run, repeat or observe any PostgreSQL test, and no output is stored. The branch state under test was `5b61298` (implementation `ee4198d` plus the test-only fix of the second context's setup in the concurrency test); the exact command lines and module list were not supplied. This supports, for the tested scenarios on one machine only, that the four facades behave as designed against real rows, locks, users and roles, and that existing Request Intake behaviour was preserved in the tested scenarios (the intended selection, runbook section 5.3, includes the unchanged intake, review, API, queue, worker, attribution and audit suites; that the 676 were those is inferred from the all-passed result, not itemized). It does not make Request Intake a module, add real AI integration, make `ModuleContext` a security sandbox, add module installation or an Update Manager, or establish production readiness. See the [local validation record](../development/local-validation-record.md).
 
 ## 4. Versioning
 
@@ -1140,18 +1274,18 @@ An update manager does not exist and is **not** part of MOD-1a. When it is desig
 - No configuration storage or value validation (only schema declarations), no secrets store, no document storage, no AI gateway.
 - No license enforcement, no signatures, no package format, no installer, no update manager, no marketplace.
 - No sandbox; see section 7.
-- Capability and permission declarations are not enforced at run time. Permission scopes are declarations; the default scope is `any`.
+- Capability and permission declarations are enforced only through the `ModuleContext` (S6, section 3.13), and only for code that uses it; no module is registered, so nothing outside tests does. Permission scopes are declarations that the context turns into Core's rule when a module asks; the default scope is `any`.
 - Default role grants are not wired: `setup_roles`, `/api/auth/me/` and `apps/accounts/profile.py` still use `apps/accounts/roles.py`,
   and nothing calls `derive_role_permissions`. Roles are fixed to the existing three.
 - Core's access rule (`apps/accounts/access.py`, section 3.8) is used only by Request Intake's own table. Nothing builds `AccessRule`
   objects from manifest permission scopes, no module can use it, and the generic "read actor, decide, log, refuse" sequence is still
-  Request Intake's glue (`apps/intake/authorization.py`), to be generalized behind the `permissions.check` facade (S6). One characteristic
+  Request Intake's glue (`apps/intake/authorization.py`); since S6 the same read-actor, decide, log, refuse sequence is available to modules behind `permissions.check` (section 3.13), while Request Intake keeps its own glue. One characteristic
   carried over unchanged: `access_problem` evaluates `permissions` twice, so a one-shot iterator (a generator) would be exhausted by the
   first part; every caller passes a `frozenset` and the tests use re-iterable collections only.
 - The behaviour-preservation tests for S1b are DB-free in the VM. The PostgreSQL comparison (`tests/test_authz_core_postgres.py`) and the
   existing review and API suites passed in the owner's local run (242 tests, owner-supplied, section 3.8); the VM never ran them.
 - Still absent after S1b: `ModuleState`, runtime module permissions (no module permission is checked at run time; no manifest becomes
-  an `AccessRule`), enable/disable, and the capability facade. Request Intake is not a module.
+  an `AccessRule`), enable/disable, and the capability facade (the first three were built in S4, the facade in S6, section 3.13). Request Intake is not a module.
 - Maintenance hooks in a manifest are declarations: nothing reads them. Since S2 `apps/tasks/worker.py` can run further named hooks after
   the legacy `after_iteration` hook (section 3.9), but the production composition installs none, `while_disabled` is not consulted (S4 did not
   change that), and a manifest hook id is not resolved to code anywhere.
@@ -1161,7 +1295,7 @@ An update manager does not exist and is **not** part of MOD-1a. When it is desig
 - S4 (section 3.11) adds `apps/module_host`, `ModuleState`, the sync and enable/disable administrator commands and the persisted namespace history
   (the continuity check runs in every sync). Its PostgreSQL tests and migration passed in the owner's local run (section 3.11, tested scenarios only); the limitations
   of S4 are listed in section 3.11, "Remaining limitations".
-- No capability facade exists (`task.enqueue` and the others are names a manifest may require, nothing a module can call).
+- Since S6 a capability facade exists for `task.enqueue`, `case.run`, `audit.record` and `permissions.check` (the `ModuleContext`, section 3.13); `revision.approval` has none. Nothing outside tests calls it (no module is registered; Request Intake is legacy), its 72 PostgreSQL tests passed in the owner's local run (tested scenarios only), and it is a naming and authority boundary, not a sandbox.
 - S5 (section 3.12) stamps runs with their module, workflow and definition version, but nothing reads the stamp: no query, preflight or continuity check uses it yet, the stored pair is checked for shape and reserved
   names and not against a registry, and protection is ORM-level. Its PostgreSQL tests and migrations passed in the owner's local run (section 3.12, tested scenarios only).
 - Request Intake has no manifest in the application; the synthetic one in `tests/module_support.py` exists only for the golden test.
