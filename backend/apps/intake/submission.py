@@ -3,7 +3,8 @@
 What one call creates, all in ONE ``transaction.atomic()`` block (all of it commits, or none of it):
 
 1. a ``Case`` with a generated reference (``REQ-YYYYMMDD-XXXXXXXX``),
-2. a ``WorkflowRun`` in state ``queued`` (the existing ``apps.cases`` run, with no revision yet),
+2. a ``WorkflowRun`` in state ``queued`` (the existing ``apps.cases`` run, with no revision yet), attributed to this
+   workflow (module ``request_intake``, workflow key ``request_intake``, definition version 1) for good,
 3. an immutable ``RequestSource`` holding the exact text, its SHA-256 and its size,
 4. ONE extraction task, through the existing ``apps.tasks.services.enqueue_task`` (idempotency key
    ``request_intake.extract:<run id>:1``; payload ``{"run_id": "<uuid>"}``, never the text),
@@ -35,6 +36,7 @@ from django.utils import timezone
 
 from apps.audit import events as audit
 from apps.audit.recorder import record_event
+from apps.cases.attribution import WorkflowAttribution
 from apps.cases.models import Case, WorkflowRun
 from apps.cases.services import create_case, create_run
 from apps.tasks.models import Task
@@ -47,7 +49,10 @@ from .models import RequestSource, StepTask
 from .policy import (
     FIRST_GENERATION,
     KIND_EXTRACT,
+    MODULE_ID,
     STEP_EXTRACT,
+    WORKFLOW_KEY,
+    WORKFLOW_VERSION,
     extraction_idempotency_key,
     extraction_payload,
     new_case_reference,
@@ -56,6 +61,9 @@ from .policy import (
 from .registry import PRODUCTION_REGISTRY
 
 _REFERENCE_ATTEMPTS = 3
+
+# Every run this workflow creates carries this attribution (a constant: nothing a caller supplies reaches it).
+REQUEST_INTAKE_ATTRIBUTION = WorkflowAttribution(MODULE_ID, WORKFLOW_KEY, WORKFLOW_VERSION)
 
 
 class SubmissionResult(NamedTuple):
@@ -109,7 +117,7 @@ def submit_request(*, text: str, submitted_by, client_request_id: uuid.UUID | No
     try:
         with transaction.atomic():
             case = _create_case_with_reference(moment)
-            run = create_run(case_id=case.pk)
+            run = create_run(case_id=case.pk, attribution=REQUEST_INTAKE_ATTRIBUTION)
             source = RequestSource.objects.create(
                 run=run,
                 submitted_by=submitted_by,

@@ -75,6 +75,11 @@ applied to any database):
 | `cases/0004_workflowrun_state_constraints` | `AddConstraint` x3 | The CHECK constraints, after the data is consistent. |
 | `intake/0001_initial` | `CreateModel` x3 | The new tables. Depends on `cases 0004`, `tasks 0001` and the user model. |
 
+**Workflow attribution (MOD-1b S5, added later; tests pending on PostgreSQL).** `cases.WorkflowRun` gained `module_id`, `workflow_key` and `workflow_version` through `cases.0006` to `0009` (same convention: columns, backfill, validation, constraints).
+`submit_request` stamps every run it creates with `request_intake` / `request_intake` / 1 (`apps/intake/policy.py`: `MODULE_ID`, `WORKFLOW_KEY`, `WORKFLOW_VERSION`; `apps/intake/submission.py`: `REQUEST_INTAKE_ATTRIBUTION`). Runs that already
+existed are attributed by `0007` only when they have a `RequestSource`; this workflow's source row is the evidence that a run is its own. Nothing in this document's state machine, transactions, idempotency or worker integration changed, and
+`submit_request` creates the run in the same transaction as before; a replay creates no run. See [module-contract.md](../architecture/module-contract.md) section 3.12 and the [runbook](runbook.md) section 5.2.
+
 Why three `cases` migrations: each migration is its own PostgreSQL transaction, so the data update never
 shares a transaction with a table alteration (PostgreSQL can refuse an `ALTER TABLE` after row updates on
 a table with deferred foreign-key triggers in the same transaction).

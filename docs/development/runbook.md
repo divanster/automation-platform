@@ -354,7 +354,7 @@ of 342 tests passed, exit code 0** (owner-supplied; no output is attached; see t
 table's fixed action CHECK with a shape CHECK, touches no existing row, and cannot be reversed once module actions are stored. Commands (preflight,
 `sqlmigrate`, the PostgreSQL run): [module-contract.md](../architecture/module-contract.md), section 3.10.
 
-MOD-1b S4 (module host; pushed, PR not yet merged) adds `backend/tests/test_module_host_postgres.py` (**75** tests, tagged `requires_postgres`) and
+MOD-1b S4 (module host; merged into `main`, PR #15) adds `backend/tests/test_module_host_postgres.py` (**75** tests, tagged `requires_postgres`) and
 migration `module_host.0001_initial`. **The owner ran them locally: the 75 passed, together with the 15 recovery tests and the 25 audit tests, the migration applied
 successfully, and the full selected regression ran 567 tests, all passed, 153.186 s, exit code 0, test database destroyed** (owner-supplied; the VM did not run or
 observe them; no output is stored; see the [local validation record](local-validation-record.md)). Tested scenarios only. The steps are in section 5.1 below.
@@ -434,6 +434,73 @@ writes the marker: the MOD-2 release's modules then have no compatibility window
 Nothing here runs a module migration, installs or downloads anything, or deletes a task, run or audit event. Disabling is audited as the system actor
 (`module.disabled`); enabling and disabling something already in that state is a no-op with no event. Rolling the *code* back to a commit without
 `apps/module_host` while the tables exist is harmless (nothing reads them); `migrate module_host zero` drops only the three tables.
+
+### 5.2 Workflow attribution (MOD-1b S5): migration preflight, PostgreSQL tests and the migration
+
+**Status: NOT RUN.** Written and checked in the VM with DB-free tests only (`manage.py test`, `python -m unittest` on the pure modules, `check`, `makemigrations --check --dry-run`, `compileall`; the DDL of
+`cases.0006` and `cases.0009` was previewed without a connection). **No PostgreSQL test and none of the four migrations has been run by anyone.** Background and rules:
+[module-contract.md](../architecture/module-contract.md) section 3.12.
+
+**What changes in a running installation.** `cases_workflowrun` gets three columns (`module_id`, `workflow_key`, `workflow_version`). Existing Request Intake runs are attributed to `request_intake` / `request_intake` / 1
+**only if they have a Request Intake source row**; no other row, id, state, timestamp, revision, approval, task or audit event is touched, and no hash is recomputed. **A run without a Request Intake source is not
+guessed at: `migrate` stops at `cases.0008` and tells you how many.** Nothing about the worker, the API or the UI changes.
+
+```powershell
+# From backend\, in the window where the project's .env and virtual environment are active. AP_RUN_DB_TESTS must be unset here.
+$Py = "$LocalProject\.venv\Scripts\python.exe"
+Set-Location "$LocalProject\backend"
+if ($env:AP_RUN_DB_TESTS) { throw "AP_RUN_DB_TESTS is already set in this window. Run: Remove-Item Env:AP_RUN_DB_TESTS   then repeat." }
+
+# 1. Preflight against the development database (reads it; applies nothing)
+& $Py manage.py showmigrations cases                                        # expect: 0005 [X], then 0006 to 0009 [ ]
+& $Py manage.py makemigrations --check --dry-run                            # expect: No changes detected
+& $Py manage.py sqlmigrate cases 0006_workflowrun_attribution_columns       # three ADD COLUMN ... NULL
+& $Py manage.py sqlmigrate cases 0009_workflowrun_attribution_constraints   # three SET NOT NULL, three ADD CONSTRAINT ... CHECK
+& $Py manage.py sqlmigrate cases 0009_workflowrun_attribution_constraints --backwards
+# Will the backfill be able to attribute every run? Runs with no Request Intake source are the ones it refuses (read only; selects no attribution column, so it works before the migration):
+& $Py manage.py shell -c "from apps.cases.models import WorkflowRun; print('runs', WorkflowRun.objects.count(), 'without_request_source', WorkflowRun.objects.filter(request_source__isnull=True).count())"
+& $Py manage.py shell -c "from apps.cases.models import WorkflowRun; [print(r) for r in WorkflowRun.objects.filter(request_source__isnull=True).values_list('id', 'state', 'case__reference', 'created_at')]"
+
+# 2. DB-free tests, then the system checks
+& $Py manage.py test                                                        # expect OK (1998 tests at the S5 checkpoint; re-check the number)
+& $Py manage.py check
+
+# 3. PostgreSQL tests: Django creates and destroys test_<AP_DB_NAME>; no --keepdb, no --noinput. The new module plus the suites that must pass
+#    (the ones that create runs were edited only to pass an attribution; the others are unchanged).
+try {
+    $env:AP_RUN_DB_TESTS = "1"
+    & $Py manage.py test tests.test_workflow_attribution_postgres tests.test_cases_persistence_postgres tests.test_intake_postgres tests.test_review_postgres tests.test_api_postgres tests.test_audit_vocabulary_postgres tests.test_authz_core_postgres tests.test_module_host_postgres tests.test_tasks_gating_postgres tests.test_tasks_postgres tests.test_tasks_recovery_postgres --tag requires_postgres -v 2
+    "exit code: $LASTEXITCODE"                                              # expect 0
+} finally {
+    Remove-Item Env:AP_RUN_DB_TESTS -ErrorAction SilentlyContinue
+}
+```
+
+Report the exact `Ran N tests` line (the new module contributes 37 by the VM's count of test methods) and any failure. A failure is expected to be a defect in a test or in the code, not a reason to skip a test: report it
+rather than deleting or loosening it. `RunStateMigrationTests` in `tests/test_intake_postgres.py` was changed to stop at `cases.0005` (its runs have no source), so check that one in particular.
+
+**Applying it to a development database (separate, optional; only after step 3 passed, and with a backup, `pg_dump` as in section 6).** Stop the worker and the API first.
+
+```powershell
+& $Py manage.py migrate cases                       # 0006 columns, 0007 backfill, 0008 validation, 0009 NOT NULL and CHECKs
+& $Py manage.py shell -c "from apps.cases.models import WorkflowRun; from django.db.models import Count; print(list(WorkflowRun.objects.values('module_id','workflow_key','workflow_version').annotate(n=Count('id'))))"
+                                                    # expect only [{'module_id': 'request_intake', 'workflow_key': 'request_intake', 'workflow_version': 1, 'n': <the number of runs>}]
+```
+
+**If `migrate` stops at `0008` (`UnattributedRunsError`: "N workflow run(s) have no workflow attribution").** Nothing is wrong with the database: `0006` and `0007` have committed, `0008` and `0009` have not, no row was changed or
+deleted and no constraint exists yet. The runs it names are runs that Request Intake did not create (before S5, only the persistence tests or hand-made rows could do that). List them with the first query above (or, after `0006`,
+`SELECT id, state, created_at FROM cases_workflowrun WHERE module_id IS NULL;`), decide what each one is, and attribute it explicitly. The code never picks a value for you, and there is no `--force`. Attribution of a run you
+have identified as a Request Intake run, for example (psql, as the owner of the database; adapt the ids; any other workflow needs its own, valid, values):
+
+```sql
+UPDATE cases_workflowrun SET module_id = 'request_intake', workflow_key = 'request_intake', workflow_version = 1 WHERE id IN ('<run id>', '<run id>') AND module_id IS NULL;
+```
+
+then run `migrate cases` again (`0006` and `0007` do not repeat any work). If the runs are disposable test data, discarding them is a separate decision of yours (this slice never deletes anything).
+
+**Reversing.** `migrate cases 0005` removes the constraints, then drops the three columns (the Request Intake tables stay); their values are the only thing lost, and `0007` derives them
+again for Request Intake runs. No other row is touched. Rolling the *code* back to a commit without the attribution while the columns exist breaks run creation (the columns are NOT NULL with no default), so reverse the
+migrations first.
 
 ## 6. Local Windows computer: setup and validation (reference procedure; owner-operated)
 
@@ -889,6 +956,7 @@ be updated when that is done and confirmed.
 | Persistence of cases, runs, result revisions, and approvals (`apps/cases`; minimal models, migration, services; [details](revision-approval-policy.md)) | **Implemented**; DB-free tests pass on the VM; the PostgreSQL tests **passed in the owner's local run** (tested scenarios only); ORM/service-level immutability, not database tamper protection |
 | Review services (`apps/intake/review.py`, `apps/audit`, `User.public_id`, roles via `setup_roles`; [details](review-services-slice.md)) | **Implemented**; DB-free tests pass on the VM; the 135 PostgreSQL tests and a smoke test **passed in the owner's local run** (tested scenarios only); no product login mechanism, REST API, or UI; ORM-level immutability only |
 | REST API (`apps/api`; session login and logout, CSRF, login throttling, request, review and audit endpoints; [details](rest-api-slice.md)) | **Implemented**; DB-free tests pass on the VM; the 100 PostgreSQL tests: 96 of the first 98 passed locally, 2 test defects corrected, **rerun pending**; no React UI, password reset, or export; throttling is per process; TLS and HSTS undecided |
+| Workflow attribution (MOD-1b S5: `WorkflowRun.module_id`, `workflow_key`, `workflow_version`; migrations `cases.0006` to `0009`; [section 5.2](#52-workflow-attribution-mod-1b-s5-migration-preflight-postgresql-tests-and-the-migration), [module-contract.md](../architecture/module-contract.md) section 3.12) | **Implemented on `feat/module-workflow-attribution`, uncommitted**; DB-free tests pass on the VM (1998 in all); the 37 PostgreSQL tests and the four migrations are **NOT RUN**; an installation holding a run without a Request Intake source stops at `0008` by design |
 | Business workflow beyond that: documents, a login mechanism, exports | Not implemented |
 | Task queue and background worker ([details](persistent-worker-slice.md)) | **Implemented** (first slice); the PostgreSQL tests passed in the owner's local run, tested scenarios only |
 | AI gateway and any AI adapter | Not implemented |

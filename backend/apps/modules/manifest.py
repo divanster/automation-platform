@@ -50,6 +50,7 @@ KNOWN_ROLES = ("Operator", "Approver", "Auditor")
 RESERVED_API_ROUTES = frozenset({"auth", "health", "modules", "admin"})
 
 MAX_ENTRIES = 100  # per collection: a sanity bound, not a business limit
+MAX_WORKFLOW_DEFINITION_VERSION = 2_147_483_647  # a positive 32-bit integer: the stored ``WorkflowRun.workflow_version`` (apps.cases.attribution) is a PostgreSQL integer
 MAX_TASK_KIND_LENGTH = 64  # apps.tasks.models.Task.kind
 MAX_AUDIT_ACTION_LENGTH = 32  # apps.audit.models.AuditEvent.action
 MAX_LABEL_LENGTH = 80
@@ -199,8 +200,8 @@ class WorkflowDeclaration:
 
     def __post_init__(self):
         _identifier(self.workflow_key, "workflow key", _DOTTED, MAX_TASK_KIND_LENGTH)
-        if not _is_int(self.definition_version) or self.definition_version < 1:
-            raise ManifestError("invalid_type", "workflow definition_version must be an integer of at least 1")
+        if not _is_int(self.definition_version) or not 1 <= self.definition_version <= MAX_WORKFLOW_DEFINITION_VERSION:
+            raise ManifestError("invalid_type", f"workflow definition_version must be an integer from 1 to {MAX_WORKFLOW_DEFINITION_VERSION}")
         kinds = _tuple_of(self.task_kinds, str, "workflow task_kinds")
         for kind in kinds:
             _identifier(kind, "workflow task kind", _DOTTED_2, MAX_TASK_KIND_LENGTH)
