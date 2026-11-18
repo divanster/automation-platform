@@ -705,7 +705,7 @@ operation's transaction: **a failed audit write rolls the state change back**, a
 therefore added both to Core's own vocabulary (`apps/audit/events.py`: `ACTIONS`, `DETAIL_KEYS`). **This changes the S3 pin "Core has seven actions"**: the seven
 actions and their detail keys are unchanged, and `tests/test_audit_vocabulary.py` (the frozen copy) and `tests/test_review_audit.py` were updated to expect nine.
 Nothing is installed into the process-wide vocabulary (`install_vocabulary` is called by nothing new; Core's own vocabulary is always in force); no audit
-migration was needed (the database already accepted the `module` subject type and any well-formed action, section 3.10).
+migration was needed (the database already accepted the `module` subject type and any well-formed action, section 3.10). **Rollback consequence:** `module.enabled` and `module.disabled` are not in the old fixed action list, so once the sync or an enable/disable has stored one, reversing audit migration `0002` is refused (section 3.10, "Rollback limits"); events are never deleted to allow it. The PostgreSQL migration tests therefore build their old-schema rows from a frozen list of the seven original actions, not from the live `events.ACTIONS`.
 
 **Administrator commands** (`python manage.py ...`, from `backend\`; each reads the static registry from `config.modules`, validates its input, closes the
 database connections, reports a database error by class only, and exits non-zero on a refusal):
