@@ -43,6 +43,7 @@ CONTROL_DIR_ENV = "AP_RECOVERY_TEST_DIR"
 BLOCK_KIND = "recovery.block"  # blocks until the parent creates RELEASE_FILE
 RENDEZVOUS_KIND = "recovery.rendezvous"  # returns only once two workers are inside it at the same time
 WORK_KIND = "recovery.work"  # records that it ran, then returns
+TEST_KINDS = (BLOCK_KIND, RENDEZVOUS_KIND, WORK_KIND)  # the kinds the child's kind gate must let through (see recovery_worker_child)
 
 RELEASE_FILE = "release"
 GO_FILE = "go"

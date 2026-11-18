@@ -348,11 +348,16 @@ corrected; the corrected tests have not been rerun).** The slice adds no model, 
 dependency. New settings: `AP_SESSION_AGE_SECONDS`, `AP_NUM_PROXIES` (default 0), `AP_API_MAX_BODY_BYTES`. Commands:
 [rest-api-slice.md](rest-api-slice.md), section 14.
 
-MOD-1b S3 (extensible audit vocabulary; pushed, not merged) adds `backend/tests/test_audit_vocabulary_postgres.py` (**24** tests, tagged
+MOD-1b S3 (extensible audit vocabulary; merged, PR #14) adds `backend/tests/test_audit_vocabulary_postgres.py` (**24** tests, tagged
 `requires_postgres`) and audit migration `0002`. The VM cannot run them. **The owner ran them locally: the 24 passed, and the selected regression
 of 342 tests passed, exit code 0** (owner-supplied; no output is attached; see the [local validation record](local-validation-record.md)). The migration replaces the audit
 table's fixed action CHECK with a shape CHECK, touches no existing row, and cannot be reversed once module actions are stored. Commands (preflight,
 `sqlmigrate`, the PostgreSQL run): [module-contract.md](../architecture/module-contract.md), section 3.10.
+
+MOD-1b S4 (module host; pushed, PR not yet merged) adds `backend/tests/test_module_host_postgres.py` (**75** tests, tagged `requires_postgres`) and
+migration `module_host.0001_initial`. **The owner ran them locally: the 75 passed, together with the 15 recovery tests and the 25 audit tests, the migration applied
+successfully, and the full selected regression ran 567 tests, all passed, 153.186 s, exit code 0, test database destroyed** (owner-supplied; the VM did not run or
+observe them; no output is stored; see the [local validation record](local-validation-record.md)). Tested scenarios only. The steps are in section 5.1 below.
 
 Expected collection at the commit that added the persistence slice (re-check it, counts
 change as tests are added): **3** skeleton tests (`PostgresUserTests` 2, `PostgresReadinessTests` 1)
@@ -365,6 +370,70 @@ migration history from the database. Without a reachable database it prints a
 `RuntimeWarning` and still reports whether model changes are missing migrations;
 a DB-free equivalent is part of the test suite
 (`tests/test_user_model.py`, `MigrationStateTests`).
+
+### 5.1 Module host (MOD-1b S4): migration preflight, PostgreSQL tests and the administrator commands
+
+**What changes in a running installation.** One additive migration (`module_host.0001_initial`: three new tables; no existing table, row or migration is touched),
+and the worker now installs a kind gate. **No module is registered, so nothing is held and every existing behaviour, Request Intake's task included, is the one you
+have today.** (One difference: with the gate installed the worker claims only kinds it has a handler for; a task of a kind the worker cannot run is left queued
+instead of being claimed and failed as `unknown_kind`.) The commands below are the ones the owner uses; the VM never ran them. The owner's passing run is recorded in the
+[local validation record](local-validation-record.md); to repeat it, use the commands below.
+
+```powershell
+# From backend\, in the window where the project's .env and virtual environment are active. AP_RUN_DB_TESTS must be unset here.
+$Py = "$LocalProject\.venv\Scripts\python.exe"
+Set-Location "$LocalProject\backend"
+if ($env:AP_RUN_DB_TESTS) { throw "AP_RUN_DB_TESTS is already set in this window. Run: Remove-Item Env:AP_RUN_DB_TESTS   then repeat." }
+
+# 1. Preflight against the development database (reads it; applies nothing)
+& $Py manage.py showmigrations module_host                          # expect: 0001_initial [ ]
+& $Py manage.py makemigrations --check --dry-run                    # expect: No changes detected
+& $Py manage.py sqlmigrate module_host 0001_initial                 # read the DDL: three CREATE TABLE, three CREATE INDEX, nothing else
+& $Py manage.py sqlmigrate module_host 0001_initial --backwards     # three DROP TABLE
+
+# 2. DB-free tests, then the system checks
+& $Py manage.py test                                                # expect OK (1926 tests at the S4 checkpoint; re-check the number)
+& $Py manage.py check
+
+# 3. PostgreSQL tests: Django creates and destroys test_<AP_DB_NAME>; no --keepdb, no --noinput. The new module plus the suites that must pass UNCHANGED
+#    (the worker, the Request Intake end to end, the audit vocabulary, authorization, review and API).
+try {
+    $env:AP_RUN_DB_TESTS = "1"
+    & $Py manage.py test tests.test_module_host_postgres tests.test_tasks_gating_postgres tests.test_tasks_postgres tests.test_tasks_recovery_postgres tests.test_intake_postgres tests.test_audit_vocabulary_postgres tests.test_authz_core_postgres tests.test_review_postgres tests.test_api_postgres --tag requires_postgres -v 2
+    "exit code: $LASTEXITCODE"                                      # expect 0
+} finally {
+    Remove-Item Env:AP_RUN_DB_TESTS -ErrorAction SilentlyContinue
+}
+```
+
+Report the exact `Ran N tests` line (the new module contributes exactly 75; the audit module 25; the whole selection was 567 in the owner's passing run) and any failure. A failure in the new module is expected to be a defect in a test or in
+the code, not a reason to skip it: report it rather than deleting or loosening a test.
+
+**Applying it to a development database (separate, optional; do it only after step 3 passed, with a backup).** Stop the worker and the API first.
+
+```powershell
+& $Py manage.py migrate module_host                  # the three tables; reversible with: manage.py migrate module_host zero (it holds no business data)
+& $Py manage.py module_status                        # no module is registered: "No modules are registered."
+& $Py manage.py module_sync                          # creates no state today but writes the initialization marker; optional now, required with every upgrade from MOD-2 on
+```
+
+**The upgrade routine from the first registered module on** (nothing needs it today): stop the worker, `migrate`, **`module_sync`**, then start the worker. Before the
+first `module_sync` ever completes (it writes a durable initialization marker), a registered module with no state row is treated as enabled (backward compatibility);
+after it, **a module without a row is held**, even if no row is left, so run the sync after every upgrade. Note that a `module_sync` run today (empty registry) already
+writes the marker: the MOD-2 release's modules then have no compatibility window and stay held until you run `module_sync` with that release, so do not skip it.
+
+**The commands** (all from `backend\`; `--json` gives one stable JSON document with sorted keys):
+
+```powershell
+& $Py manage.py module_status [<module_id>] [--json]   # read only: versions, enabled, claimable and why, task kinds
+& $Py manage.py module_sync [--json]                   # create missing state and namespace claims; report version mismatches (non-zero exit when one exists)
+& $Py manage.py module_disable <module_id>             # hold the module's queued tasks; running attempts finish; refused while an enabled module depends on it
+& $Py manage.py module_enable <module_id>              # release them (in their original order); refused for a version mismatch or a disabled dependency
+```
+
+Nothing here runs a module migration, installs or downloads anything, or deletes a task, run or audit event. Disabling is audited as the system actor
+(`module.disabled`); enabling and disabling something already in that state is a no-op with no event. Rolling the *code* back to a commit without
+`apps/module_host` while the tables exist is harmless (nothing reads them); `migrate module_host zero` drops only the three tables.
 
 ## 6. Local Windows computer: setup and validation (reference procedure; owner-operated)
 

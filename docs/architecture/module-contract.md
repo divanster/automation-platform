@@ -30,7 +30,7 @@
 > observe them; section 3.9 and [local-validation-record.md](../development/local-validation-record.md)). Supported for the tested scenarios
 > only; no production-readiness claim.
 >
-> **MOD-1b / S3 (extensible audit vocabulary)** is implemented on `feat/module-audit-vocabulary` (implementation commit `ba4060a`, test-expectation fix `5398a1b`; pushed, **not merged**). A module can
+> **MOD-1b / S3 (extensible audit vocabulary)** was implemented in commits `ba4060a` and `5398a1b` and is merged into `main` (PR #14). A module can
 > declare audit actions and Core's one recorder accepts them, without a migration per action (section 3.10): an immutable `AuditVocabulary`
 > (Core's seven actions, their detail keys and subject types unchanged, plus validated module declarations) is checked in Python whenever an event
 > is built, and audit migration `0002` replaces the fixed list of action names with a bounded, anchored **shape** check and adds the `module`
@@ -44,6 +44,19 @@
 >
 > S3 review (owner decisions): the runtime installation of a module vocabulary is deferred to MOD-2; `request` is now a reserved Core namespace in
 > the manifest; and the manifest and the audit vocabulary apply the same detail-key restrictions (sections 3.2 and 3.10).
+>
+> **MOD-1b / S4 (persistent module state, enable/disable, worker gate)** is implemented and validated on `feat/module-runtime-state` (implementation commit `96efa2f`;
+> three test-only corrections `45bd0da`, `4ba709b` and `0f8e44d`; pushed; **PR not yet merged**). A new Django app, `apps/module_host`, stores a `ModuleState` row per registered module and an append-only `ModuleNamespaceClaim` per
+> namespace (additive migration `0001`), syncs them from the approved static registry (`module_sync`), enables and disables a module transactionally with
+> an audit event (`module_enable`, `module_disable`), and reports status (`module_status`) (section 3.11). The existing S2 `kind_gate` is now installed in the
+> production worker composition: it holds the queued tasks of a disabled, version-mismatched or stateless (after the first sync) module and lets
+> **legacy kinds, Request Intake's `request_intake.extract` included, through unchanged**. **`BUILTIN_MODULES` is still EMPTY, Request Intake is not a
+> module (that is MOD-2), no module is gated in practice, and there is no public enable/disable API.** The DB-free tests pass in the development VM
+> (1926 in all; 198 of them in the five module host files). **Owner-supplied local PostgreSQL validation (the VM has no PostgreSQL and did not run, repeat or observe it;
+> no output is stored): the 75 module host PostgreSQL tests, the 15 process-level recovery tests and the 25 audit vocabulary tests passed, migration
+> `module_host.0001_initial` applied successfully, and the full selected PostgreSQL regression ran 567 tests, all passed, 153.186 s, exit code 0, test database
+> destroyed** (section 3.11, "Owner-supplied local PostgreSQL result"). That supports the tested scenarios on one machine only. Two Core audit actions were added
+> (`module.enabled`, `module.disabled`), which changes the S3 "seven Core actions" pin (section 3.11, "Audit"). No production-readiness claim.
 
 ## 1. Purpose and scope
 
@@ -57,9 +70,9 @@ about itself, how declarations are validated, and how a fixed, reviewed set of t
 compatibility checks, dependency checks with cycle detection, capability declarations, a deterministic registry with a stable
 fingerprint, and architecture tests that keep all of it isolated.
 
-**Not built:** loading or activating modules, a module state table, permissions seeding, task-handler registration with the
-worker, API or UI mounting, the audit-vocabulary change (added later, in S3, section 3.10), configuration storage, licensing, signatures, packages, an update
-manager, a marketplace (section 10).
+**Not built in MOD-1a** (later slices built some of it: the audit vocabulary in S3, section 3.10; the module state table, sync, enable/disable and the
+worker gate in S4, section 3.11): loading or activating modules, permissions seeding, task-handler registration with the worker, API or UI mounting,
+configuration storage, licensing, signatures, packages, an update manager, a marketplace (section 10).
 
 ## 2. Terms
 
@@ -381,9 +394,9 @@ strings). Per iteration the worker does: recover expired leases, **ask the gate*
   are claimed as attempt 1 (or the next attempt, for a retry). A running attempt whose kind is gated off is allowed to finish.
 - **Race window.** The gate is read once per iteration and the claim follows immediately; a kind gated off between the two can still be claimed by
   that one claim. The S4 design accepts this (attempts already in flight finish), so it is a property to know, not a bug to fix here.
-- **Layering.** `apps/tasks` receives a plain callable from the composition root (`config/task_registry.py`, which does not install one yet). It
-  imports neither `apps.modules` nor `apps.intake` (tests pin it). The `ModuleState`-backed gate, the use of `while_disabled`, and any decision about
-  which kinds belong to which module are **S4**.
+- **Layering.** `apps/tasks` receives a plain callable from the composition root (`config/task_registry.py`; since S4 it installs the module gate,
+  section 3.11). It imports neither `apps.modules` nor `apps.intake` (tests pin it). The `ModuleState`-backed gate is S4 (built); the use of
+  `while_disabled` was **not** built in S4 (no module hook exists to gate).
 
 **Compatibility with existing callers.** The production `COMPOSITION` has no gate and no extra hook (a test pins it); `runworker`,
 `process_one`'s and `run_until_stopped`'s signatures (the real-process recovery tests wrap them), the existing hook semantics and every existing
@@ -418,7 +431,7 @@ failure rolls the operation back). Existing audit rows are not touched.
 
 | Rule | Enforced by | Code |
 | --- | --- | --- |
-| The seven Core actions, their detail keys and the subject types `run`, `revision`, `approval`, `rejection` stay exactly as they were; `module` is added as a Core subject type (no event uses it yet; S4 will) | `apps/audit/events.py` constants, a frozen golden copy in `tests/test_audit_vocabulary.py` | - |
+| The seven Core actions, their detail keys and the subject types `run`, `revision`, `approval`, `rejection` stay exactly as they were; `module` is added as a Core subject type (S4 uses it for `module.enabled` and `module.disabled`, section 3.11) | `apps/audit/events.py` constants, a frozen golden copy in `tests/test_audit_vocabulary.py` | - |
 | A module cannot declare a Core action | the manifest (a Core action's namespace is reserved) and, again, the vocabulary | `core_action_claimed` |
 | A module cannot declare an action in a namespace Core uses: the first segment of a Core action (`request`, `run`, `revision`, `approval`, `rejection`) or any reserved namespace | the manifest (all five Core prefixes, `request` included since the S3 owner decision, are reserved namespaces, so no registry can give them to a module) and, as defence in depth, the vocabulary itself | `core_namespace_claimed` |
 | A module may declare an action only in a namespace it owns, as the registry knows it (`namespace_owners`); a dependency, a dependent and a prefix own nothing of each other | the vocabulary, fed the registry's owners | `namespace_not_owned` |
@@ -497,7 +510,7 @@ counts only. **Events are never deleted or rewritten to make a reverse succeed.*
 reviewed, owner-run data decision outside this migration. Without such events the reverse restores the old constraints and keeps every row. Also
 note that after a rollback of the *code* (not the migration), Python would again refuse module actions while their rows stay readable.
 
-**Not done.** `ModuleState`, runtime enable/disable, the capability facade (`audit.record` is still only a name a manifest may require), a
+**Not done in S3** (S4 added `ModuleState` and enable/disable, section 3.11; the S4 audit actions are Core's, not declared by a module). The capability facade (`audit.record` is still only a name a manifest may require), a
 module-owned subject type, storing the vocabulary, a database-level allowlist or protection, and wiring any entry point. Request Intake is not a
 module and emits only Core events. The API's audit serializer passes `action` through as text and the frontend shows an unknown action as its raw
 name, so a module action displays without a change there.
@@ -565,6 +578,219 @@ immutability only, no hash chain or trigger); any module-driven behaviour (no mo
 there is no `ModuleState` or enable/disable); behaviour with many or large audit tables (the constraint is added with a table scan under a brief
 exclusive lock); another PostgreSQL version or machine; or that no other race exists. Not a production-readiness claim. Record:
 [local-validation-record.md](../development/local-validation-record.md).
+
+### 3.11 The module host: persistent state, sync, enable/disable and the worker gate (MOD-1b / S4)
+
+**Status.** Implemented and validated on `feat/module-runtime-state` (pushed; the PR is not merged). DB-free tests pass in the development VM; the PostgreSQL tests
+and the migration were run **by the project owner locally** (section "Owner-supplied local PostgreSQL result" below), not by the VM. `apps/modules` stays pure and gains no model; the runtime state is a separate Django app, `apps/module_host`
+(label `module_host`), installed in `INSTALLED_APPS`. **No module is registered** (`BUILTIN_MODULES` is empty), Request Intake is **not** a module, there is **no
+public API** (no route, view or serializer), and nothing is installed, downloaded, imported by name or migrated by the host.
+
+**Schema (migration `module_host.0001_initial`: three `CREATE TABLE`s and their indexes, nothing else; no existing migration was modified).**
+
+| `ModuleState` column | Type and rule |
+| --- | --- |
+| `id` | UUID primary key |
+| `module_id` | `varchar(40)`, unique; CHECK `^[a-z][a-z0-9_]{2,39}$` (the manifest's own shape) |
+| `installed_version` | `varchar(32)`; CHECK for the documented SemVer subset (`MAJOR.MINOR.PATCH`, no pre-release); the version the stored data belongs to |
+| `enabled` | boolean NOT NULL, **no default**: whoever creates a row says so |
+| `configuration_version` | nullable integer (>= 0); reserved, always null (no configuration is stored yet) |
+| `registry_fingerprint` | `varchar(64)`, CHECK lower-case hex; the static registry's fingerprint when the row was last confirmed by a sync |
+| `created_at`, `updated_at`, `enabled_changed_at` | timestamps with time zone; the last equals `created_at` until `enabled` changes |
+
+| `ModuleNamespaceClaim` column | Type and rule |
+| --- | --- |
+| `id` | UUID primary key |
+| `namespace` | `varchar(40)`, **unique**; CHECK `^[a-z][a-z0-9_]{1,39}$` |
+| `module_id` | `varchar(40)`, indexed; CHECK as above |
+| `claimed_at` | timestamp with time zone |
+
+| `ModuleHostMarker` column | Type and rule |
+| --- | --- |
+| `id` | smallint primary key, CHECK `id = 1`: the database accepts exactly one row |
+| `initialized_at` | timestamp with time zone: when the first sync completed |
+| `initial_registry_fingerprint` | `varchar(64)`, CHECK lower-case hex: the registry that first sync ran against (an empty registry has one too) |
+
+There is no foreign key and no Django permission for any of the three tables. **Enforced where:** the database enforces uniqueness, the one-row marker and the shape
+checks only. A claim and the marker are append-only through the ORM (`ImmutableRecord`: no update, no reassignment, no reset, no delete; a namespace can be
+claimed once; the services only ever insert them, a test pins it), and a `ModuleState` row cannot be
+deleted through the ORM (a disabled module keeps its row and its history); updates go through the services under a row lock. Raw SQL, a migration, a
+database administrator and private ORM internals can still change or remove these rows and nothing detects it (no trigger, no hash chain), exactly as for the
+audit and case records. Code in the process is not sandboxed (section 7).
+
+**Sync (`sync_modules`, command `module_sync`).** Repeatable; one transaction, serialized by a PostgreSQL advisory lock and the row lock below.
+
+1. Reads **only** the static registry it is handed (which has already passed every compatibility, dependency, capability and namespace check of section 5);
+   it imports nothing, runs no module migration and downloads or installs nothing.
+2. **Namespace ownership.** The stored claims go through `check_namespace_continuity` (section 5.6) before anything is written: a namespace now owned by another
+   module id is refused (`namespace_ownership_changed`), and one nobody claims any more is refused (`namespace_released`). Nothing is written in either case.
+   Missing claims are inserted (a module may add namespaces); an existing claim is never touched.
+3. A registered module **without a row** gets one, with `installed_version` = the registered version and `registry_fingerprint` = the current one. It starts
+   **enabled** (so a release's modules keep working) **unless a direct dependency is not enabled and version-matched**, in which case it starts disabled. This is
+   decided in registration order, so a chain starts consistently. One `module.enabled` or `module.disabled` event (cause `sync`) is recorded per created row.
+4. An **existing row is never enabled or disabled**, and its `installed_version` is **never changed**. A registered version that differs from the stored one is a
+   **version mismatch**: it is reported (and the command exits non-zero), the module stays unavailable, and nothing about it is written.
+5. A row whose stored fingerprint is out of date, with a matching version, gets its fingerprint and `updated_at` refreshed (no event; this is not a state
+   change). A row with no registry entry is reported (`unregistered`) and left alone; nothing is ever deleted.
+6. With an empty registry a sync creates no state, but it **does write the initialization marker** (below).
+7. **The initialization marker.** In the same transaction, and only if the whole sync succeeds, the first completed sync inserts the single `ModuleHostMarker` row.
+   A refused sync (a namespace conflict, an audit failure) writes no marker: the transaction rolls back. The marker is never rewritten; a later sync leaves it alone
+   (the one exception: rows with no marker, an inconsistent database, are repaired by inserting it).
+
+**The backward-compatibility transition (explicit).** The installation existed before module state did. The rule, in `apps/module_host/rules.py` and used by the
+gate and by `module_status`, is:
+
+| Situation | Treatment | Reason shown |
+| --- | --- | --- |
+| The initialization marker does not exist (no sync has completed) and no state row exists | a registered module is treated as **enabled** | `legacy_unsynced` |
+| The marker exists (the first sync completed), and this registered module has no row, **even if no row is left at all** | **fails closed**: its task kinds are held | `missing_state` |
+| Row present, installed version differs from the registered one | unavailable | `version_mismatch` |
+| Row present, `enabled` is false | unavailable | `disabled` |
+| Row enabled and version-matched, but a direct dependency is unavailable | unavailable (defence for a hand-edited database) | `dependency_unavailable` |
+| Row enabled, version-matched, dependencies available | available | `enabled` |
+
+"Initialized" is defined by the **durable marker, not by the presence of rows** (the first S4 draft inferred it from "some row exists", which let deleted rows, or
+a sync that ran before any module existed, reopen the window; that was corrected in the S4 review). The gate reads the rows and then the marker (rows first, so a sync
+committing in between can only make the answer more closed); `module_status` reads both. **One conservative exception:** rows with no marker (only a hand edit or a
+partial restore can produce that) count as initialized, so the answer is never more open than the facts; the next `module_sync` repairs the marker. Consequences,
+stated plainly: (a) with no registered module (today) the gate never reads the database and nothing is held; (b) an installation that **never** ran `module_sync` has no
+marker, so when the first release that registers a module (MOD-2: Request Intake) arrives its modules run under `legacy_unsynced` until the administrator runs
+`module_sync` once, which is the compatibility window; (c) **an installation that already ran `module_sync` before that release (the sync with an empty registry writes
+the marker) has no window: the new release's modules have no row and are HELD (Request Intake's extraction included, once MOD-2 makes it a module) until `module_sync` is
+run**, which is the upgrade routine (stop the worker, migrate, `module_sync`, start the worker); (d) **run `module_sync` after every upgrade, before starting the
+worker**; (e) deleting every state row by hand no longer reopens the window (the marker stays); deleting the marker as well, by raw SQL, still would, and is not
+protected against. Legacy kinds are unaffected in every case.
+
+**Enable and disable (`enable_module`, `disable_module`; commands `module_enable`, `module_disable`).** Each is one `transaction.atomic()` block that locks
+**every** `ModuleState` row `FOR UPDATE` in module-id order (a handful of rows; one fixed order, so no deadlock; this is also what makes "enable a dependent"
+and "disable its dependency" mutually exclusive), reads the state, decides with the pure rules, writes, and records the audit event, all before the commit.
+
+* **Unknown module** (not in the static registry) and a malformed id are refused before a transaction is opened. A missing state row is refused
+  (`state_missing`: run the sync).
+* **Idempotent.** Enabling an enabled module, or disabling a disabled one, writes nothing and records no event (the result says `changed: false`). Enabling an
+  enabled module whose stored version does not match is **not** a no-op: it is refused.
+* **Enable** is refused for a version mismatch (`version_mismatch`) and while any direct dependency is not enabled and version-matched (`dependency_not_enabled`).
+* **Disable** is refused while any module that directly depends on it is enabled (`dependents_enabled`); disable the dependents first. A version mismatch does not
+  prevent disabling.
+* **Tasks and data are never touched.** The host imports no task model. Disabling holds the module's queued tasks (below); a running attempt finishes; failed
+  and completed tasks, runs, revisions, approvals and audit events stay exactly as they are. Enabling re-creates and re-runs nothing: held tasks become claimable
+  again, in their original order, on the worker's next iteration (no restart).
+* **Actor.** Every change is made by the administrator command line and is audited as the **system** actor (no login user, no public id). There is no public
+  API and no UI for enable or disable in S4.
+
+**The worker gate (`apps/module_host/gate.py`, installed in `config/task_registry.py`).** `make_kind_gate(registry, legacy_kinds)` returns the plain callable S2's
+`Composition.kind_gate` expects. Its answer is **the legacy kinds plus the kinds of every available module** (table above); everything else is absent, so a
+disabled module's kinds, a version-mismatched module's kinds, a module's kinds with missing state after the sync, and every unknown kind are excluded. The
+worker (unchanged code, section 3.9) narrows the answer to the kinds it has a handler for, fails closed if the gate raises or answers badly, re-raises a
+`DatabaseError` so the existing connection recovery runs (nothing is claimed), keeps recovering expired leases and running its hooks, and leaves every task of
+an excluded kind **queued, untouched and unfailed**. A running attempt of a kind that is gated off finishes and is recorded; retry, backoff and lease recovery are
+unchanged. The state is read once per iteration; the S2 race window (a kind gated off between that read and the claim can be claimed by that one claim) remains.
+
+* **Legacy kinds and Request Intake.** `config/task_registry.py` defines `LEGACY_UNGATED_KINDS = {test.add_numbers, request_intake.extract}`, taken from the two
+  handlers' own constants; a test pins it equal to the production allowlist, so a new production kind forces a decision. Legacy kinds are claimable with no module
+  state at all: **Request Intake's `request_intake.extract` is not gated, and works as before, with or without any `ModuleState` row, even if every other module is
+  disabled.** `make_kind_gate` refuses (`legacy_kind_claimed`, when `config.task_registry` is imported) a legacy kind that a registered module also declares, so
+  MOD-2 cannot register Request Intake without removing its kind from the legacy set in the same change; gating cannot start or fail to start by accident.
+* **Today** the registry is empty, so the production gate answers the legacy set **without reading the database**. Its first read happens with the first
+  registered module.
+* **One visible difference from before S4.** The production composition now carries a gate, so the worker's claim is filtered to the allowed, known kinds. A task
+  whose kind this worker has no handler for (a hand-inserted row, or a task from a newer release) is therefore left queued instead of being claimed and failed as
+  `unknown_kind`; the claim statement gains one `kind IN (...)`. This is the S2 narrowing (section 3.9), now active in production. Without a gate (tests) the old
+  behaviour is unchanged.
+* `while_disabled` of a maintenance hook is still **not** consulted: no module hook exists and the production composition installs none.
+
+**Audit.** `module.enabled` and `module.disabled`, subject type `module`, `subject_id` = the `ModuleState` id, system actor, details `module_id`,
+`installed_version`, `registry_fingerprint` and `cause` (`admin_command` or `sync`): identifiers, a version, a hash and a short token; the value rules and the
+no-free-text key rules of section 3.10 apply (a test refuses a `name`, `note` or spaced value). The event is recorded by Core's one recorder inside the
+operation's transaction: **a failed audit write rolls the state change back**, and an idempotent no-op records nothing. **Why these are Core's actions and not
+"module-declared":** `module` is a namespace the contract reserves for Core, so no manifest can declare an action in it, and S3's `with_modules` refuses it. S4
+therefore added both to Core's own vocabulary (`apps/audit/events.py`: `ACTIONS`, `DETAIL_KEYS`). **This changes the S3 pin "Core has seven actions"**: the seven
+actions and their detail keys are unchanged, and `tests/test_audit_vocabulary.py` (the frozen copy) and `tests/test_review_audit.py` were updated to expect nine.
+Nothing is installed into the process-wide vocabulary (`install_vocabulary` is called by nothing new; Core's own vocabulary is always in force); no audit
+migration was needed (the database already accepted the `module` subject type and any well-formed action, section 3.10). **Rollback consequence:** `module.enabled` and `module.disabled` are not in the old fixed action list, so once the sync or an enable/disable has stored one, reversing audit migration `0002` is refused (section 3.10, "Rollback limits"); events are never deleted to allow it. The PostgreSQL migration tests therefore build their old-schema rows from a frozen list of the seven original actions, not from the live `events.ACTIONS`.
+
+**Administrator commands** (`python manage.py ...`, from `backend\`; each reads the static registry from `config.modules`, validates its input, closes the
+database connections, reports a database error by class only, and exits non-zero on a refusal):
+
+| Command | What it does |
+| --- | --- |
+| `module_sync [--json]` | the sync above; non-zero exit (after printing the report) for a version mismatch or an unregistered state row |
+| `module_status [module_id] [--json]` | read only: per module, registered and installed version, `enabled`, `claimable` and why, task kinds, dependencies, fingerprint currency |
+| `module_enable <module_id> [--json]` | `enable_module` |
+| `module_disable <module_id> [--json]` | `disable_module` |
+
+`--json` prints one document with sorted keys and `"format": 1` (status: `registry_fingerprint`, `synced`, `modules[]`, `unregistered_state`; sync: `ok`,
+`initial_sync`, `created`, `refreshed`, `unchanged`, `version_mismatches`, `unregistered`, `namespace_claims_added`; enable and disable: `module_id`, `changed`,
+`enabled`). Text output shows a 12-character fingerprint prefix. The commands take no other argument: no path, no shell text, no `--migrate`, no install.
+
+**Future update compatibility (design intent; nothing here is an update manager).** `installed_version` and `registry_fingerprint` are what an update manager
+will compare with a new release: the sync never changes `installed_version`, so a release with another version shows up as a mismatch and the module stays
+unavailable until an update step (migration preflight, `update.data_schema_version`, backup, then an explicit audited change of the stored version) exists. The
+namespace history is persisted and checked at every sync, so a release that hands a namespace to another module id, or drops one, is refused (section 9, "Namespace
+continuity"). `configuration_version` is reserved for the versioned company configuration (ADR 0005). A sync run for a new release must come before the worker
+of that release starts, or its new modules' kinds stay held.
+
+**Remaining limitations.**
+
+* No module is registered; nothing is gated in practice. The gate, the sync and the enable/disable services have been exercised by DB-free tests with the
+  database replaced and by the PostgreSQL tests the owner ran locally (tested scenarios only; no real module has ever been registered).
+* "Initialized" is the marker (above). Raw SQL, a migration or an administrator that deletes the marker AND every state row reopens the legacy window; nothing detects it.
+  An empty-registry `module_sync` run before MOD-2 closes the window for the MOD-2 release (run the sync with that release).
+* No public API and no UI to enable or disable, and no API-side use of the state: **a disabled module is not "read-only" beyond held tasks**, because there is no
+  module write path yet. Maintenance hooks (`while_disabled`) are not wired. The API process does not read `ModuleState` and does not compare registry
+  fingerprints with the worker.
+* A version mismatch has no remedy in S4 (no update path): the module stays unavailable until the stored version and the release agree.
+* The gate race window (S2) remains; a task is held by kind, not by "who enqueued it", and enqueueing is not blocked for a disabled module (the producer, not
+  the host, decides; Request Intake is not a module).
+* Integrity is ORM and service level only (no trigger, no revoked privilege); the audit table is not tamper-protected (section 3.10). A module in the process
+  is not sandboxed.
+* The advisory lock and row locks are PostgreSQL features (the only supported database); their behaviour under load is untested.
+
+**Tests.** DB-free (all pass in the VM, 198 new tests): `tests/test_module_host_rules.py` (56: the availability and legacy-transition rule, allowed kinds, sync plan,
+enable/disable checks), `tests/test_module_host_services.py` (52: the services with the models, lock, transaction and recorder replaced by recording stand-ins;
+order of lock, save, event and commit; idempotency; refusals; rollback on an audit failure; status; the Core audit actions), `tests/test_module_host_gate.py` (26:
+the production gate and Request Intake's legacy kind, the gate with modules, the S2 worker with the gate), `tests/test_module_host_cli.py` (28: input validation,
+output, stable JSON, safe errors) and `tests/test_module_host_boundaries.py` (36: imports, no dynamic import or process, no migration run, no delete or raw
+SQL beyond the one advisory lock, one atomic block per change, model and migration contract, model/migration agreement without a database). Narrowly updated
+older pins: `test_audit_vocabulary.py`, `test_review_audit.py`, `test_module_boundaries.py`, `test_tasks_gating.py`, `test_settings.py` and
+`test_request_intake_django.py` (installed apps, callers of `config.modules`, the production gate, the nine Core actions). Each of 25 deliberate mutations of the
+implementation (8 of them aimed at the initialization marker) (fail-open missing state, version check removed, legacy kinds dropped, no idempotency, no audit event, dependents ignored, new modules always
+enabled, an empty-registry gate that answers nothing, a legacy overlap accepted, continuity skipped, a sync that enables, no gate in the composition, no row lock,
+and others) was caught by the focused set. PostgreSQL (`tests/test_module_host_postgres.py`, **75 tests; passed in the owner's local run, below**): the stored constraints, the migration
+(applied, reversed and re-applied without touching other tables or rows), sync, namespace ownership that persists and cannot change, enable and disable
+against real rows, audit consistency, rollback when the audit write fails, concurrent syncs, enables and disables (including the dependent/dependency race), and
+the worker on committed data (tasks held, resumed, a running attempt finishing, recovery, retry, version mismatch, missing state, Request Intake end to end with
+the production composition). The unchanged `test_intake_postgres`, `test_api_postgres`, `test_tasks_*_postgres` and `test_audit_vocabulary_postgres` suites are
+the regression. **Commands: [runbook.md](../development/runbook.md), section 5.1.**
+
+Three test-only corrections followed the owner's first runs, each in a test or its harness and none in production code, a model or a migration: `45bd0da` (a 41-character
+id overflows `varchar(40)` and PostgreSQL raises `DataError`, not the `IntegrityError` of a CHECK; the over-length case is asserted separately and two boundary tests were
+added, 73 to 75 tests), `4ba709b` (the process-level recovery children run the real `runworker`, so they run the production kind gate, which correctly held their
+`recovery.*` test kinds; the child now adds exactly those three kinds to the real gate's answer, and eight DB-free tests pin that it still fails closed and still holds
+every other kind) and `0f8e44d` (the audit migration tests built their audit `0001` rows from the live `events.ACTIONS`, which S4 extended with two actions the old schema
+refuses; they now use a frozen list of the seven original actions, four DB-free tests pin it to the migrations, and a new PostgreSQL test covers the reverse refusal
+after a `module.enabled` event is stored, 24 to 25 audit tests).
+
+**Owner-supplied local PostgreSQL result (2026-11-18; the VM did not run, repeat or observe it; no output is stored).** The project owner ran, on the local Windows
+computer, the 75 module host tests, the 15 process-level recovery tests and the 25 audit vocabulary tests, applied `module_host.0001_initial`, and ran the full
+selected PostgreSQL regression: **567 tests passed, 153.186 s, exit code 0, and the test database was destroyed successfully.** The command line, the module list and the
+output were not supplied (the intended list is runbook section 5.1). This supports, **for the tested scenarios only**:
+
+* the migration applying, and the stored constraints and the one-row marker behaving as the tests expect;
+* the initial sync, the marker written in the sync's transaction (an empty registry included), missing state failing closed once the marker exists, and namespace
+  ownership persisting and not being reassigned through the services;
+* idempotent, locked, audited enable and disable, including the concurrent sync, enable and disable scenarios and the rollback when the audit write fails;
+* the production worker composition with its gate: tasks of a disabled, version-mismatched or stateless module held in `queued` and not failed, resumed after an enable, a
+  running attempt finishing, and recovery and retry unchanged;
+* **Request Intake's legacy task kind staying ungated**: the extraction runs end to end through the production composition with no module state, with unrelated modules
+  disabled and with every state row gone but the marker present, and the unchanged `test_intake_postgres` and `test_api_postgres` suites are part of the intended selection (the exact module list of the 567-test run was not supplied);
+* the process-level recovery tests (real worker processes, a forced kill, shutdown with a task in progress) passing with the production gate in the loop.
+
+**What it does not show, and what remains.** It does not prove that no other race exists (the S2 gate race window remains; the threaded tests cover the scenarios written),
+it is one machine and one PostgreSQL, and the owner did not report a manual run of `module_sync`, `module_status`, `module_enable` or `module_disable` against a database
+(they are exercised by the tests through the services and, DB-free, through the commands). Request Intake is **not** registered as a module; there is **no** API-side
+write blocking for a disabled module; there is **no** capability facade and no `ModuleContext`; there is **no** module installation and no Update Manager; the gate reads
+state once per iteration; and nothing here is a production-readiness claim. Record: [local-validation-record.md](../development/local-validation-record.md).
 
 ## 4. Versioning
 
@@ -663,6 +889,10 @@ after Django's app registry is ready) is decided in MOD-2.
 Since S3 there is a second, separate composition root, `config/audit_vocabulary.py` (section 3.10). It reads a registry (the built-in one by
 default) and builds the audit vocabulary; it names no module itself, and nothing in the application calls it yet.
 
+Since S4 `config/modules.py` is read by exactly two kinds of caller: the worker's composition root (`config/task_registry.py`, which builds the kind gate from
+it) and the four administrator commands of `apps/module_host` (section 3.11). No view, serializer, settings module or other entry point calls
+`build_registry` (`tests/test_module_boundaries.py` lists the callers).
+
 ### 5.5 Direct dependency inspection
 
 `registry.dependencies` and `registry.dependents` are read-only mappings (`module id -> sorted tuple of ids`) of the **direct** edges,
@@ -676,8 +906,9 @@ section 3.4). A future disable operation uses `dependents` to refuse disabling a
 claims as a plain mapping `namespace -> module id`, `check_namespace_continuity(history, registry)` refuses a namespace that now
 belongs to a different module (`namespace_ownership_changed`) and one that nobody claims any more (`namespace_released`, because its
 identifiers may still be stored); a module may add namespaces. `next_namespace_history(history, registry)` returns the history to
-keep. **Nothing stores the history and nothing calls these functions yet**: the later module-state and update slices will keep the
-history in the database and run the check before a release is activated.
+keep. Since S4 the history is stored (`ModuleNamespaceClaim`, append-only) and `check_namespace_continuity` runs inside every `module_sync`, before anything
+is written (section 3.11); `next_namespace_history` is not called (the sync inserts only the claims that are missing). What is still missing is the
+update path that would run the check before a NEW release is activated.
 
 ## 6. Compatibility rules (summary)
 
@@ -722,9 +953,11 @@ provider; significant external actions need human approval; AI output is validat
 - **Disabling is read-only mode.** New writes through the module are blocked; queued tasks of the module are **held** (not failed);
   attempts already running are allowed to finish; historical records stay readable. A hold needs the worker's claim step to take
   only kinds that are enabled, version-matched and known to the worker, and maintenance hooks declared `while_disabled=True` keep
-  running. S2 built the worker's side of this as generic seams (a claim filter, a kind gate and ordered maintenance hooks; section 3.9)
-  that nothing installs yet; S1a did not touch the worker. The gate that reads module state, and the use of `while_disabled`, are S4.
-- **Runtime state lives in a separate `apps/module_host` Django app** (a future `ModuleState`, namespace claims, sync/enable/disable
+  running. S2 built the worker's side of this as generic seams (a claim filter, a kind gate and ordered maintenance hooks; section 3.9); S1a did
+  not touch the worker. **S4 built the gate that reads module state and installed it (section 3.11)**; the use of `while_disabled` is still not built
+  (no module declares a hook that the worker runs), and "new writes through the module are blocked" is not enforced anywhere yet (there is no module
+  write path; the held-tasks part is).
+- **Runtime state lives in a separate `apps/module_host` Django app** (built in S4: `ModuleState`, namespace claims, sync/enable/disable
   commands). `apps/modules` stays pure and gains no models. S1a only prepares the pure inputs that app will use: the registry,
   `dependents_of` (refuse to disable a module an enabled one needs), `derive_role_permissions` and the namespace continuity check.
 - **Roles.** The existing Operator, Approver and Auditor groups stay; modules supply default grants to them and add no role.
@@ -766,8 +999,10 @@ An update manager does not exist and is **not** part of MOD-1a. When it is desig
 
 ## 10. Limitations and deferred functionality
 
-- No module is registered; `BUILTIN_MODULES` is empty and nothing calls `build_registry`.
-- No activation, enablement state, database table, model or migration for modules.
+- No module is registered; `BUILTIN_MODULES` is empty. Since S4 the registry is read by the worker's composition root (the kind gate) and by the four
+  `apps/module_host` commands only (section 5.4); `apps/modules` itself still has no model and no migration.
+- Module state exists since S4 (section 3.11: `apps/module_host`, `ModuleState`, namespace claims, sync, enable and disable commands), but no module is activated
+  by it: there is nothing to activate until MOD-2.
 - No handler registration with the worker, no permission seeding, no API or UI mounting, no endpoint listing modules.
 - Run states and permission constants in Core are still shaped by Request Intake (`apps/cases/run_state.py`, `apps/accounts/roles.py`); the
   contract does not change them. The audit vocabulary is extensible since S3 (section 3.10): Core's seven actions stay Request-Intake-shaped
@@ -788,16 +1023,18 @@ An update manager does not exist and is **not** part of MOD-1a. When it is desig
 - Still absent after S1b: `ModuleState`, runtime module permissions (no module permission is checked at run time; no manifest becomes
   an `AccessRule`), enable/disable, and the capability facade. Request Intake is not a module.
 - Maintenance hooks in a manifest are declarations: nothing reads them. Since S2 `apps/tasks/worker.py` can run further named hooks after
-  the legacy `after_iteration` hook (section 3.9), but the production composition installs none, `while_disabled` is not consulted, and a manifest
-  hook id is not resolved to code anywhere.
-- The worker's claim filter and kind gate (S2, section 3.9) exist and are tested, but **no gate is installed**: every kind is still claimable, no
-  task is held, and nothing can be disabled. The S2 PostgreSQL tests passed in the owner's local run (section 3.9) for the tested scenarios
+  the legacy `after_iteration` hook (section 3.9), but the production composition installs none, `while_disabled` is not consulted (S4 did not
+  change that), and a manifest hook id is not resolved to code anywhere.
+- The worker's claim filter and kind gate (S2, section 3.9) are **installed since S4** (section 3.11), but no module is registered, so the gate answers
+  the legacy kinds and holds nothing today. The S2 PostgreSQL tests passed in the owner's local run (section 3.9) for the tested scenarios
   only; the gate race window remains.
-- No `ModuleState`, no `apps/module_host`, no enable/disable, no persisted namespace history; the continuity check is not called.
+- S4 (section 3.11) adds `apps/module_host`, `ModuleState`, the sync and enable/disable administrator commands and the persisted namespace history
+  (the continuity check runs in every sync). Its PostgreSQL tests and migration passed in the owner's local run (section 3.11, tested scenarios only); the limitations
+  of S4 are listed in section 3.11, "Remaining limitations".
 - No capability facade exists (`task.enqueue` and the others are names a manifest may require, nothing a module can call).
 - Request Intake has no manifest in the application; the synthetic one in `tests/module_support.py` exists only for the golden test.
 - Only manifest version 1; no pre-release versions.
-- **S3 (audit vocabulary), pushed and not merged:** no module is registered and nothing installs a module vocabulary in the application (no entry point,
+- **S3 (audit vocabulary), merged into `main` (PR #14):** no module is registered and nothing installs a module vocabulary in the application (no entry point,
   `ready()` or command calls `install_audit_vocabulary`), so no module action can be recorded in any running process yet. The database checks the
   shape of an action only; membership is Python's rule, bypassable by raw SQL, a migration or a database administrator. A module action stored in
   the table prevents reversing migration `0002` (by design: events are never deleted). The migration and its PostgreSQL behaviour passed the
@@ -808,7 +1045,7 @@ An update manager does not exist and is **not** part of MOD-1a. When it is desig
 ## 11. Open decisions (for later slices)
 
 1. **Loading mechanism** for module manifests that live in packages importing Django models (lazy import after app loading).
-2. **Audit vocabulary:** decided and implemented in S3 (section 3.10, on `feat/module-audit-vocabulary`, pushed and not merged): the database CHECK is a
+2. **Audit vocabulary:** decided and implemented in S3 (section 3.10, merged, PR #14): the database CHECK is a
    bounded shape pattern, the allowlist is the Python vocabulary composed from the registry. Owner decision: the process-start installation
    call is deferred to MOD-2 (where it belongs is still open), and any database-level protection of the table.
 3. **Run-state vocabulary:** keep the Core set fixed with modules mapping onto it, or make it extensible; the name `extracting` is
@@ -820,9 +1057,10 @@ An update manager does not exist and is **not** part of MOD-1a. When it is desig
 6. **Permission model for installable modules:** namespaced permissions and the existing three roles are decided (owner,
    MOD-1b); still open is how an installable package without models gets Django permission rows (Django creates them only for a
    model), versus a Core permission registry table. Built-ins keep `Meta.permissions`.
-7. **Disabling a module:** decided as read-only mode (section 8); the worker claim filter and kind gate seam exist since S2 (section 3.9,
-   nothing installed; its PostgreSQL tests passed in the owner's local run); the state storage, the gate that reads it and the API/worker agreement on the enabled set
-   are still to be built (S4).
+7. **Disabling a module:** decided as read-only mode (section 8); the worker claim filter and kind gate seam exist since S2 (section 3.9; its PostgreSQL
+   tests passed in the owner's local run); S4 built the state storage, the gate that reads it and the enable/disable commands (section 3.11; its
+   PostgreSQL tests passed in the owner's local run). Still open: how the API process learns the enabled set (there is no API use yet; the proposal is the same
+   `ModuleState` rows plus a registry-fingerprint comparison), blocking new writes through a disabled module, and honouring `while_disabled`.
 8. **Trust model:** first-party modules only, third-party in-process Python, or external isolated services.
 9. **What "Core API v1" contains** and how it is versioned.
 10. **Frontend contributions:** a build-time static registry (proposed), declarative screens, or remote code (not proposed).
@@ -857,3 +1095,12 @@ From S3 (section 3.10): DB-free `tests/test_audit_vocabulary.py` (pure and Djang
 `backend/apps/audit/vocabulary.py` (new), `backend/apps/audit/events.py` and `backend/apps/audit/models.py` (changed),
 `backend/apps/audit/migrations/0002_extensible_audit_vocabulary.py` (new) and `backend/config/audit_vocabulary.py` (new). `apps/modules`,
 `config/modules.py`, the recorder, `apps/tasks` and Request Intake are unchanged.
+
+From S4 (section 3.11): DB-free `tests/test_module_host_rules.py` (pure), `tests/test_module_host_services.py`, `tests/test_module_host_gate.py`,
+`tests/test_module_host_cli.py` and `tests/test_module_host_boundaries.py` (198 tests; pass in the VM); PostgreSQL `tests/test_module_host_postgres.py` (75 tests;
+owner-run locally, section 3.11); the recovery harness (`tests/recovery_support.py`, `tests/recovery_worker_child.py`, `tests/test_tasks_recovery_support.py`, 8 new DB-free
+tests) and the audit migration fixtures (`tests/test_audit_vocabulary.py`, 4 new DB-free tests, and `tests/test_audit_vocabulary_postgres.py`, 25 tests) were corrected
+(test-only). Source: `backend/apps/module_host/{apps,models,errors,rules,services,gate,cli}.py`, `backend/apps/module_host/management/commands/module_{sync,status,enable,disable}.py`
+and `backend/apps/module_host/migrations/0001_initial.py` (all new), `backend/apps/audit/events.py` (two Core actions added), `backend/config/task_registry.py`
+(the gate and `LEGACY_UNGATED_KINDS`) and `backend/config/settings/base.py` (the app). `apps/modules`, `config/modules.py`, `apps/tasks`, the recorder, the existing
+migrations and Request Intake are unchanged.

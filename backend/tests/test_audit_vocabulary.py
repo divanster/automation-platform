@@ -49,7 +49,8 @@ BACKEND = Path(__file__).resolve().parent.parent
 STDLIB = set(sys.stdlib_module_names)
 ACTOR, SUBJECT, CASE, RUN = (uuid.uuid4() for _ in range(4))
 
-# A frozen copy of Core's vocabulary as it was before S3 (apart from the new "module" subject type, which is asserted separately). If an
+# A frozen copy of Core's vocabulary: the seven actions that existed before S3, plus "module.enabled" and "module.disabled", which MOD-1b S4 added as Core's
+# own actions (the "module" namespace is reserved for Core, so no module can declare them). The new "module" subject type is asserted separately. If an
 # action or a detail key of Core ever changes, this table is what makes the change visible.
 CORE_ACTIONS = (
     "request.submitted",
@@ -59,6 +60,8 @@ CORE_ACTIONS = (
     "approval.recorded",
     "approval.invalidated",
     "rejection.recorded",
+    "module.enabled",
+    "module.disabled",
 )
 CORE_KEYS = {
     "request.submitted": {"byte_length", "client_request_id_used"},
@@ -68,6 +71,8 @@ CORE_KEYS = {
     "approval.recorded": {"revision_id", "content_hash", "warning_count"},
     "approval.invalidated": {"revision_id", "by_revision_id", "approval_count"},
     "rejection.recorded": {"revision_id", "content_hash", "reason_code"},
+    "module.enabled": {"module_id", "installed_version", "registry_fingerprint", "cause"},
+    "module.disabled": {"module_id", "installed_version", "registry_fingerprint", "cause"},
 }
 CORE_SUBJECTS = ("run", "revision", "approval", "rejection", "module")
 
@@ -935,7 +940,7 @@ class ArchitectureTests(SimpleTestCase):
     def test_the_worker_composition_and_the_module_composition_root_are_unchanged(self):
         from config.task_registry import COMPOSITION
 
-        self.assertIsNone(COMPOSITION.kind_gate)
+        self.assertIsNotNone(COMPOSITION.kind_gate)  # S4 installs the module gate; it has nothing to do with the audit vocabulary
         self.assertEqual(COMPOSITION.maintenance_hooks, ())
         source = (BACKEND / "config" / "task_registry.py").read_text(encoding="utf-8")
         self.assertNotIn("audit", source)
@@ -971,3 +976,59 @@ class ArchitectureTests(SimpleTestCase):
         loader = MigrationLoader(None, ignore_no_migrations=True)
         detector = MigrationAutodetector(loader.project_state(), ProjectState.from_apps(django_apps), NonInteractiveMigrationQuestioner(specified_apps={"audit"}))
         self.assertEqual(detector.changes(graph=loader.graph, trim_to_apps={"audit"}), {})
+
+
+class OldSchemaHelperTests(SimpleTestCase):
+    """The PostgreSQL migration tests build rows for the OLD schema (audit 0001). They must use the frozen historical actions, never the live vocabulary.
+
+    MOD-1b S4 added ``module.enabled`` and ``module.disabled`` to ``events.ACTIONS``. The old schema's fixed list refuses them (correctly), so a helper that inserted
+    ``events.ACTIONS`` under audit 0001 failed with ``audit_event_action_valid`` in three tests (it was not a defect of the migration or of any production code).
+    """
+
+    def migration(self, name):
+        import importlib
+
+        return importlib.import_module(f"apps.audit.migrations.{name}")
+
+    def old_fixed_list_of_migration_0001(self):
+        constraints = self.migration("0001_initial").Migration.operations[0].options["constraints"]
+        (valid,) = [c for c in constraints if c.name == "audit_event_action_valid"]
+        (key, values), = valid.condition.children
+        self.assertEqual(key, "action__in")
+        return tuple(values)
+
+    def postgres_test_constant(self, name):
+        tree = ast.parse((BACKEND / "tests" / "test_audit_vocabulary_postgres.py").read_text(encoding="utf-8"))
+        (assigned,) = [n for n in tree.body if isinstance(n, ast.Assign) and any(getattr(t, "id", "") == name for t in n.targets)]
+        return ast.literal_eval(assigned.value)
+
+    def test_the_frozen_old_actions_are_exactly_the_old_fixed_list_and_the_migration_guard(self):
+        frozen = self.postgres_test_constant("OLD_ACTIONS")
+        self.assertEqual(frozen, self.old_fixed_list_of_migration_0001())
+        self.assertEqual(frozen, tuple(self.migration("0002_extensible_audit_vocabulary").OLD_ACTIONS))
+        self.assertEqual(frozen, events.ACTIONS[: len(frozen)])  # the live vocabulary still starts with them, unchanged
+
+    def test_the_live_vocabulary_has_actions_the_old_schema_refuses_which_is_why_the_helper_failed(self):
+        refused_by_the_old_schema = set(events.ACTIONS) - set(self.old_fixed_list_of_migration_0001())
+        self.assertEqual(refused_by_the_old_schema, {events.ACTION_MODULE_ENABLED, events.ACTION_MODULE_DISABLED})
+
+    def test_the_old_schema_helper_does_not_read_the_live_vocabulary(self):
+        tree = ast.parse((BACKEND / "tests" / "test_audit_vocabulary_postgres.py").read_text(encoding="utf-8"))
+        (cls,) = [n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "AuditMigrationTests"]
+        (helper,) = [n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name == "insert_old_vocabulary_rows"]
+        used = {f"{n.value.id}.{n.attr}" for n in ast.walk(helper) if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name)}
+        self.assertNotIn("events.ACTIONS", used)
+        self.assertIn("OLD_ACTIONS", {n.id for n in ast.walk(helper) if isinstance(n, ast.Name)})
+
+    def test_no_test_inserts_the_live_vocabulary_into_the_old_schema(self):
+        # every use of events.ACTIONS inside AuditMigrationTests must come AFTER the test has migrated to audit 0002 (the new schema)
+        source = (BACKEND / "tests" / "test_audit_vocabulary_postgres.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        (cls,) = [n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "AuditMigrationTests"]
+        for function in [n for n in cls.body if isinstance(n, ast.FunctionDef)]:
+            uses = [n.lineno for n in ast.walk(function) if isinstance(n, ast.Attribute) and ast.unparse(n) == "events.ACTIONS"]
+            if not uses:
+                continue
+            forward = [n.lineno for n in ast.walk(function) if isinstance(n, ast.Call) and ast.unparse(n) == "self.migrate(AUDIT_0002)"]
+            with self.subTest(test=function.name):
+                self.assertTrue(forward and min(uses) > min(forward), "events.ACTIONS is used before the test has migrated to audit 0002")

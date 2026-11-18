@@ -64,6 +64,17 @@ AUDIT_0001 = ("audit", "0001_initial")
 AUDIT_0002 = ("audit", "0002_extensible_audit_vocabulary")
 TABLE = "audit_auditevent"
 OLD_SUBJECTS = ("run", "revision", "approval", "rejection")
+# The seven actions the FIXED list of audit 0001 allows: a historical fact, frozen on purpose. It must NOT be ``events.ACTIONS``: that is the LIVE vocabulary, and
+# MOD-1b S4 added "module.enabled" and "module.disabled" to it, which the old schema (correctly) refuses. DB-free tests pin this list to the migrations.
+OLD_ACTIONS = (
+    "request.submitted",
+    "revision.created",
+    "request.edited",
+    "run.state_changed",
+    "approval.recorded",
+    "approval.invalidated",
+    "rejection.recorded",
+)
 FIELDS = ("id", "occurred_at", "actor_kind", "actor_public_id", "action", "subject_type", "subject_id", "case_id", "run_id", "details")
 
 MALFORMED = [
@@ -132,8 +143,7 @@ class AuditMigrationTests(DedicatedTestDatabaseMixin, TransactionTestCase):
 
     def insert_old_vocabulary_rows(self):
         model = self.old_model(AUDIT_0001)
-        actions = events.ACTIONS
-        for index, action in enumerate(actions):
+        for index, action in enumerate(OLD_ACTIONS):  # events as they existed under the old schema, not the live vocabulary
             model.objects.create(**row(action, OLD_SUBJECTS[index % 4], details={"n": index, "flag": True}, case_id=uuid.uuid4(), run_id=uuid.uuid4()))
         model.objects.create(**row(actor_kind="user", actor_public_id=uuid.uuid4()))
         return model
@@ -143,7 +153,7 @@ class AuditMigrationTests(DedicatedTestDatabaseMixin, TransactionTestCase):
         self.assertIn("audit_event_action_valid", self.constraints())
         model = self.insert_old_vocabulary_rows()
         before = snapshot(model)
-        self.assertEqual(len(before), len(events.ACTIONS) + 1)
+        self.assertEqual(len(before), len(OLD_ACTIONS) + 1)
 
         self.migrate(AUDIT_0002)
 
@@ -243,6 +253,18 @@ class AuditMigrationTests(DedicatedTestDatabaseMixin, TransactionTestCase):
         with self.assertRaises(IrreversibleError):
             self.migrate(AUDIT_0001)
         self.assertEqual(snapshot(), before)
+        self.assertIn(AUDIT_0002, MigrationRecorder(connection).applied_migrations())
+
+    def test_reverse_is_refused_when_a_core_module_host_event_is_stored(self):
+        # MOD-1b S4: module.enabled and module.disabled are Core actions the old fixed list does not have, so a stored one blocks the reverse too.
+        self.migrate(AUDIT_0001)
+        self.migrate(AUDIT_0002)
+        AuditEvent.objects.create(**row("module.enabled", "module", details={"module_id": "alpha_host", "cause": "sync"}))
+        before = snapshot()
+        with self.assertRaises(IrreversibleError):
+            self.migrate(AUDIT_0001)
+        self.assertEqual(snapshot(), before)
+        self.assertIn("audit_event_action_shape", self.constraints())  # nothing was touched
         self.assertIn(AUDIT_0002, MigrationRecorder(connection).applied_migrations())
 
     def test_reverse_succeeds_on_an_empty_table_and_the_migration_can_be_reapplied(self):

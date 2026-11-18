@@ -10,7 +10,7 @@
 > request-intake workflow, performs **no external effect**, authorizes none, and registers no Windows service.
 > (A later slice, [request-intake orchestration](request-intake-orchestration-slice.md), connects the queue to
 > the workflow through an explicit composition point; this document describes the queue slice as it was. Section 11 records the
-> later MOD-1b / S2 change to the claim, the hooks and the gate seam.)
+> later MOD-1b / S2 change to the claim, the hooks and the gate seam; section 12 records MOD-1b / S4, which installs a module gate.)
 
 ## 1. Scope
 
@@ -232,7 +232,7 @@ try {
   `runworker`; `HANDLERS` itself is unchanged); no endpoint or UI exists.
 * Task rows hold business payloads in plain JSON in the database; nothing here encrypts or access-controls them, and there is no authorization on enqueueing. Do not enqueue sensitive data until that is designed.
 
-## 11. MOD-1b / S2: claim filter, maintenance hooks and kind gate (commit `28483a6`; not yet merged)
+## 11. MOD-1b / S2: claim filter, maintenance hooks and kind gate (commit `28483a6`; merged, PR #13)
 
 A later, small change to `apps/tasks`; the design and the guarantees of sections 2 to 4 stand. The full contract is
 [module-contract.md](../architecture/module-contract.md) section 3.9; in short:
@@ -249,11 +249,11 @@ A later, small change to `apps/tasks`; the design and the guarantees of sections
   this worker has a handler for, becomes the claim filter; an empty answer, an exception or an invalid answer (including `None`) means nothing is
   claimed (fail closed), while recovery and the hooks still run. A database error from the gate is re-raised before any claim. Held tasks stay
   queued and are claimed as attempt 1 once the gate opens.
-* **Compatibility.** `config/task_registry.py` and `runworker` are unchanged: no gate and no extra hook are installed, so the worker claims every
-  kind and runs its one hook exactly as in sections 2 to 7. The signatures of `process_one` and `run_until_stopped` (wrapped by the real-process
+* **Compatibility.** In S2 itself `config/task_registry.py` and `runworker` were unchanged: no gate and no extra hook were installed, so the worker claimed every
+  kind and ran its one hook exactly as in sections 2 to 7 (S4, section 12, later installed a gate). The signatures of `process_one` and `run_until_stopped` (wrapped by the real-process
   recovery tests) are unchanged. `apps/tasks` still imports nothing from `apps.modules`, `apps.intake` or `workflows`.
-* **Deferred.** The gate that reads module state, `while_disabled`, and any enable/disable are S4. Nothing here decides which kinds belong to a
-  module.
+* **Deferred.** The gate that reads module state and enable/disable were S4 (section 12, built); `while_disabled` is still not built. Nothing here decides
+  which kinds belong to a module.
 * **Validation.** `tests/test_tasks_gating.py` (DB-free, 72 tests) passes in the development VM. `tests/test_tasks_gating_postgres.py`
   (`FilteredClaimTests`, `FilteredRetryAndRecoveryTests`, `FilteredClaimConcurrencyTests`, `GatedWorkerTests`) (39 tests) was run, together
   with the unchanged `test_tasks_postgres.py` (95) and `test_tasks_recovery_postgres.py` (15), by the project owner on the local Windows
@@ -272,3 +272,32 @@ try {
     "exit code: $LASTEXITCODE"
 } finally { Remove-Item Env:AP_RUN_DB_TESTS -ErrorAction SilentlyContinue }
 ```
+
+## 12. MOD-1b / S4: the module gate is installed (pushed; owner-run PostgreSQL validation passed)
+
+S4 adds no code to `apps/tasks` (a test pins that it still imports nothing from `apps.modules`, `apps.module_host`, `apps.intake` or `workflows`). It **installs** the
+S2 kind gate in the production composition, `config/task_registry.py`. The contract is [module-contract.md](../architecture/module-contract.md) section 3.11; in short:
+
+* **The gate** is `apps.module_host.gate.make_kind_gate(registry, legacy_kinds)`: the legacy kinds plus the kinds of every enabled, version-matched module with
+  state (state is read once per iteration; before the first `module_sync` completes (the durable initialization marker) a registered module without a row is treated as
+  enabled, after it a module without a row is held, even if no row is left). Disabled, version-mismatched, stateless-after-sync and unknown kinds are not in the answer, so their queued tasks are **held** (`queued`, attempt 0,
+  untouched, never failed) and are claimed, in their original order, as attempt 1 on the iteration after the module is enabled. A running attempt finishes and is
+  recorded. Lease recovery, retry with backoff, fencing and the hooks are unchanged and run whether or not the gate is open.
+* **Request Intake is unaffected.** `request_intake.extract` and `test.add_numbers` are **legacy ungated kinds** (`config.task_registry.LEGACY_UNGATED_KINDS`):
+  they are claimable with no module state at all. No module is registered, so the production gate answers exactly those two kinds **without reading the database**.
+  MOD-2 must take `request_intake.extract` out of that set when it registers Request Intake (a registered module that declares a legacy kind is refused when
+  `config.task_registry` is imported).
+* **One visible change.** With a gate installed the claim is filtered (S2 narrowing), so a task whose kind this worker has no handler for is left queued rather than
+  claimed and failed as `unknown_kind`. `claim_next_task` itself is unchanged; the unrestricted behaviour (no gate) is still pinned by the old tests.
+* **Database errors** from the gate's state read follow the existing worker loop (connections closed, retried after the poll interval, five in a row stop the
+  worker); nothing is claimed in that iteration. Any other gate failure allows nothing and is logged by exception class only.
+* **Not done:** `while_disabled` (no module hook exists), blocking enqueue for a disabled module, and the race window of section 11.
+* **Validation.** DB-free: `tests/test_module_host_gate.py` (26, incl. the production gate with Request Intake's kind and the worker with a gate) passes in the VM.
+  PostgreSQL: `tests/test_module_host_postgres.py` (75 tests, `GatedWorkerTests`, `RequestIntakeRegressionTests`, ...), the unchanged `test_intake_postgres.py`
+  (it installs `COMPOSITION`, now with the gate, and runs the extraction end to end), the queue suites and the 15 process-level recovery tests were run by the project owner
+  locally: **the full selected regression passed, 567 tests, 153.186 s, exit code 0, test database destroyed** (owner-supplied; the VM did not run or observe it; no output
+  is stored; [record](local-validation-record.md)). For the tested scenarios only this supports held tasks staying `queued` and not failing, release after an enable, a running
+  attempt finishing, unchanged recovery and retry, and Request Intake's legacy kind staying ungated. It does not prove that no other race exists (the section 11 race window
+  remains), and there is no production-readiness claim. **Process-level recovery children:** they run the real `runworker`, hence the production gate; the child
+  (`tests/recovery_worker_child.py`) wraps `install_composition` so that the real gate's answer also contains the three `recovery.*` test kinds (a failing gate still allows
+  nothing, every other kind is still held). Commands: [runbook.md](runbook.md) section 5.1.

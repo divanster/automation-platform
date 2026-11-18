@@ -174,7 +174,7 @@ class ChildScriptTests(ControlDirectoryMixin, SimpleTestCase):
 
     def test_the_patches_inject_the_registry_and_a_shifted_clock_into_the_existing_worker_parameters(self):
         with mock.patch.object(worker, "process_one") as process_one, mock.patch.object(worker, "run_until_stopped") as run_until_stopped:
-            with mock.patch.object(support, "STOP", None):
+            with mock.patch.object(support, "STOP", None), mock.patch.object(worker, "install_composition"):  # install_patches also wraps this one
                 clock = child_script.install_patches(400)
                 shifted = clock()
                 self.assertTrue(timezone.now() + timedelta(seconds=399) < shifted < timezone.now() + timedelta(seconds=401))
@@ -214,6 +214,91 @@ class ChildScriptTests(ControlDirectoryMixin, SimpleTestCase):
         self.assertTrue(support.CHILD_SCRIPT.is_file())
         self.assertFalse(support.CHILD_SCRIPT.name.startswith("test"))
         self.assertFalse(Path(support.__file__).name.startswith("test"))
+
+
+class ChildKindGateTests(SimpleTestCase):
+    """MOD-1b S4 installed a kind gate in the production composition. The process-level children run the real ``runworker``, so they run that gate.
+
+    The six process-level recovery tests enqueue ``recovery.*`` tasks. Those kinds are neither legacy kinds nor a module's, so the production gate (correctly) holds
+    them in ``queued`` and the worker answers "No task available". The child therefore adds exactly the three test kinds to the gate's answer and keeps the gate
+    otherwise as it is. None of this needs a database: ``worker._claimable_kinds`` only asks the gate and narrows its answer.
+    """
+
+    def setUp(self):
+        from config import task_registry
+
+        self.task_registry = task_registry
+        self.addCleanup(setattr, worker, "_composition", worker._composition)
+        self.registry = support.registry()
+
+    def install_in_child(self, composition):
+        """Install ``composition`` through the child's wrapper, exactly as ``runworker`` does inside the child process."""
+        with mock.patch.object(support, "STOP", None):
+            patcher = mock.patch.object(worker, "process_one"), mock.patch.object(worker, "run_until_stopped")
+            for each in patcher:
+                each.start()
+                self.addCleanup(each.stop)
+            original = worker.install_composition
+            self.addCleanup(setattr, worker, "install_composition", original)
+            child_script.install_patches(0)
+            worker.install_composition(composition)  # the wrapper, now installed on the worker module
+
+    def test_the_production_gate_holds_the_recovery_test_kinds_which_is_why_the_children_found_no_task(self):
+        worker.install_composition(self.task_registry.COMPOSITION)
+        allowed = worker._claimable_kinds(self.registry)
+        self.assertEqual(allowed, frozenset({"test.add_numbers"}))  # the legacy kinds narrowed to this registry
+        for kind in support.TEST_KINDS:
+            self.assertNotIn(kind, allowed)
+
+    def test_through_the_childs_wrapper_the_three_test_kinds_are_allowed_and_nothing_else_is_added(self):
+        self.install_in_child(self.task_registry.COMPOSITION)
+        self.assertEqual(worker._claimable_kinds(self.registry), frozenset({"test.add_numbers", *support.TEST_KINDS}))
+        self.assertEqual(frozenset(support.TEST_KINDS), {"recovery.block", "recovery.rendezvous", "recovery.work"})
+
+    def test_the_wrapped_gate_still_holds_every_other_kind(self):
+        registry = {**self.registry, "os.system": handlers.TaskHandler(kind="os.system", validate=lambda p: p, run=lambda p: {}, is_test_handler=True)}
+        self.install_in_child(self.task_registry.COMPOSITION)
+        self.assertNotIn("os.system", worker._claimable_kinds(registry))  # an unknown kind stays queued
+
+    def test_the_wrapper_keeps_the_composition_otherwise_as_it_is(self):
+        production = self.task_registry.COMPOSITION
+        self.install_in_child(production)
+        installed = worker._composition
+        self.assertIs(installed.registry, production.registry)
+        self.assertIs(installed.after_iteration, production.after_iteration)
+        self.assertEqual(installed.maintenance_hooks, production.maintenance_hooks)
+        self.assertIsNot(installed.kind_gate, production.kind_gate)  # wrapped, not replaced by "allow everything"
+        self.assertIsNotNone(installed.kind_gate)
+
+    def test_a_composition_without_a_gate_stays_without_one(self):
+        self.install_in_child(worker.Composition(registry=self.registry))
+        self.assertIsNone(worker._composition.kind_gate)
+
+    def test_a_failing_or_badly_answering_production_gate_still_allows_nothing(self):
+        def raises():
+            raise RuntimeError("gate unavailable")
+
+        for name, gate in (("raises", raises), ("none", lambda: None), ("string", lambda: "recovery.work"), ("mapping", lambda: {"recovery.work": True}), ("generator", lambda: (k for k in ["x"]))):
+            with self.subTest(gate=name):
+                self.install_in_child(worker.Composition(registry=self.registry, kind_gate=gate))
+                with self.assertLogs(worker.logger, level="ERROR"):
+                    self.assertEqual(worker._claimable_kinds(self.registry), frozenset())  # fail closed: the test kinds are NOT added on top of a failed gate
+
+    def test_a_database_error_from_the_production_gate_still_reaches_the_workers_recovery(self):
+        from django.db import OperationalError
+
+        def broken():
+            raise OperationalError("down")
+
+        self.install_in_child(worker.Composition(registry=self.registry, kind_gate=broken))
+        with self.assertRaises(OperationalError):
+            worker._claimable_kinds(self.registry)
+
+    def test_the_legacy_request_intake_kind_is_untouched_by_the_wrapper(self):
+        from apps.intake.registry import PRODUCTION_REGISTRY
+
+        self.install_in_child(self.task_registry.COMPOSITION)
+        self.assertEqual(worker._claimable_kinds(PRODUCTION_REGISTRY), frozenset({"test.add_numbers", "request_intake.extract"}))
 
 
 class WorkerProcessesTests(SimpleTestCase):

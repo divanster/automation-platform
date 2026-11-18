@@ -25,6 +25,7 @@ INSTALLED_APPS = [
     "apps.cases",
     "apps.health",
     "apps.intake",
+    "apps.module_host",
     "apps.tasks",
 ]
 
