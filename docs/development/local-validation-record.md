@@ -588,7 +588,7 @@ manual run of `module_status`, `module_sync`, `module_enable` or `module_disable
 
 - It does not prove that no other concurrency race exists. The S2 gate race window (a kind gated off between the gate's read and the claim can be claimed by that one claim) remains, and the state is read once per iteration.
 - Request Intake is **not** registered as a module (`BUILTIN_MODULES` is empty); nothing is gated in practice. MOD-2 must remove its kind from the legacy set when it registers it.
-- There is **no API-side write blocking** for a disabled module, no `while_disabled` handling, no capability facade or `ModuleContext`, no module installation and no Update Manager; a version mismatch has no remedy yet.
+- There is **no API-side write blocking** for a disabled module, no `while_disabled` handling, no capability facade or `ModuleContext` (at S4; S6 added one, see its section below), no module installation and no Update Manager; a version mismatch has no remedy yet.
 - Integrity is ORM and service level only (no trigger, no revoked privilege); raw SQL that deletes the marker and every state row reopens the legacy window. The audit table is not tamper-protected.
 - If `module_sync` runs before MOD-2, the marker exists and the MOD-2 release's modules stay held until `module_sync` runs with that release (the upgrade routine).
 - One machine, one operating system, one PostgreSQL. **This is not a production-readiness claim.**
@@ -628,6 +628,42 @@ attribution tests plus the 567 tests of the S4 selection; the intended selection
 **What it does not validate, and what does not exist.**
 
 - Request Intake is **not** registered as a module (`BUILTIN_MODULES` is empty), nothing reads the attribution, and no module is activated.
-- There is no `ModuleContext` or capability facade, no module installation and no Update Manager, and no real AI integration.
+- There is no `ModuleContext` or capability facade (at S5; S6 added one, see the next section), no module installation and no Update Manager, and no real AI integration.
 - The attribution is checked for shape and reserved names, not against a registry; protection is ORM and service level only (no trigger, no revoked privilege), so raw SQL can change a value.
 - It does not prove that no other race or edge case exists. One machine, one operating system, one PostgreSQL. **This is not a production-readiness claim.**
+
+## MOD-1b / S6 ModuleContext capability facade: owner-supplied local PostgreSQL results (2026-11-18)
+
+> **Scope.** S6 adds the `ModuleContext` (`apps/module_host/context.py`, the pure `context_rules.py` and `config/module_context.py`): an immutable, registry-backed context with four capability facades (`tasks`, `cases`, `audit`
+> and `permissions`) that delegate to the existing Core services (branch `feat/module-capability-facade`: implementation `ee4198d`, test-only fix `5b61298`; see [module-contract.md](../architecture/module-contract.md), section 3.13, and
+> [runbook.md](runbook.md), section 5.3). S6 adds no migration, model, command or route. The project owner ran the PostgreSQL tests **locally on the Windows computer**. **These are owner-supplied results.** The development VM has no
+> PostgreSQL, never connected to one, and did not run, repeat or observe any of it. No output or log is stored in this repository.
+
+**Reported by the owner:**
+
+| Item | Reported result |
+| --- | --- |
+| Focused S6 PostgreSQL tests (`tests/test_module_context_postgres.py`) | **72 passed** |
+| Full selected PostgreSQL regression | **676 tests passed, 191.518 seconds, exit code 0** |
+| Test database | The dedicated test database was destroyed successfully |
+| DB-free regression in the development VM | 2129 tests passed |
+
+**What was not supplied:** the command lines and module list of the runs, the output, and any manual smoke test of Request Intake (**not reported; not claimed**; S6 changes nothing a smoke test would exercise, because nothing in the
+application calls the context). Whether the runs used exactly the commit `5b61298` is the owner's stated expectation, not an output stored here. For orientation only (the VM's arithmetic, not stated by the owner): the intended selection is the
+one in [runbook.md](runbook.md), section 5.3; that the 676 tests are those modules is inferred from the all-passed result, not itemized.
+
+**What this supports (this environment and these scenarios only):**
+
+- **The ModuleContext.** `ModuleContext` was implemented with four capability facades; the 72 PostgreSQL tests passed against real rows: task enqueue through the unchanged queue, runs with attribution and the state machine, audit
+  inside and rolled back with the transaction, permission checks with real users and roles compared with Request Intake's own authorization, the module states (disabled, version mismatch, missing state, before the first sync), the
+  shared row lock and the concurrency scenarios (a disable that waits for an in-flight call, and a call that waits for an uncommitted disable).
+- **Existing Request Intake behaviour in the tested scenarios.** The selected regression passed with S6 in place, so submission, extraction, review, approval, rejection, task claiming, recovery, workflow attribution and the audit history
+  behaved as before in those scenarios (S6 changes none of their code).
+
+**What it does not validate, and what does not exist.**
+
+- Request Intake is **not** registered as a module (`BUILTIN_MODULES` is empty), does not use a context, and nothing in the application calls the context; no module is activated.
+- There is no real AI integration. `revision.approval` has no facade.
+- **`ModuleContext` is not a security sandbox**: it is a naming and authority boundary inside one process; code admitted to the process can bypass it.
+- There is no module installation and no Update Manager, no module endpoint and no API-side write blocking for a disabled module.
+- It does not prove that no other race or edge case exists (the S2 gate race window is unchanged). One machine, one operating system, one PostgreSQL. **This is not a production-readiness claim.**

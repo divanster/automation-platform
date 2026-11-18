@@ -63,7 +63,7 @@
 > `request_intake` / `request_intake` / 1 by an evidence-based, idempotent backfill that **stops, with a count, at any run it cannot attribute** (section 3.12). It changes no state transition, task, lease, approval,
 > audit event or canonical byte, exposes nothing through the REST API, and activates no module. Request Intake is still not a module. No production-readiness claim.
 >
-> **MOD-1b / S6 (the ModuleContext capability facade)** is implemented on `feat/module-capability-facade` (committed locally, not yet pushed; **PostgreSQL tests NOT RUN**). `apps/module_host/context.py` gives a registered module one controlled door to Core
+> **MOD-1b / S6 (the ModuleContext capability facade)** is implemented on `feat/module-capability-facade` (implementation `ee4198d`, test fix `5b61298`; pushed, PR not yet opened; **owner-supplied local PostgreSQL validation passed**: 72 focused tests and a 676-test selected regression, tested scenarios only, see section 3.13). `apps/module_host/context.py` gives a registered module one controlled door to Core
 > (`ModuleContext.open(registry, module_id)`): immutable identity, and `tasks.enqueue`, `cases.create_case` / `create_run` / `transition_run`, `audit.record` and `permissions.require` / `authorize`, each only if the manifest declares the capability,
 > each delegating to the existing Core service unchanged after checking the module's own declarations, ownership and (for the state-changing calls) its `ModuleState` under a shared row lock (section 3.13). No queue, worker, state-machine,
 > audit or authorization code changed, nothing uses it outside tests, Request Intake is still legacy, and it is a naming and authority boundary, not a sandbox. No production-readiness claim.
@@ -337,7 +337,7 @@ not a production-readiness claim. Record: [local-validation-record.md](../develo
 nothing derives `AccessRule` objects from manifests: the permission scopes of section 3.5 are still declarations, and the table of
 Request Intake is still written in code. A later slice will build rules from a registered module's declarations (scope `own` to
 `own_permissions`, `any` and `global` to `any_permissions`) and put the generic read-actor-then-decide-then-log sequence behind the
-`permissions.check` facade (built in S6, section 3.13: the rule is built per call from the declared scope; the golden comparison with Request Intake's table is a PostgreSQL test over every user and owner, not run in the VM); a disabled
+`permissions.check` facade (built in S6, section 3.13: the rule is built per call from the declared scope; the golden comparison with Request Intake's table is a PostgreSQL test over every user and owner, which passed in the owner's local run, not in the VM); a disabled
 module's actions are blocked by a separate gate, never by changing who holds a permission. `apps/modules` does not import Core's
 rule (a test pins it), and `setup_roles`, `/api/auth/me/` and `profile.py` are untouched.
 
@@ -929,8 +929,7 @@ cleanup returns the test database to the latest migrations).
 
 ### 3.13 The ModuleContext: the controlled capability facade (MOD-1b / S6)
 
-**Status.** Implemented on `feat/module-capability-facade` (committed locally, not yet pushed, no PR). DB-free tests pass in the development VM (131 new ones; 2129 in all). **The PostgreSQL tests (72) have NOT been run**
-(the VM has no PostgreSQL and never connects to one); the owner's commands are in the [runbook](../development/runbook.md), section 5.3. **No module is registered, Request Intake is still not a module (MOD-2) and does not
+**Status.** Implemented on `feat/module-capability-facade` (implementation `ee4198d`, test-only fix `5b61298`; pushed, PR not yet opened). DB-free tests pass in the development VM (131 new ones; 2129 in all). **PostgreSQL validation was run locally by the owner, not by the VM** (the VM has no PostgreSQL and never connects to one): the 72 focused PostgreSQL tests passed, and the full selected PostgreSQL regression passed, 676 tests in 191.518 s, exit code 0, test database destroyed. These are owner-supplied results; no output is stored in this repository (see the [local validation record](../development/local-validation-record.md)). The owner's commands are in the [runbook](../development/runbook.md), section 5.3. **No module is registered, Request Intake is still not a module (MOD-2) and does not
 use a context, nothing calls the composition root, and no real AI integration exists.** No migration, no model and no existing service changed.
 
 **Goal.** One controlled interface through which a future module reaches Core: `ModuleContext`, built for one registered module from the approved static registry, exposing up to four facades, each only if the manifest
@@ -1039,7 +1038,7 @@ race window for the worker's claim is unchanged.
 
 * No module is registered and Request Intake is not a module, so nothing uses the context outside tests; the four facades are validated by tests with a synthetic module only.
 * `revision.approval` has no facade (a module cannot create revisions or approvals through Core yet), there is no configuration or secret access, no document access and no AI access.
-* The PostgreSQL behaviour (the shared lock, the transaction joining, real users and roles, concurrency) is **not run**: until the owner runs the 72 tests nothing about it is proven.
+* The PostgreSQL behaviour (the shared lock, the transaction joining, real users and roles, concurrency) passed the 72 focused tests and the 676-test selected regression in the owner's local run (owner-supplied; the VM did not run or observe them). That supports the tested scenarios on one machine only: it does not prove that no other race or edge case exists.
 * `permissions.authorize` is a Core decision only; Request Intake's own `apps/intake/authorization.py` is unchanged and still its own glue (they agree, by a PostgreSQL test over every user and owner).
 * No public API, no UI and no administrator command use the context; no sandbox, installer or Update Manager.
 
@@ -1051,9 +1050,11 @@ as the composition root, importing `config.modules` (the pinned importer lists w
 **Tests.** DB-free: `tests/test_module_context_rules.py` (33, pure: they run with `python -m unittest` and no Django), `tests/test_module_context.py` (98: construction and identity, immutability, capability gating, state enforcement and
 its order, delegation arguments, explicit actors, permission scopes against Core's rule, the Request Intake compatibility and the architecture boundaries), with the helper `tests/module_context_support.py`. Each of 19 deliberate
 mutations of the implementation was caught by the focused set. Narrowly updated older pins: `test_module_boundaries.py` (the importers of `apps.modules` and of `config.modules`), `test_module_host_boundaries.py` (what `context.py` may import,
-the one extra statement of raw SQL, the importers of the host) and `test_workflow_attribution.py` (the creators of runs). PostgreSQL, **not run**: `tests/test_module_context_postgres.py` (72 tests: real task enqueue and the unchanged queue,
+the one extra statement of raw SQL, the importers of the host) and `test_workflow_attribution.py` (the creators of runs). PostgreSQL, **passed in the owner's local run** (owner-supplied; not run by the VM): `tests/test_module_context_postgres.py` (72 tests: real task enqueue and the unchanged queue,
 real runs with attribution and the state machine, audit inside and rolled back with the transaction and the ORM immutability of events, permission checks with real users and roles against Request Intake's own authorization,
 disable, enable, version mismatch, missing state and the pre-sync transition against real rows, concurrency including a disable that waits for an in-flight call, and the legacy Request Intake path). Commands: runbook section 5.3.
+
+**Owner-supplied PostgreSQL validation (S6).** The owner ran the S6 tests on the local Windows computer: the 72 focused PostgreSQL tests passed, and the full selected PostgreSQL regression passed (676 tests, 191.518 s, exit code 0; the test database was destroyed successfully). The VM ran only the 2129 DB-free tests; it did not run, repeat or observe any PostgreSQL test, and no output is stored. The branch state under test was `5b61298` (implementation `ee4198d` plus the test-only fix of the second context's setup in the concurrency test); the exact command lines and module list were not supplied. This supports, for the tested scenarios on one machine only, that the four facades behave as designed against real rows, locks, users and roles, and that existing Request Intake behaviour was preserved in the tested scenarios (the intended selection, runbook section 5.3, includes the unchanged intake, review, API, queue, worker, attribution and audit suites; that the 676 were those is inferred from the all-passed result, not itemized). It does not make Request Intake a module, add real AI integration, make `ModuleContext` a security sandbox, add module installation or an Update Manager, or establish production readiness. See the [local validation record](../development/local-validation-record.md).
 
 ## 4. Versioning
 
@@ -1294,7 +1295,7 @@ An update manager does not exist and is **not** part of MOD-1a. When it is desig
 - S4 (section 3.11) adds `apps/module_host`, `ModuleState`, the sync and enable/disable administrator commands and the persisted namespace history
   (the continuity check runs in every sync). Its PostgreSQL tests and migration passed in the owner's local run (section 3.11, tested scenarios only); the limitations
   of S4 are listed in section 3.11, "Remaining limitations".
-- Since S6 a capability facade exists for `task.enqueue`, `case.run`, `audit.record` and `permissions.check` (the `ModuleContext`, section 3.13); `revision.approval` has none. Nothing outside tests calls it (no module is registered; Request Intake is legacy), its PostgreSQL tests are not run, and it is a naming and authority boundary, not a sandbox.
+- Since S6 a capability facade exists for `task.enqueue`, `case.run`, `audit.record` and `permissions.check` (the `ModuleContext`, section 3.13); `revision.approval` has none. Nothing outside tests calls it (no module is registered; Request Intake is legacy), its 72 PostgreSQL tests passed in the owner's local run (tested scenarios only), and it is a naming and authority boundary, not a sandbox.
 - S5 (section 3.12) stamps runs with their module, workflow and definition version, but nothing reads the stamp: no query, preflight or continuity check uses it yet, the stored pair is checked for shape and reserved
   names and not against a registry, and protection is ORM-level. Its PostgreSQL tests and migrations passed in the owner's local run (section 3.12, tested scenarios only).
 - Request Intake has no manifest in the application; the synthetic one in `tests/module_support.py` exists only for the golden test.
