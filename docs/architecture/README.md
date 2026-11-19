@@ -12,7 +12,7 @@
 > owner's local run, tested scenarios only; [slice document](../development/review-services-slice.md)) and a REST API slice (session
 > login with CSRF protection and throttling, request endpoints over those services; DB-free tests pass, 96 of the first 98 PostgreSQL
 > tests passed in the owner's local run and 2 failed on test defects now corrected, rerun pending; [slice document](../development/rest-api-slice.md)). Export, a React UI, password reset,
-> real AI, the AI gateway, frontend, and installer do not exist. Everything below is a design unless an Accepted ADR says otherwise.
+> real AI and the installer do not exist; the AI gateway exists only as a standalone foundation that nothing calls ([ai-gateway.md](ai-gateway.md)). Everything below is a design unless an Accepted ADR says otherwise.
 
 This directory contains the initial architecture specification and
 implementation plan for the Automation Platform.
@@ -29,6 +29,7 @@ implementation plan for the Automation Platform.
 4. [background-execution.md](background-execution.md): PostgreSQL-backed queue
    and persistent worker design.
 5. [ai-policy.md](ai-policy.md): AI gateway, data-policy modes, and safeguards.
+   [ai-gateway.md](ai-gateway.md): the AI-1a gateway foundation as implemented.
 6. [deployment.md](deployment.md): development, standalone, and future hub
    deployment; operations.
 7. [implementation-plan.md](implementation-plan.md): phases 0 to 9, each with

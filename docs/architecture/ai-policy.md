@@ -1,11 +1,20 @@
 # AI Gateway and Data Policy
 
-> **Status: Not implemented.** No gateway, adapter, or policy enforcement
-> exists. Confirmed directions: a provider-neutral gateway, a deterministic
-> test adapter before any real provider, no silent fallback to cloud, and no
-> automatic email sending or ERP writes in the first slice. The exact policy
-> modes, capability checks, and evaluation procedure below are **proposed**
-> and remain unproven until implemented and tested.
+> **Status: foundation implemented (AI-1a); no real AI.** The provider-neutral contracts, the three policy modes with enforcement
+> before any provider call, a static provider registry, strict structured-output validation, stable error codes and a deterministic
+> **test** adapter exist as a standalone, standard-library package (`backend/apps/ai_gateway`; see [ai-gateway.md](ai-gateway.md)). The
+> unit tests are DB-free and pass in the development VM. **Nothing calls the gateway**: no workflow, module or API uses it, no real
+> provider, credential, per-company policy setting or administrator approval exists, and Request Intake still extracts with its own
+> deterministic fixture parser. Confirmed directions: a provider-neutral gateway, a deterministic test adapter before any real provider,
+> no silent fallback to cloud, and no automatic email sending or ERP writes in the first slice. Embeddings (section 5), credential
+> handling (section 9), evaluation (section 11) and the rest of this document that ai-gateway.md does not describe remain **proposed**
+> and unproven.
+>
+> **Naming used by the code.** The third mode is `approved_cloud` with the locality `cloud` (this document first proposed
+> `approved_external` and `external`; ADR 0004 still uses the old names). The error codes are `provider_unavailable`,
+> `policy_violation`, `timeout`, `invalid_structured_output`, `rate_limit`, `authentication_failure`, `unsupported_model`,
+> `configuration_error`, `capability_missing`, `invalid_request` and `provider_error` (this document's earlier `policy_denied` and
+> `invalid_output` are `policy_violation` and `invalid_structured_output`).
 
 ## 1. Goals
 
@@ -27,10 +36,11 @@ Conceptual contract (illustrative, not final):
 - **Input:** a task description (for example "extract structured fields"), the
   input text, the expected output schema, a `ModelProfile` reference, and a
   policy context (the company data-policy mode and the workflow identity).
+  (Implemented: `GenerationRequest` and `PolicyContext`; the workflow identity is not part of the policy context yet.)
 - **Output:** either structured data that conforms to the requested schema, or a
-  typed failure (`policy_denied`, `capability_missing`, `provider_unavailable`,
-  `invalid_output`, `timeout`), together with provenance (adapter, reported
-  model identifier, parameters, duration).
+  typed failure (`policy_violation`, `capability_missing`, `provider_unavailable`,
+  `invalid_structured_output`, `timeout`, and the other codes in [ai-gateway.md](ai-gateway.md), section 8), together with
+  provenance (provider, reported model identifier, duration, token usage; parameters are in the profile).
 - **Adapters** implement the contract for one provider kind. The gateway owns
   policy checks, schema validation, timeouts, and provenance recording so that
   adapters stay thin.
@@ -49,22 +59,24 @@ The gateway does not depend on business workflows
 3. **Company-endpoint adapter (later, Phase 6).** A model server operated by the
    company.
 4. **External adapter (later, Phase 6).** A third-party hosted service, only
-   under the approved-external mode.
+   under the approved-cloud mode.
 
 The specific local runtime and external provider are open questions
 ([open-questions.md](open-questions.md)). None is selected.
 
 ## 4. Data-policy modes
 
-Each company has exactly one policy mode, stored in `CompanyProfile`. Each
-`ModelProfile` declares its **locality**. The gateway permits a call only when
-the profile's locality is allowed by the mode.
+Each company has exactly one policy mode, stored in `CompanyProfile` (**not
+implemented**: AI-1a takes the mode as a `PolicyContext` argument of every call). Each
+provider declares its **locality**, and a `ModelProfile` names its provider and the mode it
+was approved for. The gateway permits a call only when the provider's locality is allowed
+by both the profile's mode and the mode in force.
 
 | Mode | Allowed locality | Meaning |
 | --- | --- | --- |
 | `local_only` | `local` | Data is processed only on the installation's own machine. |
 | `company_endpoint` | `local`, `company_endpoint` | Data may also go to model servers the company itself operates. |
-| `approved_external` | `local`, `company_endpoint`, `external` | Data may go to a third-party service, but only a provider an administrator has explicitly approved and recorded. |
+| `approved_cloud` | `local`, `company_endpoint`, `cloud` | Data may go to a third-party service, but only a provider an administrator has explicitly approved and recorded. |
 
 Rules:
 
@@ -82,7 +94,7 @@ Rules:
   against the mode recorded in a run's execution snapshot. The snapshot records
   what was used for explainability; it does not grant permission. If an
   administrator tightens the mode (for example to `local_only`) while a task is
-  queued or retrying, the task fails with `policy_denied` (non-retryable)
+  queued or retrying, the task fails with `policy_violation` (non-retryable)
   instead of calling a now-disallowed provider.
 - A mode change affects future calls. Already-recorded results keep their
   provenance.
@@ -100,7 +112,7 @@ retrieval (and pgvector) is optional and not required by the first workflow
 - Every request that expects structure carries a schema owned by the workflow
   package.
 - The gateway validates the model output against the schema before returning it.
-- Output that fails validation is an attempt failure (`invalid_output`). It is
+- Output that fails validation is an attempt failure (`invalid_structured_output`). It is
   **never** silently repaired, truncated into shape, or filled with defaults.
 - Passing schema validation does not make the content true. Deterministic
   business-rule validation and human review still apply
@@ -148,6 +160,9 @@ that they do.
   guess.
 - Input that exceeds a profile's limits fails explicitly; it is not silently
   truncated.
+- *As implemented in AI-1a:* the **provider** declares its capabilities (models, structured-output modes, token limits, generation
+  parameters) and the gateway checks each profile against them when it is built (`unsupported_model`, `capability_missing`). Images,
+  languages and demonstrating a capability at run time are not implemented.
 
 ## 11. Model changes require evaluation
 
