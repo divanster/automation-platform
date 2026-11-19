@@ -390,7 +390,7 @@ class RunWorkerStartUpTests(SimpleTestCase):
         self.assertNotIn("CHARGE-SECRET", str(caught.exception))
 
     def test_a_lease_that_cannot_cover_the_ai_deadline_stops_the_start(self):
-        with mock.patch.dict(os.environ, ai_environ(), clear=True), mock.patch.object(worker, "process_one") as process:
+        with mock.patch.dict(os.environ, ai_environ(), clear=True), mock.patch.object(worker, "process_one") as process, mock.patch.object(task_registry, "build_extractor_source", wraps=lambda *a, **k: build_extractor_source(*a, **{**k, "transport": FakeTransport()})):
             with self.assertRaises(CommandError) as caught:
                 self.run_command("--once", "--lease-seconds", "30")
         process.assert_not_called()
