@@ -12,11 +12,13 @@ Django, no other ``apps.*`` package and no business workflow. It can be imported
 * ``gateway``: ``AIGateway``, which checks policy, calls a provider and validates the structured output.
 * ``structured``: the closed JSON Schema subset and its validator. ``jsonvalue``: bounded immutable JSON.
 * ``errors``: the stable error codes.
-* ``adapters``: provider adapters. AI-1a has only the deterministic TEST adapter (not re-exported here: it is test-only).
+* ``transport``: the HTTP seam (AI-1b) that HTTP adapters use instead of opening sockets.
+* ``adapters``: provider adapters: the deterministic TEST adapter (not re-exported here: it is test-only) and, since AI-1b, the KPMG Workbench
+  adapter (``adapters/workbench.py``).
 
-NO REAL PROVIDER EXISTS. Nothing calls this package yet: Request Intake still uses its own deterministic fixture parser. The only place
-that names providers and profiles is the composition root ``config/ai_gateway.py``, whose built-in tuples are EMPTY. Design and limits:
-docs/architecture/ai-gateway.md.
+NO REAL PROVIDER HAS EVER BEEN RUN. Nothing calls this package yet: Request Intake still uses its own deterministic fixture parser. The
+composition root ``config/ai_gateway.py`` has EMPTY built-in tuples; the one real adapter (AI-1b) has its own opt-in composition and a
+separate transport outside this package. Design and limits: docs/architecture/ai-gateway.md.
 """
 
 from .contracts import (

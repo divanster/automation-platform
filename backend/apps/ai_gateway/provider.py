@@ -2,8 +2,9 @@
 
 An adapter is a thin translation to one provider kind. It receives a ``ProviderCall`` (no policy, no profile, no company, no workflow) and
 returns a ``ProviderResult`` with the model's RAW text, or raises ``AIGatewayError`` with a code from ``errors.ADAPTER_CODES``. It does not
-validate the structure, apply policy, retry, fall back to another provider or log content: the gateway does the first two, nothing does the
-others (docs/architecture/ai-policy.md, section 2).
+validate the structure, apply policy, fall back to another provider or model, or log content: the gateway does the first two, nothing does the
+others (docs/architecture/ai-policy.md, section 2). An adapter MAY retry the SAME provider and model for a transient failure, but only
+boundedly and inside the call's ``timeout_seconds`` (AI-1b: ``adapters/workbench.py``).
 
 An adapter MUST honor ``timeout_seconds`` with the provider's own timeout (for example a socket timeout); the gateway cannot interrupt a
 call that is running, it can only refuse a late answer (docs/architecture/ai-gateway.md, "Security limitations").

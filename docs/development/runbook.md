@@ -172,6 +172,7 @@ Variables are documented, with placeholders, in `.env.example`. These are the va
 | `AP_ALLOWED_HOSTS` | development optional, production **required** | Comma-separated. Development defaults to localhost only; production rejects wildcards |
 | `AP_CSRF_TRUSTED_ORIGINS` | production optional | Comma-separated explicit origins |
 | `AP_RUN_DB_TESTS` | tests | Only `1` enables PostgreSQL-backed tests |
+| `AP_AI_WORKBENCH_*` (ten names) | the opt-in KPMG Workbench gateway only (`config/ai_workbench.py`, AI-1b) | **Not read by the settings** and not needed by anything that runs today; read when `build_workbench_gateway()` is called. Only the key (`AP_AI_WORKBENCH_API_KEY`, a secret) is required. See [section 5.5](#55-kpmg-workbench-provider-ai-1b-configuration-and-local-validation) |
 
 **On the VM, no real database variables are configured and no `.env` exists.** On the local computer, create the
 file once and every `manage.py` command picks it up, in any terminal:
@@ -598,6 +599,49 @@ try {
 
 Report the exact `Ran N tests` line and any failure. A failure is expected to be a defect in a test or in the code, not a reason to skip a test: report it rather than deleting or loosening it. The groups to look at first if something fails: the worker tests of `test_request_intake_module_postgres` (held, resumed, a running attempt, recovery and retry; they rely on the gate reading
 committed state on every iteration), `test_tasks_recovery_postgres` (its child processes now run a production gate that reads module state: the test database has no initialization marker, so the compatibility window keeps Request Intake claimable) and the edited classes in `test_module_host_postgres` and `test_module_context_postgres`.
+
+### 5.5 KPMG Workbench provider (AI-1b): configuration and local validation
+
+**Status: written and aligned with the client-side HTTP contract reported from the FI integration audit (GP-0299-FI-APP); checked with DB-free tests and a mocked transport in the VM;
+never run against the Workbench.** Nothing in the running application uses it, so no step here is needed to run the application, the worker or the tests. Design, error mapping and what is
+confirmed, added or still unverified: [ai-gateway.md](../architecture/ai-gateway.md) section 14.
+
+**Variables** (names in `.env.example`; set them in the git-ignored `.env` for development, or in the process environment; **never commit a value, paste a key into a chat or put it in a
+command line**). **Only the key is required.**
+
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `AP_AI_WORKBENCH_API_KEY` | yes | The subscription key, sent raw in `Ocp-Apim-Subscription-Key`. The only secret. |
+| `AP_AI_WORKBENCH_AUTH_HEADER` | no | Default `Ocp-Apim-Subscription-Key`. Override only after live evidence. |
+| `AP_AI_WORKBENCH_CHAT_PATH` | no | Default `/deployments/{deployment}/chat/completions?api-version={api_version}`. Override only after live evidence. |
+| `AP_AI_WORKBENCH_ENDPOINT` | no | Default `https://api.workbench.kpmg/genai/azure/openai`. **The host must be `api.workbench.kpmg`**; any other host is refused so the key cannot be sent elsewhere |
+| `AP_AI_WORKBENCH_API_VERSION` | no | Default `2024-10-21` |
+| `AP_AI_WORKBENCH_CHARGE_CODE` | no | Default `00000000` (placeholder; use the real code for a live probe) |
+| `AP_AI_WORKBENCH_TIMEOUT_SECONDS` | no | Default `90`; the deadline of a whole call, retries included |
+| `AP_AI_WORKBENCH_MAX_RETRIES` | no | Default `2` |
+| `AP_AI_WORKBENCH_PROXY_URL` | no | `http://[user:password@]host[:port]`. The only proxy used: `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` are ignored |
+| `AP_AI_WORKBENCH_CA_BUNDLE` | no | An extra PEM CA file for a company TLS-inspection proxy. TLS verification itself cannot be switched off |
+
+Without the key `build_workbench_gateway()` raises `configuration_error` naming the variable; nothing is sent and nothing falls back to another provider. An empty value counts as
+unset (so an empty path or header means the default). A variable already set in the terminal wins over `.env` (section 3). The models are chosen by the profile a request names
+(`workbench-gpt5`, preferred; `workbench-gpt41`, manual); there is no default profile and no fallback. The request sends no model, temperature, sampling or token-limit parameter.
+
+**What the VM checks (DB-free; from `backend\`; no network, no key, nothing installed):**
+
+```powershell
+$Py = "..\.venv\Scripts\python.exe"
+& $Py manage.py test tests.test_ai_workbench_adapter tests.test_ai_workbench_transport tests.test_ai_workbench_composition tests.test_ai_gateway_transport_contract tests.test_ai_gateway_boundaries   # expect OK (147 new plus 21)
+& $Py manage.py test                                                                                    # expect OK (2485 tests at the AI-1b checkpoint; re-check the number)
+& $Py -m unittest tests.test_ai_gateway_contracts tests.test_ai_gateway_policy tests.test_ai_gateway_registry tests.test_ai_gateway_structured tests.test_ai_gateway_core tests.test_ai_gateway_deterministic tests.test_ai_gateway_secrets tests.test_ai_gateway_transport_contract tests.test_ai_workbench_adapter tests.test_ai_workbench_transport   # pure: no Django settings
+& $Py manage.py check
+& $Py manage.py makemigrations --check --dry-run                                                        # in the VM this needs the history check patched (no database); AI-1b adds no model or migration
+& $Py -m compileall -q apps config tests workflows
+git diff --check
+```
+
+**What nobody has checked:** any request to the real service, a real proxy, real certificates, whether GPT-5 and GPT-4.1 return valid JSON for the minimal request, the status codes and the
+answer fields beyond `choices[0].message.content`. Do not point a real key at the endpoint until the owner has accepted the prerequisites in
+[ai-gateway.md](../architecture/ai-gateway.md) section 14.9, and use only synthetic, non-customer text for the first probe. No PostgreSQL is involved, so there is nothing for the owner to run against a database.
 
 ## 6. Local Windows computer: setup and validation (reference procedure; owner-operated)
 
@@ -1058,7 +1102,9 @@ be updated when that is done and confirmed.
 | Request Intake as the first built-in module (MOD-2: `apps/intake/module.py`, `config/modules.py`, `config/task_registry.py`; [section 5.4](#54-request-intake-as-a-registered-module-mod-2-activation-sequence-and-postgresql-tests), [module-contract.md](../architecture/module-contract.md) section 3.14) | **Implemented on `feat/request-intake-module`** (`871bf2d`, test corrections `8915925` and `05cf1a7`; pushed, PR not opened); DB-free tests pass on the VM (2172 in all); the owner ran the PostgreSQL tests locally, 701 passed, and `module_sync` on the development database (owner-supplied, tested scenarios only); no migration; `module_sync` must be run before the worker claims Request Intake tasks on an installation that has already synced; the module is declared and gated, not sandboxed, and does not use `ModuleContext` |
 | Business workflow beyond that: documents, a login mechanism, exports | Not implemented |
 | Task queue and background worker ([details](persistent-worker-slice.md)) | **Implemented** (first slice); the PostgreSQL tests passed in the owner's local run, tested scenarios only |
-| AI gateway and any AI adapter | Not implemented |
+| AI gateway foundation (AI-1a: contracts, policy, registry, deterministic test provider; [ai-gateway.md](../architecture/ai-gateway.md)) | **Implemented and merged** (PR #19); DB-free tests only; nothing calls it |
+| KPMG Workbench provider adapter (AI-1b; [section 5.5](#55-kpmg-workbench-provider-ai-1b-configuration-and-local-validation), [ai-gateway.md](../architecture/ai-gateway.md) section 14) | **Written on `feat/ai-workbench-adapter`**, aligned with the client-side contract from the FI audit; 147 new DB-free tests with a mocked transport, 2485 in all, pass on the VM; **never run against the Workbench** (client-side evidence only); not in the production composition; nothing calls it |
+| Any AI feature a user can reach | Not implemented |
 | Frontend (`frontend/`; React, TypeScript, Vite; [details](frontend-slice.md)) | **Written.** UI-1 (login, request list, new request, request detail with polling) was reported by the owner as run in a real browser (no output recorded). UI-2 (draft editing, approve with warning acknowledgement, reject, per-request audit history, stale-revision handling; [section 13](frontend-slice.md#13-ui-2-review-and-approval)): 264 frontend tests, typecheck and build pass on the VM against a stubbed `fetch` and the 1246 backend DB-free tests pass; one UI-2 workflow (submit, extract, edit, approve by a second user, audit) was reported by the owner as run in a real browser against the local API, PostgreSQL and worker ([record](local-validation-record.md); screenshots described, not stored), so **UI-2 is development-validated for that workflow only**; the stale-revision conflict and rejection were not shown. Not served by Django; run with `npm run dev` |
 | Local `.env` loading (`manage.py` only, development settings only, existing variables win; [section 3](#3-environment-configuration)) | **Implemented**; 42 DB-free tests; checked end to end on the VM with a temporary fake `.env` (deleted); **not yet used with the real local database** |
 | Production application server, Windows service packaging, installer | Not implemented |
