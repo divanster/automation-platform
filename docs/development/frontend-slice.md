@@ -138,9 +138,9 @@ error, empty and notice states.
 - **Submit.** One `client_request_id` per distinct text: resubmitting the same text after a lost response returns the original
   request; editing the text starts a new id. The text is sent without trimming. On success the app opens the created
   request.
-- **Detail and polling** (`lib/useRequestDetail.ts`). Polls every 2 s for the first 30 polls, then every 10 s, only while
-  the state is `queued`, `extracting` or `exporting`. It stops in every other state, when a refresh fails (the last good data
-  stays visible with the error and a retry), when the user leaves the page, and it skips fetches while the tab is hidden.
+- **Detail and polling** (`lib/useRequestDetail.ts`). UI-1 polled every 2 s while processing and stopped in every other state.
+  **FE-5 replaced this** with the generic live-refresh hook described in section 15 (3 s while processing, slower otherwise,
+  quiet errors with back-off, no polling while the tab is hidden or the user is signed out).
 - **Shown.** State, processing task state and attempts, the safe failure code, extraction outcome, current revision number,
   full SHA-256 content hash, the draft, findings split into blocking and warnings with their stable `code` and `field_path`,
   approval and rejection counts, and the server's `allowed_actions` and `action_blockers` as read-only information.
@@ -205,8 +205,8 @@ jsdom, not a browser, so layout and styling are unverified.
 - **Same-origin only; no production serving.** `npm run dev` is the only supported way to run it. Django does not serve
   `frontend/dist`, and `BrowserRouter` deep links need a server-side fallback to `index.html` that does not exist yet.
   `vite preview` is not a production server. TLS, HSTS and CSP are open deployment items.
-- **Polling, not push.** Intervals are provisional. A request with no running worker is polled indefinitely (every 10 s
-  after the first minute).
+- **Polling, not push.** Intervals are provisional (see section 15 for the FE-5 values and limits). A request with no running
+  worker keeps being polled (every 10 s after the first minute).
 - **Per-process login throttling** and the absence of password reset, MFA and lockout are API limitations that apply to the UI.
 - **Installation-wide approver and auditor visibility** (an Approver sees every request) is the backend's initial policy.
 - **Self-approval is forbidden even for a lone user** (backend rule). A single-account installation cannot complete the
@@ -581,3 +581,92 @@ sidebar keeps the brand mark. The content container is wider (92rem) with fluid 
 hierarchy, and the requests table is denser (zebra rows, hover and focus-within highlight, monospace references, right-aligned tabular
 revision numbers, no-wrap dates). Filters, pagination bar, empty and loading states are restyled. These changes are CSS that Vitest does
 not process, so they have not been seen in a browser by the development VM; the theme is still not persisted.
+
+## 15. FE-5: live updates and background synchronization
+
+Frontend only. No backend, API, payload, migration or dependency change (TanStack Query is not installed and was not added; a small
+custom hook was enough). No WebSocket, SSE or new endpoint: the app polls the existing `GET /api/requests/` and
+`GET /api/requests/{run_id}/`.
+
+### 15.1 Polling architecture
+
+`lib/useLiveResource.ts` is the one polling mechanism. `useRequestDetail` and the requests list both use it; `lib/liveIntervals.ts`
+holds the intervals.
+
+| Screen | Interval |
+|---|---|
+| Requests list | 5 s |
+| Detail, processing (`queued`, `extracting`, `exporting`) | 3 s for the first 60 refreshes, then 10 s |
+| Detail, `needs_review` | 10 s |
+| Detail, `approved`, `exported`, `failed`, `cancelled` | 30 s |
+
+The intervals are provisional, not measured. Rules the hook enforces:
+
+- **One request at a time per resource.** The next timer starts only after the previous request has finished, so refreshes never
+  overlap; a visibility event while a request is in flight does not start a second one.
+- **Cancellation.** Each effect run owns an `AbortController`. Unmount, a change of route or query parameters (page, state filter),
+  logout and a manual `reload()` abort the request in flight; a response that arrives after its effect was cleaned up is ignored,
+  even where the abort could not stop it.
+- **Authentication.** Nothing is fetched or scheduled while the user is not authenticated. Logging out cancels the timer and the
+  request. A `not_authenticated` answer still goes through the existing unauthenticated handler, which signs the user out.
+- **Visibility.** While `document.visibilityState` is `hidden` no timer is set (a timer pending when the tab is hidden is cleared).
+  When the tab becomes visible the data refreshes at once and polling resumes. The first load happens even in a hidden tab.
+- **No duplicate polling.** The effect depends only on the resource key (the stringified dependencies), a reload counter and the
+  authenticated flag, and its cleanup removes the timer and the `visibilitychange` listener.
+- **Refresh in place.** A refresh, including `reload()`, keeps the previous data and sets `refreshing`; only a change of the key
+  returns to the `loading` state (skeleton). The list therefore keeps its rows, filters, page, URL parameters and scroll position.
+- **Errors.** A failed refresh keeps the last good data and sets `refreshError`. Network errors, 429, 5xx and unexpected responses
+  are retried with back-off (the interval doubled per failure, at most 30 s); other 4xx stop polling until the user presses
+  "Try again" or refreshes. A failure before any data has been loaded is the normal error screen.
+
+### 15.2 UI
+
+`components/LiveStatus.tsx` shows, next to the Refresh button on the list and at the top of the detail page: "Refreshing…" while a
+background request runs, "Updated HH:MM:SS" after each success, and "Could not refresh: …" with "Try again" when a refresh fails
+(a status region, not an alert, so it does not interrupt). Background refreshes never replace the page with a skeleton.
+
+`lib/useStateTransitionToasts.ts` raises one toast when a request is seen moving to `needs_review` ("Request R is ready for
+review.") or `failed` ("Request R failed during processing."). It only uses the request reference. The first data of a page is
+a baseline, so opening a page never notifies; each request and state is notified once, so later refreshes and repeated polls
+say nothing more.
+
+### 15.3 Mutations
+
+Submit, edit, approve and reject keep their existing code paths, payloads, CSRF header, revision-id and content-hash checks and
+their in-flight guards (the button is disabled while a submission runs, so a second click cannot send a second request). After a
+success the page calls `reload()`: it aborts any poll in flight (so an older answer cannot overwrite the newer data) and refreshes
+at once. The audit history reloads when the state, current revision, or approval or rejection counts change, not on every poll.
+
+### 15.4 Dirty-form protection and stale revisions
+
+`DraftEditor` still reads its form state from props once, so a refresh never changes what the user has typed. FE-5 adds a
+`seenRevisions` set and compares it with the revision the server now reports:
+
+- Form **untouched**: it updates itself to the newer revision and says so ("Updated to revision N, which was saved elsewhere").
+- Form **edited** (and not saving): the draft stays as typed, the existing stale-revision conflict banner appears, and the fields
+  and save button are locked until the user chooses explicitly "Keep my version and base it on the latest" or "Discard my changes and load the latest". This is the
+  same flow as the existing 409 `stale_base_revision` handling, which still applies when saving.
+- A revision the user has already chosen to build on is added to `seenRevisions`, so a poll that still shows the older revision
+  cannot raise the conflict again.
+
+### 15.5 Tests (development VM, jsdom, `fetch` stubbed, fake timers)
+
+`pages/LiveUpdates.test.tsx` (34 tests) covers: the intervals, query and filter preservation, rows kept during a refresh, no
+overlap, a stale filter response ignored and aborted, hidden pause and visible resume, logout and unmount cancellation, no
+polling when unauthenticated, network failure and recovery, route-change abort, dirty-form protection, four stale-revision scenarios,
+a refresh after approval that ignores an older in-flight answer, and notification dedupe. `pages/RequestDetailPage.test.tsx` was
+updated for the new intervals. The full run was 17 files, 328 tests passed, with `npm run typecheck`, `npm run build` and
+`git diff --check` clean.
+
+### 15.6 Limitations
+
+- **Not seen in a real browser.** Nothing in FE-5 was run against the local Django, PostgreSQL and worker, and no owner validation
+  is recorded; the tests use a stubbed `fetch` and fake timers.
+- Polling is per tab: every open tab polls on its own. There is no push, no shared poll between tabs and no server hint to back off.
+- Intervals are provisional and chosen without load measurements. A request with no worker keeps polling (every 10 s after the first minute).
+- Findings and warnings inside an open editor are not live-updated; they refresh with the page data around it, and the editor's own
+  form keeps the user's values.
+- The audit history refreshes on a detected change or after an action, not on a timer.
+- Notifications cover only `needs_review` and `failed`, and are seen only by a user with the page open; there is no notification
+  for requests the user is not currently viewing.
+- A 4xx other than 429 stops background polling until the user retries.

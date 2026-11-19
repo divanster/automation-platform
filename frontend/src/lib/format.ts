@@ -11,8 +11,7 @@ export const STATE_LABELS: Record<RunState, string> = {
   cancelled: "Cancelled",
 };
 
-// States in which the system is still working and the page should keep refreshing. Every other state is stable until
-// a person acts, so polling stops there.
+// States in which the system is still working; the detail page refreshes these fastest (see liveIntervals.ts).
 const PROCESSING_STATES: ReadonlySet<string> = new Set(["queued", "extracting", "exporting"]);
 
 export function isProcessingState(state: string): boolean {
@@ -31,6 +30,10 @@ export function formatDateTime(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
   return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
+}
+
+export function formatTime(date: Date): string {
+  return new Intl.DateTimeFormat(undefined, { timeStyle: "medium" }).format(date);
 }
 
 /** The first group of a UUID: enough to tell users apart on screen without showing a whole identifier. */

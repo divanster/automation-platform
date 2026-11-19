@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { Link, useSearchParams } from "react-router";
 
 import { listRequests } from "../api/requests";
@@ -6,11 +7,14 @@ import { useAuth } from "../auth/AuthContext";
 import { PageHeader } from "../components/PageHeader";
 import { Pagination } from "../components/Pagination";
 import { StateBadge } from "../components/StateBadge";
+import { LiveStatus } from "../components/LiveStatus";
 import { EmptyState, ErrorState, LoadingState } from "../components/Status";
 import { Icon } from "../components/ui/Icon";
 import { describeError, isPermissionError } from "../lib/errors";
 import { formatDateTime, isRunState, shortId, stateLabel } from "../lib/format";
-import { useResource } from "../lib/useResource";
+import { LIST_POLL_MS } from "../lib/liveIntervals";
+import { useLiveResource } from "../lib/useLiveResource";
+import { useStateTransitionToasts } from "../lib/useStateTransitionToasts";
 
 const PAGE_SIZE = 20;
 
@@ -36,7 +40,17 @@ export function RequestsPage() {
   const { state: auth, can } = useAuth();
   const me = auth.status === "authenticated" ? auth.user.public_id : null;
 
-  const { state: result, reload } = useResource((signal) => listRequests({ page, page_size: PAGE_SIZE, state }, signal), [page, state]);
+  // The page and filter come from the URL; changing either loads the new view, a background refresh keeps the rows on screen.
+  const { state: result, reload, refreshing, refreshError, lastUpdated } = useLiveResource(
+    (signal) => listRequests({ page, page_size: PAGE_SIZE, state }, signal),
+    [page, state],
+    { interval: () => LIST_POLL_MS },
+  );
+  const tracked = useMemo(
+    () => (result.status === "ready" ? result.data.results.map((r) => ({ runId: r.run_id, reference: r.reference, state: r.state })) : null),
+    [result],
+  );
+  useStateTransitionToasts(tracked);
 
   function update(next: { page?: number; state?: RunState | "" }) {
     const merged = new URLSearchParams();
@@ -87,10 +101,13 @@ export function RequestsPage() {
             </button>
           ))}
         </div>
-        <button type="button" className="button toolbar-end" onClick={reload}>
-          <Icon name="refresh" />
-          Refresh
-        </button>
+        <div className="toolbar-end live-toolbar">
+          {result.status === "ready" ? <LiveStatus refreshing={refreshing} lastUpdated={lastUpdated} error={refreshError} onRetry={reload} /> : null}
+          <button type="button" className="button" onClick={reload}>
+            <Icon name="refresh" />
+            Refresh
+          </button>
+        </div>
       </div>
 
       {result.status === "loading" ? <LoadingState label="Loading requests…" skeleton={5} /> : null}

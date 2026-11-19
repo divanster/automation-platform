@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RequestDetail } from "../api/types";
-import { FAST_POLL_COUNT, FAST_POLL_MS, SLOW_POLL_MS } from "../lib/useRequestDetail";
+import { ACTIVE_FAST_POLLS, ACTIVE_POLL_MS, ACTIVE_SLOW_POLL_MS, REVIEW_POLL_MS, TERMINAL_POLL_MS } from "../lib/liveIntervals";
 import { apiError, installFakeApi, json, type Handler } from "../test/fakeApi";
 import { HASH, OTHER_ID, RUN_ID, USER_ID, detail } from "../test/fixtures";
 import { renderApp } from "../test/renderApp";
@@ -46,33 +46,43 @@ afterEach(() => {
 });
 
 describe("status polling", () => {
-  it("polls while queued and extracting, shows each state, and stops when the state is stable", async () => {
+  it("polls while queued and extracting, shows each state, and slows down once the state needs a person", async () => {
     const api = installFakeApi(signedIn(sequence(queued(), detail({ ...queued(), state: "extracting", processing: { step: "extract", task_state: "running", attempt_count: 1, failure_code: null } }), detail())));
     renderApp(`/requests/${RUN_ID}`);
 
     expect(await screen.findByText(/queued\. the request waits/i)).toBeInTheDocument();
     expect(detailCalls(api)).toBe(1);
 
-    await vi.advanceTimersByTimeAsync(FAST_POLL_MS);
+    await vi.advanceTimersByTimeAsync(ACTIVE_POLL_MS);
     expect(await screen.findByText(/extracting…/i)).toBeInTheDocument();
     expect(detailCalls(api)).toBe(2);
 
-    await vi.advanceTimersByTimeAsync(FAST_POLL_MS);
+    await vi.advanceTimersByTimeAsync(ACTIVE_POLL_MS);
     expect(await screen.findByText("Needs review", { selector: ".badge" })).toBeInTheDocument();
     expect(detailCalls(api)).toBe(3);
 
-    await vi.advanceTimersByTimeAsync(5 * 60 * 1000); // five minutes in a stable state: no more requests
+    await vi.advanceTimersByTimeAsync(REVIEW_POLL_MS - 1000); // margin: the fake clock also follows real time
     expect(detailCalls(api)).toBe(3);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(detailCalls(api)).toBe(4);
   });
 
-  it.each(["needs_review", "approved", "exported", "failed", "cancelled"] as const)("does not poll a request that is already %s", async (state) => {
+  it.each([
+    ["needs_review", REVIEW_POLL_MS],
+    ["approved", TERMINAL_POLL_MS],
+    ["exported", TERMINAL_POLL_MS],
+    ["failed", TERMINAL_POLL_MS],
+    ["cancelled", TERMINAL_POLL_MS],
+  ] as const)("refreshes a request that is %s only every %i ms", async (state, delay) => {
     const api = installFakeApi(
       signedIn(sequence(detail({ state, failed_step: state === "failed" ? "extract" : "", processing: { step: "extract", task_state: state === "failed" ? "failed" : "succeeded", attempt_count: 3, failure_code: state === "failed" ? "handler_error" : null } }))),
     );
     renderApp(`/requests/${RUN_ID}`);
     await screen.findByRole("heading", { name: /REQ-20260101-AAAA0001/ });
-    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.advanceTimersByTimeAsync(delay - 1000);
     expect(detailCalls(api)).toBe(1);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(detailCalls(api)).toBe(2);
   });
 
   it("slows down after the first stretch of fast polls, and keeps going while still processing", async () => {
@@ -80,11 +90,11 @@ describe("status polling", () => {
     renderApp(`/requests/${RUN_ID}`);
     await screen.findByText(/queued\. the request waits/i);
 
-    await vi.advanceTimersByTimeAsync(FAST_POLL_MS * FAST_POLL_COUNT);
+    await vi.advanceTimersByTimeAsync(ACTIVE_POLL_MS * ACTIVE_FAST_POLLS);
     const afterFast = detailCalls(api);
-    expect(afterFast).toBe(FAST_POLL_COUNT + 1);
+    expect(afterFast).toBe(ACTIVE_FAST_POLLS + 1);
 
-    await vi.advanceTimersByTimeAsync(SLOW_POLL_MS * 3);
+    await vi.advanceTimersByTimeAsync(ACTIVE_SLOW_POLL_MS * 3);
     expect(detailCalls(api)).toBe(afterFast + 3);
   });
 
@@ -98,37 +108,53 @@ describe("status polling", () => {
     expect(detailCalls(api)).toBe(before);
   });
 
-  it("keeps the last good data, reports the failed refresh, stops polling, and resumes on request", async () => {
+  it("keeps the last good data, reports the failed refresh, and recovers by itself", async () => {
+    const api = installFakeApi(signedIn(sequence(queued(), "network-error", detail())));
+    renderApp(`/requests/${RUN_ID}`);
+    await screen.findByText(/queued\. the request waits/i);
+
+    await vi.advanceTimersByTimeAsync(ACTIVE_POLL_MS);
+    expect(await screen.findByText(/could not refresh/i)).toBeInTheDocument();
+    expect(screen.getByText(/queued\. the request waits/i)).toBeInTheDocument(); // last good data still shown
+    expect(detailCalls(api)).toBe(2);
+
+    await vi.advanceTimersByTimeAsync(ACTIVE_POLL_MS * 2); // the retry is delayed (back-off), then succeeds
+    expect(await screen.findByText("Needs review", { selector: ".badge" })).toBeInTheDocument();
+    expect(screen.queryByText(/could not refresh/i)).not.toBeInTheDocument();
+    expect(detailCalls(api)).toBe(3);
+  });
+
+  it("lets the user retry a failed refresh at once", async () => {
     const api = installFakeApi(signedIn(sequence(queued(), "network-error", detail())));
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderApp(`/requests/${RUN_ID}`);
     await screen.findByText(/queued\. the request waits/i);
-
-    await vi.advanceTimersByTimeAsync(FAST_POLL_MS);
-    expect(await screen.findByText(/could not refresh/i)).toBeInTheDocument();
-    expect(screen.getByText(/queued\. the request waits/i)).toBeInTheDocument(); // last good data still shown
-    await vi.advanceTimersByTimeAsync(60_000);
-    expect(detailCalls(api)).toBe(2); // polling stopped
+    await vi.advanceTimersByTimeAsync(ACTIVE_POLL_MS);
+    await screen.findByText(/could not refresh/i);
 
     await user.click(screen.getByRole("button", { name: "Try again" }));
     expect(await screen.findByText("Needs review", { selector: ".badge" })).toBeInTheDocument();
-    expect(screen.queryByText(/could not refresh/i)).not.toBeInTheDocument();
+    expect(detailCalls(api)).toBe(3);
   });
 
-  it("does not fetch while the tab is hidden and continues when it is visible again", async () => {
-    let hidden = false;
-    vi.spyOn(document, "hidden", "get").mockImplementation(() => hidden);
+  it("does not fetch while the tab is hidden and refreshes at once when it is visible again", async () => {
+    let state: DocumentVisibilityState = "visible";
+    vi.spyOn(document, "visibilityState", "get").mockImplementation(() => state);
     const api = installFakeApi(signedIn(sequence(queued())));
     renderApp(`/requests/${RUN_ID}`);
     await screen.findByText(/queued\. the request waits/i);
 
-    hidden = true;
-    await vi.advanceTimersByTimeAsync(FAST_POLL_MS * 5);
+    state = "hidden";
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(ACTIVE_POLL_MS * 5);
     expect(detailCalls(api)).toBe(1);
 
-    hidden = false;
-    await vi.advanceTimersByTimeAsync(FAST_POLL_MS * 2);
-    expect(detailCalls(api)).toBeGreaterThan(1);
+    state = "visible";
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(detailCalls(api)).toBe(2); // immediately, without waiting for the interval
+    await vi.advanceTimersByTimeAsync(ACTIVE_POLL_MS);
+    expect(detailCalls(api)).toBe(3); // and the schedule continues
   });
 
   it("returns to the login when a poll finds the session gone", async () => {
@@ -142,7 +168,7 @@ describe("status polling", () => {
     renderApp(`/requests/${RUN_ID}`);
     await screen.findByText(/queued\. the request waits/i);
     expired = true;
-    await vi.advanceTimersByTimeAsync(FAST_POLL_MS);
+    await vi.advanceTimersByTimeAsync(ACTIVE_POLL_MS);
     expect(await screen.findByRole("heading", { name: "Sign in" })).toBeInTheDocument();
     expect(screen.getByText(/your session has ended/i)).toBeInTheDocument();
   });

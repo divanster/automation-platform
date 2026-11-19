@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 
 import { getRequest } from "../api/requests";
 import { editRequest } from "../api/review";
@@ -104,6 +104,10 @@ export function DraftEditor({ detail, draft, onSaved, onClose, onOutOfDate }: Pr
   // The revision this form started from. It changes only when the user explicitly chooses to continue on top of a newer one.
   const baseRevisionId = useRef<string | null>(detail.current_revision?.id ?? null);
   const baseNumber = useRef<number | null>(detail.current_revision?.number ?? null);
+  // Revisions this form has already taken into account. The page's data can lag behind what the user just chose (after
+  // "keep my version" the page still shows the older revision until its next refresh), so only a revision NOT in this set
+  // counts as a change made by someone else.
+  const seenRevisions = useRef<Set<string | null>>(new Set([baseRevisionId.current]));
 
   const [form, setForm] = useState<DraftForm>(() => formFromDraft(draft));
   const [findings, setFindings] = useState<PathFinding[]>(detail.findings);
@@ -115,6 +119,26 @@ export function DraftEditor({ detail, draft, onSaved, onClose, onOutOfDate }: Pr
   const submitting = useRef(false);
 
   const dirty = isDirty(form);
+
+  // BACKGROUND REFRESH. The page keeps refreshing `detail` while the editor is open, but the form never reads it again
+  // except here: when the server's current revision is no longer the one this form is based on, either someone else saved
+  // (unsaved edits are kept and the same two explicit choices as after a 409 are offered) or there is nothing to lose
+  // (the untouched form is replaced by the latest draft).
+  const serverRevisionId = detail.current_revision?.id ?? null;
+  const behind = !seenRevisions.current.has(serverRevisionId);
+  const activeConflict: Conflict | null = conflict ?? (behind && dirty && !saving ? { latest: detail } : null);
+
+  useEffect(() => {
+    if (!behind || dirty || saving || conflict || detail.draft === null) return;
+    baseRevisionId.current = serverRevisionId;
+    seenRevisions.current.add(serverRevisionId);
+    baseNumber.current = detail.current_revision?.number ?? null;
+    setForm(formFromDraft(detail.draft));
+    setFindings(detail.findings);
+    setFindingsOrigin("loaded");
+    setMessage(`Updated to revision ${detail.current_revision?.number ?? "—"}, which was saved elsewhere. You had not changed anything yet.`);
+  }, [behind, dirty, saving, conflict, detail, serverRevisionId]);
+
   const grouped = groupByPath(findings);
   const shown = displayedPaths(form);
   const unplaced = findings.filter((f) => !shown.has(f.field_path));
@@ -136,7 +160,7 @@ export function DraftEditor({ detail, draft, onSaved, onClose, onOutOfDate }: Pr
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
-    if (submitting.current || saving || conflict || !dirty) return;
+    if (submitting.current || saving || activeConflict || !dirty) return;
     submitting.current = true;
     setSaving(true);
     setMessage(null);
@@ -195,9 +219,10 @@ export function DraftEditor({ detail, draft, onSaved, onClose, onOutOfDate }: Pr
   }
 
   function keepMineOnTopOfLatest() {
-    if (!conflict) return;
-    baseRevisionId.current = conflict.latest.current_revision?.id ?? null;
-    baseNumber.current = conflict.latest.current_revision?.number ?? null;
+    if (!activeConflict) return;
+    baseRevisionId.current = activeConflict.latest.current_revision?.id ?? null;
+    seenRevisions.current.add(baseRevisionId.current);
+    baseNumber.current = activeConflict.latest.current_revision?.number ?? null;
     setConflict(null);
     setMessage(
       "Your version is now based on the latest revision. Saving it will REPLACE the content of that revision with what is in this form. Review it, then save.",
@@ -210,7 +235,7 @@ export function DraftEditor({ detail, draft, onSaved, onClose, onOutOfDate }: Pr
   }
 
   const busy = saving;
-  const latestDraft = conflict?.latest.draft ?? null;
+  const latestDraft = activeConflict?.latest.draft ?? null;
 
   return (
     <form className="editor" onSubmit={onSubmit} aria-labelledby="editor-title" noValidate>
@@ -225,11 +250,11 @@ export function DraftEditor({ detail, draft, onSaved, onClose, onOutOfDate }: Pr
 
       {message ? <Notice kind={conflict || findingsOrigin === "save" ? "error" : "info"}>{message}</Notice> : null}
 
-      {conflict ? (
+      {activeConflict ? (
         <div className="conflict" role="alert">
           <p>
-            <strong>This request was changed while you were editing.</strong> It is now at revision {conflict.latest.current_revision?.number ?? "—"}
-            {conflict.latest.state !== detail.state ? ` and its state is ${conflict.latest.state}` : ""}. Your changes are still in the form below and have not been saved.
+            <strong>This request was changed while you were editing.</strong> It is now at revision {activeConflict.latest.current_revision?.number ?? "—"}
+            {activeConflict.latest.state !== detail.state ? ` and its state is ${activeConflict.latest.state}` : ""}. Your changes are still in the form below and have not been saved.
           </p>
           {latestDraft ? (
             <details>
@@ -257,7 +282,7 @@ export function DraftEditor({ detail, draft, onSaved, onClose, onOutOfDate }: Pr
         </section>
       ) : null}
 
-      <fieldset disabled={busy || conflict !== null}>
+      <fieldset disabled={busy || activeConflict !== null}>
         <legend>Requester</legend>
         <TextField
           label="Name"
@@ -273,7 +298,7 @@ export function DraftEditor({ detail, draft, onSaved, onClose, onOutOfDate }: Pr
         />
       </fieldset>
 
-      <fieldset disabled={busy || conflict !== null}>
+      <fieldset disabled={busy || activeConflict !== null}>
         <legend>Items ({form.items.length})</legend>
         <FieldFindings id="items-findings" findings={grouped.get("items")} />
         {form.items.length === 0 ? <p className="muted">No items.</p> : null}
@@ -333,7 +358,7 @@ export function DraftEditor({ detail, draft, onSaved, onClose, onOutOfDate }: Pr
         ) : null}
       </fieldset>
 
-      <fieldset disabled={busy || conflict !== null}>
+      <fieldset disabled={busy || activeConflict !== null}>
         <legend>Request notes</legend>
         <TextField
           label="Notes"
@@ -361,7 +386,7 @@ export function DraftEditor({ detail, draft, onSaved, onClose, onOutOfDate }: Pr
         </ConfirmStep>
       ) : (
         <div className="form-actions">
-          <button type="submit" className="button button-primary" disabled={!dirty || busy || conflict !== null}>
+          <button type="submit" className="button button-primary" disabled={!dirty || busy || activeConflict !== null}>
             {saving ? "Saving…" : "Save as new revision"}
           </button>
           <button type="button" className="button" onClick={requestClose} disabled={busy}>
