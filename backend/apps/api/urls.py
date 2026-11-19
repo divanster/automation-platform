@@ -1,11 +1,11 @@
-"""``/api/auth/`` and ``/api/requests/`` routes. The health routes stay in ``apps.health``.
+"""``/api/auth/``, ``/api/requests/`` and ``/api/dashboard/`` routes. The health routes stay in ``apps.health``.
 
 Paths use the ``uuid`` converter, so a path segment that is not a UUID is a plain 404 before any view runs.
 """
 
 from django.urls import path
 
-from . import views_auth, views_requests
+from . import views_auth, views_dashboard, views_requests
 
 app_name = "api"
 
@@ -14,6 +14,7 @@ urlpatterns = [
     path("auth/login/", views_auth.LoginView.as_view(), name="auth-login"),
     path("auth/logout/", views_auth.LogoutView.as_view(), name="auth-logout"),
     path("auth/me/", views_auth.MeView.as_view(), name="auth-me"),
+    path("dashboard/summary/", views_dashboard.DashboardSummaryView.as_view(), name="dashboard-summary"),
     path("requests/", views_requests.RequestCollectionView.as_view(), name="request-collection"),
     path("requests/<uuid:run_id>/", views_requests.RequestDetailView.as_view(), name="request-detail"),
     path("requests/<uuid:run_id>/edit/", views_requests.RequestEditView.as_view(), name="request-edit"),

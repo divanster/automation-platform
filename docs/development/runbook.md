@@ -727,6 +727,44 @@ the concurrency test (two threads, each with its own connection), the module-dis
 
 **What nobody has checked:** a Request Intake extraction against the real Workbench, how often GPT-5 answers inside the schema, the end-to-end latency and cost, a stored company policy, behaviour under load, and any PostgreSQL scenario beyond the tested ones (the owner's local run passed the tests above).
 
+## 5.7 Dashboard summary API (BE-DASH-1): checks and PostgreSQL validation
+
+Backend only: `GET /api/dashboard/summary/` (contract, permissions and query strategy in `rest-api-slice.md` section 18). No model, migration or
+dependency change; the frontend is not integrated, so the dashboard still makes nine list requests. **Status: the DB-free tests pass in the
+development VM; the PostgreSQL tests are written and have NOT been run by anyone.** Nothing below is evidence until you report a run.
+
+```powershell
+# From backend\, in the window where the project's .env and virtual environment are active. AP_RUN_DB_TESTS must be unset here.
+$Py = "..\.venv\Scripts\python.exe"
+if ($env:AP_RUN_DB_TESTS) { throw "AP_RUN_DB_TESTS is already set in this window. Run: Remove-Item Env:AP_RUN_DB_TESTS   then repeat." }
+& $Py manage.py test                                    # DB-free suite; no database is touched
+& $Py manage.py check
+& $Py manage.py makemigrations --check --dry-run        # expect: No changes detected
+& $Py -m compileall -q apps config tests workflows
+git diff --check
+try {
+    $env:AP_RUN_DB_TESTS = "1"
+    # 1. The new file alone. Django creates and drops test_<AP_DB_NAME>; no --keepdb, no --noinput.
+    & $Py manage.py test tests.test_dashboard_summary_postgres --tag requires_postgres -v 2
+    "exit code: $LASTEXITCODE"                          # expect 0
+    # 2. The suites the shared list code and the API can affect.
+    & $Py manage.py test tests.test_dashboard_summary_postgres tests.test_api_postgres tests.test_review_postgres tests.test_intake_postgres tests.test_request_intake_module_postgres tests.test_audit_vocabulary_postgres tests.test_authz_core_postgres --tag requires_postgres -v 2
+    "exit code: $LASTEXITCODE"                          # expect 0
+} finally {
+    Remove-Item Env:AP_RUN_DB_TESTS -ErrorAction SilentlyContinue
+}
+```
+
+Report the exact `Ran N tests` lines and any failure. Look first at the query-count tests (`QueryCountTests`: they assert the statement shape, so a different
+Django or PostgreSQL SQL rendering would show there), the concurrency tests (two or four threads, each with its own connection), and the list tests in
+`tests.test_api_postgres`, because `list_requests` now shares its visibility helper with the summary.
+
+**Two stale architecture tests were corrected in this slice** (`tests.test_request_intake_module`, `RoutesTests`): `test_the_declared_screens_equal_the_react_routes` did not know FE-6's Core `/dashboard` route, and
+`test_the_declared_navigation_equals_the_layouts_links_and_its_permission_hint` still read `Layout.tsx`, whose sidebar moved to `components/shell/navigation.ts` in FE-4 (it also had to know the `/dashboard` entry). They now name the Core
+dashboard route, API prefix and navigation entry explicitly (`CORE_*` constants), keep the module's declarations exact (the dashboard is NOT in the Request Intake manifest), and still fail on any other undeclared route or entry.
+
+**What nobody has checked:** the summary against a real database and a real browser, its latency on a realistic number of requests, whether an index would help (none was added), and behaviour under load.
+
 ## 6. Local Windows computer: setup and validation (reference procedure; owner-operated)
 
 > **Nothing in this section has been run.** No local repository, Python

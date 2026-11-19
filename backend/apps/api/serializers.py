@@ -198,6 +198,10 @@ class RequestListQuery(PageQuery):
     state = serializers.ChoiceField(choices=list(STATES), required=False)
 
 
+class DashboardSummaryQuery(StrictSerializer):
+    """The summary takes no query parameters: a fixed shape and a fixed recent-list size."""
+
+
 # --- response serializers -----------------------------------------------------------------------------
 
 
@@ -238,6 +242,16 @@ class RequestListItemOutput(serializers.Serializer):
     current_revision_number = serializers.IntegerField(allow_null=True)
     outcome_status = serializers.CharField(allow_null=True)
     submitted_by = serializers.UUIDField()
+
+
+class DashboardSummaryOutput(serializers.Serializer):
+    total = serializers.IntegerField()
+    processing = serializers.IntegerField()
+    needs_review = serializers.IntegerField()
+    approved = serializers.IntegerField()
+    failed = serializers.IntegerField()
+    by_state = serializers.DictField(child=serializers.IntegerField())
+    recent_requests = RequestListItemOutput(many=True)
 
 
 class FindingOutput(serializers.Serializer):

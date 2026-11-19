@@ -1,4 +1,4 @@
-"""Read services for the request API: a paginated list, the detail read model, and a paginated audit read.
+"""Read services for the request API: a paginated list, the dashboard summary, the detail read model, and a paginated audit read.
 
 Everything here is READ-ONLY and authorized like the write services (``apps.intake.authorization``): the
 actor is reloaded from the database, and the rules are the pure ones in ``apps.intake.access`` and
@@ -23,6 +23,8 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from typing import NamedTuple
+
+from django.db.models import Count
 
 from apps.accounts.authz import load_actor
 from apps.cases import services as case_services
@@ -86,6 +88,37 @@ def _visible_runs(actor_pk, sees_all: bool, state: str | None):
     return runs.order_by("-created_at", "-id")
 
 
+def _view_scope(user):
+    """The actor and whether they see EVERY request (``view_any_request`` or a superuser) or only their own.
+
+    The one place the list and the dashboard summary decide visibility: it raises ``AuthorizationError`` for an
+    unauthenticated, inactive or view-permission-less user BEFORE any request is read.
+    """
+    actor = require_permission(user, Action.VIEW)
+    sees_all = (
+        scope_problem(
+            Action.VIEW, is_superuser=actor.is_superuser, permissions=actor.permissions, actor_pk=actor.pk, submitter_pk=None
+        )
+        is None
+    )
+    return actor, sees_all
+
+
+def _list_item(run) -> RequestListItem:
+    """The list row of a run loaded with ``select_related(*LIST_RELATED)`` (no query per row)."""
+    return RequestListItem(
+        run_id=run.pk,
+        case_id=run.case_id,
+        reference=run.case.reference,
+        state=run.state,
+        failed_step=run.failed_step,
+        created_at=run.created_at,
+        current_revision_number=None if run.current_revision is None else run.current_revision.revision_number,
+        outcome_status=getattr(getattr(run, "extraction_outcome", None), "status", None),
+        submitted_by=run.request_source.submitted_by.public_id,
+    )
+
+
 def list_requests(*, user, page: int = 1, page_size: int = DEFAULT_PAGE_SIZE, state: str | None = None) -> RequestPage:
     """One page of the requests ``user`` may view, newest first (run id breaks ties, so the order is stable).
 
@@ -96,33 +129,70 @@ def list_requests(*, user, page: int = 1, page_size: int = DEFAULT_PAGE_SIZE, st
     _check_page(page, page_size)
     if state is not None and state not in STATES:
         raise ValueError("state must be a known run state")
-    require_permission(user, Action.VIEW)
-    actor = load_actor(user)
-    sees_all = (
-        scope_problem(
-            Action.VIEW, is_superuser=actor.is_superuser, permissions=actor.permissions, actor_pk=actor.pk, submitter_pk=None
-        )
-        is None
-    )
+    actor, sees_all = _view_scope(user)
 
     runs = _visible_runs(actor.pk, sees_all, state)
     count = runs.count()
     rows = runs.select_related(*LIST_RELATED)[(page - 1) * page_size : page * page_size]
-    items = tuple(
-        RequestListItem(
-            run_id=run.pk,
-            case_id=run.case_id,
-            reference=run.case.reference,
-            state=run.state,
-            failed_step=run.failed_step,
-            created_at=run.created_at,
-            current_revision_number=None if run.current_revision is None else run.current_revision.revision_number,
-            outcome_status=getattr(getattr(run, "extraction_outcome", None), "status", None),
-            submitted_by=run.request_source.submitted_by.public_id,
-        )
-        for run in rows
+    return RequestPage(tuple(_list_item(run) for run in rows), count, page, page_size)
+
+
+RECENT_LIMIT = 5  # the dashboard's "newest requests" size; a fixed bound, not a client choice
+# The only columns ``_list_item`` reads. The list loads whole rows (its page may be 100 of them); the dashboard is polled, so it
+# reads just these and never loads the source text, a revision's bytes, a draft or the submitter's password hash.
+RECENT_FIELDS = (
+    "state",
+    "failed_step",
+    "created_at",
+    "case__reference",
+    "current_revision__revision_number",
+    "request_source__submitted_by__public_id",
+    "extraction_outcome__status",
+)
+# States in which the system is still working on a request. FE-6 shows the same group as "Processing"
+# (frontend/src/lib/format.ts PROCESSING_STATES); the group is defined here so the server owns the number.
+PROCESSING_STATES = ("queued", "extracting", "exporting")
+
+
+@dataclass(frozen=True)
+class DashboardSummary:
+    total: int
+    processing: int
+    needs_review: int
+    approved: int
+    failed: int
+    by_state: dict  # every run state, zero when there is none, in the run-state vocabulary's order
+    recent_requests: tuple  # RequestListItem, newest first
+
+
+def get_dashboard_summary(*, user) -> DashboardSummary:
+    """Counts of the requests ``user`` may view by run state, plus the newest few of them.
+
+    VISIBILITY is exactly the list's (``_view_scope`` and ``_visible_runs``): ``view_any_request`` or a superuser
+    sees every request, ``view_own_request`` only the user's own, anyone else gets ``AuthorizationError``.
+
+    TWO queries, whatever the number of requests: one ``GROUP BY state`` aggregate (so ``total`` is the sum of
+    ``by_state`` by construction; one statement is one snapshot) and one list query limited to ``RECENT_LIMIT``
+    rows with the list's joins. The recent rows are a second statement: a request that changes between the two can
+    appear in a different state than the counts show; the next refresh corrects it. Nothing here reads request text.
+    """
+    actor, sees_all = _view_scope(user)
+    visible = _visible_runs(actor.pk, sees_all, None)
+
+    by_state = dict.fromkeys(STATES, 0)
+    for row in visible.order_by().values("state").annotate(n=Count("pk")):
+        by_state[row["state"]] = row["n"]
+
+    recent = tuple(_list_item(run) for run in visible.select_related(*LIST_RELATED).only(*RECENT_FIELDS)[:RECENT_LIMIT])
+    return DashboardSummary(
+        total=sum(by_state.values()),
+        processing=sum(by_state[state] for state in PROCESSING_STATES),
+        needs_review=by_state["needs_review"],
+        approved=by_state["approved"],
+        failed=by_state["failed"],
+        by_state=by_state,
+        recent_requests=recent,
     )
-    return RequestPage(items, count, page, page_size)
 
 
 @dataclass(frozen=True)

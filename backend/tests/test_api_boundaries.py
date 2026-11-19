@@ -1,4 +1,4 @@
-"""DB-free static tests: the API is a thin transport over the services, and its security settings are explicit.
+﻿"""DB-free static tests: the API is a thin transport over the services, and its security settings are explicit.
 
 They read source with ``ast`` and import settings fresh under controlled environments; no database is touched.
 """
@@ -12,7 +12,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.test import SimpleTestCase
 from django.urls import URLPattern, get_resolver
 
-from apps.api import base, views_auth, views_requests
+from apps.api import base, views_auth, views_dashboard, views_requests
 from apps.intake import queries, review, submission
 from tests.settings_loader import load_settings
 from tests.test_request_intake_boundaries import imported_modules
@@ -25,6 +25,7 @@ PROD = {"AP_SECRET_KEY": FAKE_KEY, "AP_ALLOWED_HOSTS": "app.example.invalid"}
 SERVICES = {
     "submit_request_as": submission.submit_request_as,
     "list_requests": queries.list_requests,
+    "get_dashboard_summary": queries.get_dashboard_summary,
     "get_request_detail": queries.get_request_detail,
     "edit_request": review.edit_request,
     "approve_request": review.approve_request,
@@ -76,6 +77,7 @@ class RouteInventoryTests(SimpleTestCase):
                 "api/auth/login/": "LoginView",
                 "api/auth/logout/": "LogoutView",
                 "api/auth/me/": "MeView",
+                "api/dashboard/summary/": "DashboardSummaryView",
                 "api/requests/": "RequestCollectionView",
                 "api/requests/<uuid:run_id>/": "RequestDetailView",
                 "api/requests/<uuid:run_id>/edit/": "RequestEditView",
@@ -105,6 +107,7 @@ class RouteInventoryTests(SimpleTestCase):
             views_auth.LoginView: {"POST"},
             views_auth.LogoutView: {"POST"},
             views_auth.MeView: {"GET"},
+            views_dashboard.DashboardSummaryView: {"GET"},
             views_requests.RequestCollectionView: {"GET", "POST"},
             views_requests.RequestDetailView: {"GET"},
             views_requests.RequestEditView: {"POST"},
@@ -118,7 +121,7 @@ class RouteInventoryTests(SimpleTestCase):
 
 
 class ViewsAreTransportAdaptersTests(SimpleTestCase):
-    VIEW_FILES = ("views_requests.py", "views_auth.py")
+    VIEW_FILES = ("views_requests.py", "views_auth.py", "views_dashboard.py")
 
     def test_views_import_no_model_no_orm_no_database_and_no_domain_package(self):
         for name in self.VIEW_FILES:
@@ -132,7 +135,7 @@ class ViewsAreTransportAdaptersTests(SimpleTestCase):
                     self.assertNotIn(token, source)
 
     def test_every_request_view_method_calls_exactly_one_service(self):
-        for cls in (views_requests.RequestCollectionView, views_requests.RequestDetailView, views_requests.RequestEditView, views_requests.RequestApproveView, views_requests.RequestRejectView, views_requests.RequestAuditView):
+        for cls in (views_requests.RequestCollectionView, views_requests.RequestDetailView, views_requests.RequestEditView, views_requests.RequestApproveView, views_requests.RequestRejectView, views_requests.RequestAuditView, views_dashboard.DashboardSummaryView):
             for method in ("get", "post"):
                 function = cls.__dict__.get(method)
                 if function is None:
@@ -143,7 +146,7 @@ class ViewsAreTransportAdaptersTests(SimpleTestCase):
                     self.assertEqual(len(used), 1, used)
 
     def test_the_keywords_views_pass_are_real_parameters_of_the_services(self):
-        for name in ("views_requests.py",):
+        for name in ("views_requests.py", "views_dashboard.py"):
             for call_name, call in calls_in(tree(API / name)):
                 if call_name in SERVICES:
                     parameters = set(inspect.signature(SERVICES[call_name]).parameters)
@@ -151,13 +154,13 @@ class ViewsAreTransportAdaptersTests(SimpleTestCase):
                         self.assertLessEqual({k.arg for k in call.keywords}, parameters)
 
     def test_the_actor_is_always_request_user(self):
-        for call_name, call in calls_in(tree(API / "views_requests.py")):
+        for call_name, call in calls_in(tree(API / "views_requests.py")) + calls_in(tree(API / "views_dashboard.py")):
             if call_name in SERVICES:
                 user = next(k for k in call.keywords if k.arg == "user")
                 self.assertEqual(ast.unparse(user.value), "request.user", call_name)
 
     def test_no_identity_is_ever_read_from_the_request_body(self):
-        source = (API / "views_requests.py").read_text(encoding="utf-8")
+        source = (API / "views_requests.py").read_text(encoding="utf-8") + (API / "views_dashboard.py").read_text(encoding="utf-8")
         for token in ("approver", "public_id", "actor", "user_id", "rejected_by", "edited_by"):
             self.assertNotIn(token, source)
 
@@ -192,7 +195,7 @@ class ViewsAreTransportAdaptersTests(SimpleTestCase):
     def test_the_base_view_keeps_the_project_authentication_and_permission_defaults(self):
         self.assertNotIn("authentication_classes", base.ApiView.__dict__)
         self.assertNotIn("permission_classes", base.ApiView.__dict__)
-        for cls in (views_auth.LogoutView, views_auth.MeView, views_requests.RequestCollectionView):
+        for cls in (views_auth.LogoutView, views_auth.MeView, views_dashboard.DashboardSummaryView, views_requests.RequestCollectionView):
             self.assertTrue(issubclass(cls, base.ApiView))
 
 
