@@ -767,9 +767,28 @@ page, the Refresh button, navigation from cards, quick actions and the sidebar, 
 
 - **Not seen in a real browser.** No owner validation is recorded for FE-6; visual layout, dark theme and the 10 s refresh against a real
   Django, PostgreSQL and worker are untested.
-- No server-side summary endpoint (nine requests per refresh, see 16.2), no history or trend, and no counts by period.
+- No history or trend, and no counts by period. A server-side summary endpoint now exists (BE-DASH-1, section 17) but the dashboard
+  does not use it yet: it still sends the nine requests described above until the frontend integration slice.
 - No AI usage, cost, worker or provider-health figures: the API has no endpoint for any of them, so none are shown.
 - "Approved" excludes `exporting` and `exported`; no export exists yet, so both are expected to be 0.
 - No stale-while-error indication per figure: a figure whose refresh failed shows "Unavailable" until the next success.
 - A superuser whose profile lists no view permission lands on `/requests` as before.
 - FE-7, AI Settings and document upload are not part of this slice.
+
+## 17. BE-DASH-1: dashboard summary endpoint (backend only; the frontend is NOT integrated)
+
+`GET /api/dashboard/summary/` was added so that a later frontend slice can replace the nine requests of section 16.1 with one. **This
+slice changes no frontend file**: the dashboard still sends nine `GET /api/requests/` requests per refresh, and the cost in 16.2 is
+unchanged until that integration. The endpoint's contract, permission rules, query strategy and tests are in
+`rest-api-slice.md` section 18; this section records what the frontend will have to do with it.
+
+- **Mapping.** `total`, `needs_review`, `approved` and `failed` are the figures of the same names; `processing` is queued + extracting
+  + exporting, computed by the server from the same grouped result (the frontend's `PROCESSING_STATES` and the server's
+  `PROCESSING_STATES` in `apps/intake/queries.py` are two copies of one definition, pinned by a test on the server side only);
+  `by_state` carries all eight states, each present and zero when empty, for the distribution; `recent_requests` has the five newest
+  items in exactly the `RequestListItem` shape the dashboard already renders.
+- **Accuracy.** The counts are one grouped query, so `total` always equals the sum of `by_state`; the "counts disagree" note of 16.2
+  becomes unnecessary for them. The recent list is a second statement and can be a moment newer than the counts.
+- **Failure.** One request means one error state: there is no longer a per-figure "Unavailable". A 403 means the user has no view
+  permission, exactly as for the list.
+- **Not done here:** the frontend change, a polling-interval review, and removal of `dashboardData.ts`'s nine-request path.

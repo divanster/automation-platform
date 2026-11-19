@@ -277,12 +277,33 @@ def normalized(path: str) -> str:
     return re.sub(r":[A-Za-z_]+", ":param", path if path.startswith("/") else "/" + path)
 
 
+# The dashboard (BE-DASH-1 / FE-6) is a Core screen and a Core API route: it is not a Request Intake contribution and is not in the
+# manifest. Adding to these sets is a deliberate decision; an undeclared module route still fails the equality checks below.
+CORE_API_PREFIXES = {"auth", "dashboard"}
+CORE_SCREENS = {"/dashboard"}
+CORE_NAVIGATION = {"/dashboard": ("intake.view_own_request", "intake.view_any_request")}  # any-of display hint, not a module permission
+
+
+def navigation_entries():
+    """The sidebar entries of frontend/src/components/shell/navigation.ts as {to: (permission, anyPermission)}."""
+    source = (FRONTEND / "components" / "shell" / "navigation.ts").read_text(encoding="utf-8")
+    body = source.split("export const NAV_ITEMS", 1)[1]
+    entries = {}
+    for block in re.findall(r"\{\s*id:.*?isActive", body, flags=re.S):
+        to = re.search(r'\bto:\s*"([^"]+)"', block).group(1)
+        single = re.search(r'\bpermission:\s*"([^"]+)"', block)
+        anyof = re.search(r"\banyPermission:\s*\[([^\]]*)\]", block)
+        entries[to] = (single.group(1) if single else None, tuple(re.findall(r'"([^"]+)"', anyof.group(1))) if anyof else None)
+    return entries
+
+
 class RoutesTests(SimpleTestCase):
     def test_the_api_prefix_is_the_one_first_segment_the_api_serves_besides_auth(self):
         from apps.api import urls
 
         segments = {str(p.pattern).split("/")[0] for p in urls.urlpatterns}
-        self.assertEqual(segments - {"auth"}, {c.route_prefix for c in MANIFEST.api_contributions})
+        # Core routes are listed explicitly; any other first segment must be a declared module contribution.
+        self.assertEqual(segments - CORE_API_PREFIXES, {c.route_prefix for c in MANIFEST.api_contributions})
         self.assertEqual(reverse("api:request-collection"), "/api/requests/")
         self.assertEqual(reverse("api:request-detail", args=["00000000-0000-0000-0000-000000000001"]), "/api/requests/00000000-0000-0000-0000-000000000001/")
 
@@ -293,17 +314,23 @@ class RoutesTests(SimpleTestCase):
         app = (FRONTEND / "App.tsx").read_text(encoding="utf-8")
         react = {normalized(p) for p in re.findall(r'<Route path="([^"]+)"', app)} - {"/login", "/*"}
         declared = {normalized(u.path) for u in MANIFEST.ui_contributions if u.kind == "route"}
-        self.assertEqual(declared, react)
+        self.assertEqual(declared, react - CORE_SCREENS)  # every non-Core route is declared by the module, and nothing else is
+        self.assertTrue(CORE_SCREENS <= react)  # a Core screen exists only while it really is a route
+        self.assertFalse(declared & CORE_SCREENS)  # the module does not claim a Core screen
         self.assertEqual(len(declared), len([u for u in MANIFEST.ui_contributions if u.kind == "route"]))  # no duplicate route
 
     def test_the_declared_navigation_equals_the_layouts_links_and_its_permission_hint(self):
-        layout = (FRONTEND / "components" / "Layout.tsx").read_text(encoding="utf-8")
-        links = set(re.findall(r'<NavLink to="([^"]+)"', layout))
+        entries = navigation_entries()  # the sidebar moved from Layout.tsx to shell/navigation.ts in FE-4
         declared = {u.path for u in MANIFEST.ui_contributions if u.kind == "navigation"}
-        self.assertEqual(declared, links)
-        self.assertIn(f'const PERM_SUBMIT = "{accounts_roles.PERM_SUBMIT}";', layout)
+        self.assertEqual(declared, set(entries) - set(CORE_NAVIGATION))
+        self.assertFalse(declared & set(CORE_NAVIGATION))
         hints = {u.path: u.permission for u in MANIFEST.ui_contributions if u.kind == "navigation"}
         self.assertEqual(hints, {"/requests": None, "/requests/new": accounts_roles.PERM_SUBMIT})
+        for path, hint in hints.items():  # the sidebar's hint is the manifest's, with no any-of list
+            self.assertEqual(entries[path], (hint, None), path)
+        for path, anyof in CORE_NAVIGATION.items():  # the Core entry's hint is the two view permissions, and only those
+            self.assertEqual(entries[path], (None, anyof), path)
+        self.assertEqual(set(CORE_NAVIGATION["/dashboard"]), {accounts_roles.PERM_VIEW_OWN, accounts_roles.PERM_VIEW_ANY})
 
     def test_the_frontend_was_not_given_dynamic_loading(self):
         for path in FRONTEND.rglob("*.ts*"):

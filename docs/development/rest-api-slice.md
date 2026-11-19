@@ -41,6 +41,7 @@ in a view.
 | `POST /api/requests/{run_id}/approve/` | session, CSRF | Approve the current revision | `intake.review.approve_request` |
 | `POST /api/requests/{run_id}/reject/` | session, CSRF | Reject the current revision | `intake.review.reject_request` |
 | `GET /api/requests/{run_id}/audit/` | session | Paginated audit events | `intake.queries.list_run_audit` (new, wraps `review.list_audit_events`) |
+| `GET /api/dashboard/summary/` | session | Counts by state and the five newest visible requests (BE-DASH-1, section 18) | `intake.queries.get_dashboard_summary` (new) |
 
 `{run_id}` is a UUID (the workflow run id). A path that is not a UUID does not match a route (404).
 
@@ -450,3 +451,55 @@ React UI and any browser client; real AI; export execution; file upload and docu
 
 * **Domain validation formatted a quantity in plain notation before its own safety guard (FIXED in this slice, at the domain boundary).** `workflows/request_intake/validation.py` (`_number_in_text`) called `format(value, "f")` on every positive quantity when a source text was supplied, and `canonical.py`'s `MAX_PADDING_ZEROS` guard ran only later. A `Decimal` such as `1e-999999999` therefore made validation build a string of about a gigabyte (the check hung until it was killed). The extractor's own text parser cannot produce such a value, so the existing submit and worker path was not affected; a draft supplied directly (the edit endpoint) could. The fix: the constant and the arithmetic moved to `workflows/request_intake/quantity.py` (`MAX_PADDING_ZEROS`, `plain_padding_zeros`, `plain_notation_length`, all reading only the Decimal's digits and exponent), canonicalization uses them, and validation now never formats a value beyond the bound or longer than the source text (it reports "not found in the source", a warning; canonicalization is the layer that refuses). The API keeps its 1,000-character plain-form bound as an additional transport safeguard, using the domain's own arithmetic. Tests: `tests/test_request_intake_decimal_safety.py` (24, pure) and the mapping tests in `tests/test_api_errors.py`.
 * **DRF's `CharField` coerces numbers to strings** and its default `Throttled.wait` is already rounded up; both are handled and tested in this slice.
+
+## 18. BE-DASH-1: dashboard summary endpoint
+
+`GET /api/dashboard/summary/`: one authenticated read that returns what the FE-6 dashboard currently assembles from nine `GET /api/requests/`
+calls. Backend only; the frontend is not integrated (see `frontend-slice.md` section 17). No model, migration, index or dependency change.
+
+### 18.1 Contract
+
+No query parameters (any is a `400 validation_error`, as for the other strict queries). Response `200`, `Cache-Control: no-store`:
+
+```json
+{
+  "total": 7,
+  "processing": 3,
+  "needs_review": 2,
+  "approved": 1,
+  "failed": 1,
+  "by_state": {"queued": 2, "extracting": 1, "needs_review": 2, "approved": 1, "exporting": 0, "exported": 0, "failed": 1, "cancelled": 0},
+  "recent_requests": [
+    {"run_id": "<uuid>", "case_id": "<uuid>", "reference": "...", "state": "needs_review", "failed_step": "", "created_at": "...",
+     "current_revision_number": 1, "outcome_status": "valid", "submitted_by": "<user public id>"}
+  ]
+}
+```
+
+* `by_state` always has all eight run states (zero when empty). `total` is the sum of `by_state`, by construction. `processing` is `queued + extracting + exporting` (the same group the frontend calls processing); `needs_review`, `approved` and `failed` repeat the entries of `by_state` for the cards. No other figure is returned: nothing about AI usage, cost, workers, or periods.
+* `recent_requests` has at most 5 items, newest first with the run id as tie-break (the list endpoint's order), each exactly an item of `GET /api/requests/` (`RequestListItemOutput`). It never contains request text, the parsed draft, findings, canonical bytes, or any user field other than the submitter's public id.
+
+### 18.2 Permission semantics (unchanged, not duplicated)
+
+The service `apps.intake.queries.get_dashboard_summary` decides visibility with the same private helper as `list_requests` (`_view_scope`: `require_permission(user, Action.VIEW)` then `scope_problem`), over the same `_visible_runs` queryset. Consequently: an unauthenticated client gets the API's `403 not_authenticated`; an authenticated user with neither `view_own_request` nor `view_any_request` gets `403 permission_denied` (never zeros); a user with only `view_own_request` is counted and listed on their own requests only; `view_any_request` (Approver, Auditor) and superusers see all. The actor is reloaded from the database on every call, so a deactivated user or a removed role is refused on the next call. Throttling (`api_user`) and the session authentication are the project defaults; the view sets none of its own. Nothing about access was broadened, and `list_requests` keeps its behaviour (it was refactored onto the shared helper; its tests pass unchanged).
+
+### 18.3 Query strategy and performance
+
+* **Counts:** one grouped statement, `SELECT state, COUNT(id) ... GROUP BY state`, with the visibility filter and no ordering. Not one query per state, and no Python loop over rows.
+* **Recent requests:** one statement with `LIMIT 5`, the list's joins, and `.only(...)` of just the columns the item needs, so the source text, the password hash, canonical bytes and drafts are never read. No N+1: the joined values are in the row.
+* **Per call:** about 3 queries for the session user and the permission check, plus these 2; the number is the same for 1 or 10,000 requests. The cost of the grouped query grows with the visible rows (a scan or an index scan of the run table); **no index was added and none is justified by evidence**, and the cost has not been measured. Revisit only with a measurement from a realistic data set.
+* **Response size:** bounded (8 counts and at most 5 items).
+
+### 18.4 Tests
+
+DB-free: `tests/test_dashboard_summary.py` (40 tests: the response contract, aggregation and zero-filling, visibility decisions through the real rules, the compiled SQL of both statements (one group-by, one `LIMIT 5`, no sensitive column), the 403 behaviour and its mapping, and the architecture pins) and the extended `tests/test_api_boundaries.py` (route inventory, GET only, one service per view, no ORM in the view). `tests/test_request_intake_module.py` now names `dashboard` as a Core API prefix, screen and navigation entry (explicit `CORE_*` constants) while the module's declarations stay exact.
+
+PostgreSQL (**written, NOT run**; `tests/test_dashboard_summary_postgres.py`, tagged `requires_postgres`): an empty database, real counts for every state, agreement with `GET /api/requests/?state=` for every user kind, own/any/superuser/hybrid visibility, 403 for a user without a view permission and for an anonymous client, a lost role or deactivation refused on the next call, independence from paging, tie-stable newest-first recent requests, no request text in the body, query counts (equal for 1 and 31 requests, at most 8, exactly one grouped and one `LIMIT 5` statement on the run table, no source text or password hash selected), the list and detail endpoints still working, and two concurrency tests (readers during state changes; readers during new submissions). The exact commands are in `runbook.md` section 5.7. Nothing in them is evidence until the owner reports a run.
+
+### 18.5 Limitations
+
+* **Not one snapshot.** The counts are consistent with each other (one statement); the recent list is a second statement and may already include a request the counts do not (or the reverse). Each statement is itself consistent; no transaction wraps both.
+* The `processing` group is defined on the server and on the frontend separately.
+* Throttling is per process, as for every endpoint. One summary per refresh is 6 requests a minute per open tab at the current 10 s interval, against 54 for the nine-request version; the load has not been measured.
+* No history, trend, period counts, or AI, worker and provider figures; no per-module breakdown (the endpoint is Core-routed but its data is Request Intake's: a module-aware dashboard is a later design decision).
+* The endpoint does not check whether Request Intake is enabled; nothing blocks the API for a disabled module (an existing limitation).
