@@ -440,14 +440,16 @@ class CapabilityTests(ContractTestCase):
 
 
 class StaticCompositionRootTests(ContractTestCase):
-    def test_the_builtin_tuple_is_static_and_empty_in_mod_1a(self):
+    def test_the_builtin_tuple_is_static_and_holds_only_request_intake_since_mod_2(self):
+        from apps.intake.module import MANIFEST
         from config import modules as root
 
-        self.assertEqual(root.BUILTIN_MODULES, ())
         self.assertIsInstance(root.BUILTIN_MODULES, tuple)
+        self.assertEqual(root.BUILTIN_MODULES, (MANIFEST,))
         registry = root.build_registry()
-        self.assertEqual(len(registry), 0)
-        self.assertEqual(registry.fingerprint, build().fingerprint)
+        self.assertEqual(registry.module_ids, ("request_intake",))
+        self.assertEqual(registry.fingerprint, build(MANIFEST).fingerprint)
+        self.assertNotEqual(registry.fingerprint, build().fingerprint)  # the empty registry of MOD-1 had another fingerprint
 
     def test_the_composition_root_can_build_a_registry_from_given_manifests(self):
         from config import modules as root

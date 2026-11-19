@@ -92,7 +92,8 @@ class CoreStaysIndependentTests(SimpleTestCase):
         # apps/module_host (MOD-1b S4) is the module host: it is handed a registry and checks it (the type, the namespace continuity rule, the errors).
         # apps/module_host/context.py (MOD-1b S6) is the ModuleContext: it is handed a registry and checks its type.
         host = {"apps/module_host/cli.py", "apps/module_host/context.py", "apps/module_host/gate.py", "apps/module_host/services.py"}
-        self.assertEqual(importers - inside, {"config/modules.py", "config/audit_vocabulary.py"} | host)
+        # apps/intake/module.py (MOD-2) is Request Intake's manifest: it builds ModuleManifest objects, the one thing a module package may import from here.
+        self.assertEqual(importers - inside, {"config/modules.py", "config/audit_vocabulary.py", "apps/intake/module.py"} | host)
 
     def test_nothing_in_the_application_imports_the_composition_root_yet(self):
         # MOD-1a activated nothing. S3 added the audit vocabulary composition root (imported by nothing in the application). S4 activates the registry in
@@ -114,10 +115,14 @@ class CoreStaysIndependentTests(SimpleTestCase):
             if path.name not in allowed:
                 self.assertNotIn("build_registry", path.read_text(encoding="utf-8"), path.name)
 
-    def test_the_composition_root_imports_only_the_module_package_and_the_standard_library(self):
+    def test_the_composition_root_imports_only_the_module_package_the_manifests_and_the_standard_library(self):
+        # MOD-2: the ONE non-library import besides apps.modules is Request Intake's manifest module, by its fixed name, and nothing else of apps.intake.
         for name in absolute_imports(BACKEND / "config" / "modules.py"):
             with self.subTest(imported=name):
-                self.assertTrue(name.split(".")[0] in STDLIB or name == "apps.modules" or name.startswith("apps.modules."), name)
+                self.assertTrue(
+                    name.split(".")[0] in STDLIB or name == "apps.modules" or name.startswith("apps.modules.") or name in ("apps.intake.module", "apps.intake.module.MANIFEST"),
+                    name,
+                )
 
     def test_the_composition_root_names_modules_only_in_a_static_tuple(self):
         source = (BACKEND / "config" / "modules.py").read_text(encoding="utf-8")
@@ -159,10 +164,16 @@ class CoreStaysIndependentTests(SimpleTestCase):
                     self.assertTrue(any(name == a or name.startswith(a + ".") for a in allowed_project_imports), f"{path.name} imports {name}")
         self.assertEqual([p for p in imports_of("apps.modules") if p.startswith("apps/tasks/")], [])
 
-    def test_request_intake_does_not_import_the_module_package_yet(self):
+    def test_only_request_intakes_manifest_imports_the_module_package_and_nothing_in_it_imports_the_composition_root(self):
+        # MOD-2: apps/intake/module.py builds the manifest from apps.modules.manifest. No other file of the app imports the package, and none imports config.
         for path in _sources(BACKEND / "apps" / "intake"):
             names = absolute_imports(path)
-            self.assertFalse({n for n in names if n == "apps.modules" or n.startswith("apps.modules.") or n == "config.modules"}, path.name)
+            self.assertFalse({n for n in names if n == "config" or n.startswith("config.")}, path.name)
+            package = {n for n in names if n == "apps.modules" or n.startswith("apps.modules.")}
+            if path.name == "module.py":
+                self.assertTrue(package and all(n == "apps.modules.manifest" or n.startswith("apps.modules.manifest.") for n in package), package)
+            else:
+                self.assertFalse(package, path.name)
         for path in _sources(BACKEND / "workflows"):
             self.assertFalse({n for n in absolute_imports(path) if n.startswith(("apps.modules", "config.modules"))}, path.name)
 
@@ -175,7 +186,7 @@ class ExistingBehaviorIsUnchangedTests(SimpleTestCase):
         from config.task_registry import COMPOSITION
 
         self.assertIs(COMPOSITION.registry, PRODUCTION_REGISTRY)
-        self.assertEqual(set(PRODUCTION_REGISTRY), {"test.add_numbers", "request_intake.extract"})
+        self.assertEqual(set(PRODUCTION_REGISTRY), {"test.add_numbers", "request_intake.extract"})  # unchanged by MOD-2: the kind is a module's now, the handler is the same
         source = (BACKEND / "config" / "task_registry.py").read_text(encoding="utf-8")
         self.assertIn("from apps.intake.registry import PRODUCTION_REGISTRY", source)
         # MOD-1b S4: the composition root now also installs the module kind gate (config.modules is read there, and only there in this file); the

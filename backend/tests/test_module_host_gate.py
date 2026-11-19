@@ -1,10 +1,10 @@
 """DB-free tests for MOD-1b S4: the worker kind gate built from the static registry and the stored module state.
 
-``SimpleTestCase`` refuses every database query. The production gate (an EMPTY registry today) must answer without one; the gate of a registry with
+``SimpleTestCase`` refuses every database query. The production gate (Request Intake only, since MOD-2) reads the state through the same function; the gate of a registry with
 modules reads the state through ``apps.module_host.gate.read_host_state``, which these tests replace. What a real claim does against PostgreSQL (tasks held
 while disabled, resumed after enabling, a running attempt finishing, recovery and retry) is in tests/test_module_host_postgres.py and is NOT run here.
 
-The most important tests here are the legacy ones: Request Intake is not a module yet, so ``request_intake.extract`` must stay claimable with no module state.
+The Request Intake tests (MOD-2) pin that its kind is gated by the stored state like any module's, while the generic gate tests below use synthetic modules.
 """
 
 import logging
@@ -14,6 +14,7 @@ from unittest import mock
 from django.db import OperationalError
 from django.test import SimpleTestCase
 
+from apps.intake import services
 from apps.intake.registry import PRODUCTION_REGISTRY
 from apps.module_host import gate, rules
 from apps.module_host.errors import ModuleHostError
@@ -52,58 +53,108 @@ def fake_handler(kind):
 WORKER_REGISTRY = MappingProxyType({kind: fake_handler(kind) for kind in ("test.add_numbers", "request_intake.extract", "alpha_mod.work", "beta_mod.work", "gamma.unknown_to_registry")})
 
 
-class LegacyRequestIntakeTests(SimpleTestCase):
-    """Request Intake is not a module: its task kind must work exactly as before."""
+PRODUCTION_LEGACY = frozenset({"test.add_numbers"})
+INTAKE_KIND = "request_intake.extract"
 
-    def test_the_legacy_kinds_are_exactly_the_production_allowlist(self):
-        self.assertEqual(task_registry.LEGACY_UNGATED_KINDS, LEGACY)
-        self.assertEqual(task_registry.LEGACY_UNGATED_KINDS, frozenset(PRODUCTION_REGISTRY))  # a new production kind forces a decision
 
-    def test_the_production_gate_allows_request_intake_with_no_state_and_no_query(self):
-        answer = task_registry.COMPOSITION.kind_gate()  # SimpleTestCase: any query would raise
-        self.assertIsInstance(answer, frozenset)
-        self.assertEqual(answer, LEGACY)
-        self.assertIn("request_intake.extract", answer)
+def production_state(*, enabled=True, version="1.0.0", present=True, initialized=True):
+    rows = facts(("request_intake", enabled, version)) if present else {}
+    return mock.patch.object(gate, "read_host_state", return_value=HostState(rows, initialized))
+
+
+class RequestIntakeModuleGateTests(SimpleTestCase):
+    """MOD-2: Request Intake is a registered module. Its task kind is gated by the stored module state and is no longer a legacy kind."""
+
+    def test_the_legacy_kinds_are_only_the_queues_test_kind_and_every_other_production_kind_belongs_to_a_module(self):
+        self.assertEqual(task_registry.LEGACY_UNGATED_KINDS, PRODUCTION_LEGACY)
+        owned = set(task_registry.MODULE_REGISTRY.task_kinds)
+        self.assertEqual(owned, {INTAKE_KIND})
+        self.assertEqual(task_registry.LEGACY_UNGATED_KINDS | owned, frozenset(PRODUCTION_REGISTRY))  # a new production kind forces a decision
+        self.assertFalse(task_registry.LEGACY_UNGATED_KINDS & owned)
+
+    def test_the_gate_reads_the_state_and_allows_request_intake_only_when_it_is_available(self):
+        with production_state():
+            self.assertEqual(task_registry.COMPOSITION.kind_gate(), PRODUCTION_LEGACY | {INTAKE_KIND})
+        with production_state(enabled=False):
+            self.assertEqual(task_registry.COMPOSITION.kind_gate(), PRODUCTION_LEGACY)  # held: tasks stay queued, test.add_numbers is untouched
+        with production_state(version="0.9.0"):
+            self.assertEqual(task_registry.COMPOSITION.kind_gate(), PRODUCTION_LEGACY)
+
+    def test_missing_state_after_initialization_fails_closed_for_request_intake(self):
+        # the development database may hold the marker from an earlier empty-registry sync: an absent row is NOT "enabled"
+        with production_state(present=False, initialized=True):
+            self.assertEqual(task_registry.COMPOSITION.kind_gate(), PRODUCTION_LEGACY)
+
+    def test_before_any_sync_the_legacy_window_keeps_request_intake_claimable(self):
+        with production_state(present=False, initialized=False):
+            self.assertEqual(task_registry.COMPOSITION.kind_gate(), PRODUCTION_LEGACY | {INTAKE_KIND})
 
     def test_the_production_registry_and_reconciler_are_unchanged(self):
         self.assertIs(task_registry.COMPOSITION.registry, PRODUCTION_REGISTRY)
         self.assertEqual(task_registry.COMPOSITION.maintenance_hooks, ())
-        self.assertIsNotNone(task_registry.COMPOSITION.after_iteration)
+        self.assertIs(task_registry.COMPOSITION.after_iteration, services.reconcile_after_iteration)
 
-    def test_the_worker_claims_request_intake_through_the_production_gate(self):
+    def test_the_worker_claims_request_intake_only_through_the_production_gate(self):
         previous = worker._composition
         self.addCleanup(setattr, worker, "_composition", previous)
         worker.install_composition(task_registry.COMPOSITION)
-        self.assertEqual(worker._claimable_kinds(PRODUCTION_REGISTRY), LEGACY)
+        with production_state():
+            self.assertEqual(worker._claimable_kinds(PRODUCTION_REGISTRY), PRODUCTION_LEGACY | {INTAKE_KIND})
+        with production_state(enabled=False):
+            self.assertEqual(worker._claimable_kinds(PRODUCTION_REGISTRY), PRODUCTION_LEGACY)
 
-    def test_process_one_passes_the_legacy_kinds_to_the_claim_with_the_production_composition(self):
+    def test_process_one_passes_the_gated_kinds_to_the_claim_with_the_production_composition(self):
         previous = worker._composition
         self.addCleanup(setattr, worker, "_composition", previous)
         worker.install_composition(task_registry.COMPOSITION)
-        with mock.patch.object(worker, "recover_expired_leases"), mock.patch.object(worker, "claim_next_task", return_value=None) as claim, mock.patch.object(
-            worker, "_run_after_iteration"
-        ):
-            outcome = worker.process_one(worker_id="w-1", lease_seconds=60)
-        self.assertEqual(outcome.status, worker.ProcessStatus.IDLE)
-        self.assertEqual(claim.call_args.kwargs["allowed_kinds"], LEGACY)
+        for enabled, expected in ((True, PRODUCTION_LEGACY | {INTAKE_KIND}), (False, PRODUCTION_LEGACY)):
+            with self.subTest(enabled=enabled), production_state(enabled=enabled), mock.patch.object(worker, "recover_expired_leases"), mock.patch.object(
+                worker, "claim_next_task", return_value=None
+            ) as claim, mock.patch.object(worker, "_run_after_iteration"):
+                outcome = worker.process_one(worker_id="w-1", lease_seconds=60)
+                self.assertEqual(outcome.status, worker.ProcessStatus.IDLE)
+                self.assertEqual(claim.call_args.kwargs["allowed_kinds"], expected)
 
-    def test_a_task_kind_the_registry_does_not_declare_stays_unknown_even_with_a_legacy_set(self):
-        self.assertNotIn("request_intake.other", task_registry.COMPOSITION.kind_gate())
-        self.assertNotIn("alpha_mod.work", task_registry.COMPOSITION.kind_gate())
+    def test_a_task_kind_the_registry_does_not_declare_stays_unknown(self):
+        with production_state():
+            answer = task_registry.COMPOSITION.kind_gate()
+        self.assertNotIn("request_intake.other", answer)
+        self.assertNotIn("alpha_mod.work", answer)
 
-    def test_registering_request_intake_as_a_module_without_touching_the_legacy_set_fails_loudly(self):
-        takeover = ModuleRegistry.build([mod("request_intake", kinds=("request_intake.extract",))])
+    def test_keeping_the_request_intake_kind_in_the_legacy_set_would_fail_loudly(self):
         with self.assertRaises(ModuleHostError) as caught:
-            gate.make_kind_gate(takeover, task_registry.LEGACY_UNGATED_KINDS)
+            gate.make_kind_gate(task_registry.MODULE_REGISTRY, task_registry.LEGACY_UNGATED_KINDS | {INTAKE_KIND})
         self.assertEqual(caught.exception.code, "legacy_kind_claimed")
-        self.assertIn("request_intake.extract", str(caught.exception))
-        gate.make_kind_gate(takeover, {"test.add_numbers"})  # the explicit way: MOD-2 drops the kind from the legacy set in the same change
 
-    def test_the_built_in_registry_is_empty_so_nothing_is_gated_today(self):
+    def test_the_built_in_registry_holds_exactly_request_intake(self):
+        from apps.intake.module import MANIFEST
         from config.modules import BUILTIN_MODULES, build_registry
 
-        self.assertEqual(BUILTIN_MODULES, ())
-        self.assertEqual(len(build_registry()), 0)
+        self.assertEqual(BUILTIN_MODULES, (MANIFEST,))
+        self.assertEqual(build_registry().module_ids, ("request_intake",))
+        self.assertIs(task_registry.MODULE_REGISTRY.get("request_intake"), MANIFEST)
+
+
+class HandlerCompositionTests(SimpleTestCase):
+    """``rules.check_handler_composition``: the allowlist is exactly the legacy kinds plus the registry's task kinds."""
+
+    def test_the_production_composition_fits(self):
+        rules.check_handler_composition(task_registry.MODULE_REGISTRY, PRODUCTION_REGISTRY, task_registry.LEGACY_UNGATED_KINDS)
+
+    def test_a_declared_kind_without_a_handler_is_refused(self):
+        with self.assertRaises(ModuleHostError) as caught:
+            rules.check_handler_composition(REGISTRY, {"test.add_numbers", "alpha_mod.work"}, {"test.add_numbers"})
+        self.assertEqual(caught.exception.code, "handler_composition")
+        self.assertIn("beta_mod.work", str(caught.exception))
+
+    def test_a_handler_nobody_owns_is_refused(self):
+        with self.assertRaises(ModuleHostError) as caught:
+            rules.check_handler_composition(REGISTRY, {"test.add_numbers", "alpha_mod.work", "beta_mod.work", "gamma.stray"}, {"test.add_numbers"})
+        self.assertEqual(caught.exception.code, "handler_composition")
+        self.assertIn("gamma.stray", str(caught.exception))
+
+    def test_a_legacy_kind_may_have_a_handler_and_an_empty_registry_needs_only_legacy_handlers(self):
+        rules.check_handler_composition(EMPTY, {"test.add_numbers"}, {"test.add_numbers"})
 
 
 class GateAnswerTests(SimpleTestCase):

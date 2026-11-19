@@ -32,8 +32,8 @@ by passing the explicit ``SYSTEM_ACTOR`` sentinel.
 
 TRUST LIMITS (docs/architecture/module-contract.md, section 3.13). A context is a naming and authority boundary inside one process, not a sandbox: code
 admitted to the process can import Core services directly. The context exposes no database connection, no cursor, no registry or manifest mutation and no
-filesystem access, and imports nothing by name, but it cannot stop module code from doing those things by other means. Request Intake is NOT a module (MOD-2): it
-does not use a context, ``ModuleContext.open`` refuses its id, and its submission path is unchanged.
+filesystem access, and imports nothing by name, but it cannot stop module code from doing those things by other means. Request Intake is a registered module since MOD-2, but it
+does not use a context: its submission path and services are unchanged (a test pins that).
 """
 
 import uuid
@@ -137,7 +137,7 @@ class ModuleContext(_Frozen):
         """The context of ``module_id`` in ``registry`` (the approved static registry). Reads no database: identity comes from the registry alone.
 
         Raises ``ModuleContextError`` for something that is not a registry (``invalid_registry``), a malformed id (``invalid_module_id``) or a module the registry
-        does not contain (``unknown_module``: Request Intake, until MOD-2). ``handler_registry`` is the task handler allowlist ``enqueue`` validates against
+        does not contain (``unknown_module``). ``handler_registry`` is the task handler allowlist ``enqueue`` validates against
         (``apps.tasks.services.enqueue_task``'s ``registry``); ``None`` means the queue's own default.
         """
         if not isinstance(registry, ModuleRegistry):

@@ -6,7 +6,7 @@ before Django's app registry is ready. Core packages never import this file; a t
 
 * ``build_audit_vocabulary(registry=None)`` is a pure function: Core's vocabulary plus every ``AuditActionDeclaration`` of the registered
   modules, with the namespace owners and the reserved namespaces the registry knows. ``registry=None`` means the built-in modules
-  (``config.modules.BUILTIN_MODULES``, which is EMPTY in MOD-1b S3, so the result then equals Core's vocabulary).
+  (``config.modules.BUILTIN_MODULES``: Request Intake since MOD-2. It declares no audit action, because every action it emits is Core's, so the result still equals Core's vocabulary).
 * ``install_audit_vocabulary(registry=None)`` builds and installs it (``apps.audit.events.install_vocabulary``). It is idempotent, refuses a
   conflicting second installation, and is not called by any settings module, app config or entry point yet: with no module registered
   Core's own vocabulary is already the installed default, and the first module (MOD-2) decides where the call belongs (for example next to

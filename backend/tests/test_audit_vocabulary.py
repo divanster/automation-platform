@@ -133,8 +133,11 @@ class CoreVocabularyIsUnchangedTests(CleanAuditVocabularyMixin, SimpleTestCase):
             with self.subTest(action=action):
                 self.assertEqual(set(keys) & FORBIDDEN_DETAIL_KEYS, set())
 
-    def test_no_module_is_built_in_and_the_built_in_composition_equals_core(self):
-        self.assertEqual(module_root.BUILTIN_MODULES, ())
+    def test_the_built_in_modules_declare_no_audit_action_so_the_built_in_composition_equals_core(self):
+        # MOD-2: Request Intake is built in, and every audit action it emits is Core's (the request, revision, run, approval and rejection namespaces are
+        # reserved), so it declares none and the vocabulary events are checked against is exactly Core's.
+        self.assertEqual([m.module_id for m in module_root.BUILTIN_MODULES], ["request_intake"])
+        self.assertEqual([a for m in module_root.BUILTIN_MODULES for a in m.audit_actions], [])
         built = composition.build_audit_vocabulary()
         self.assertEqual(built, events.CORE_VOCABULARY)
         self.assertEqual(built.fingerprint, events.CORE_VOCABULARY.fingerprint)
@@ -820,8 +823,7 @@ class RequestNamespaceIsCoreTests(CleanAuditVocabularyMixin, SimpleTestCase):
     def test_no_module_that_exists_or_is_modelled_breaks(self):
         from tests.module_support import full_manifest
 
-        self.assertEqual(module_root.BUILTIN_MODULES, ())
-        self.assertEqual(len(module_root.build_registry()), 0)
+        self.assertEqual(module_root.build_registry().module_ids, ("request_intake",))
         registry = registry_of(intake_like_manifest(), full_manifest(), audit_module(), manifest(module_id="plain_one"))
         self.assertEqual(set(registry.module_ids), {"request_intake", "full_module", "audit_demo", "plain_one"})
         self.assertEqual(registry.namespace_owners["intake"], "request_intake")  # the synthetic Request Intake keeps its own namespaces
@@ -923,7 +925,7 @@ class ArchitectureTests(SimpleTestCase):
         for name in _imports(BACKEND / "config/audit_vocabulary.py"):
             with self.subTest(imported=name):
                 self.assertTrue(name.split(".")[0] in STDLIB or name in allowed or name in {"apps.audit.events.CORE_VOCABULARY"}, name)
-        self.assertEqual(module_root.BUILTIN_MODULES, ())
+        self.assertEqual(len(module_root.BUILTIN_MODULES), 1)  # MOD-2: Request Intake
 
     def test_no_dynamic_import_callable_path_or_runtime_discovery(self):
         banned_imports = {"importlib", "pkgutil", "os", "glob", "pathlib", "subprocess", "socket", "pickle", "ctypes", "django", "sys"}
@@ -944,7 +946,7 @@ class ArchitectureTests(SimpleTestCase):
         self.assertEqual(COMPOSITION.maintenance_hooks, ())
         source = (BACKEND / "config" / "task_registry.py").read_text(encoding="utf-8")
         self.assertNotIn("audit", source)
-        self.assertEqual(module_root.BUILTIN_MODULES, ())
+        self.assertEqual(len(module_root.BUILTIN_MODULES), 1)  # MOD-2: Request Intake
 
     def test_the_module_package_is_still_free_of_audit_and_django_imports(self):
         for path in sorted((BACKEND / "apps" / "modules").rglob("*.py")):

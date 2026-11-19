@@ -43,8 +43,8 @@ from apps.intake.access import Action
 from apps.intake.submission import REQUEST_INTAKE_ATTRIBUTION, submit_request
 from apps.module_host import services as host
 from apps.module_host.context import SYSTEM_ACTOR, ModuleContext
-from apps.module_host.errors import ModuleContextError
-from apps.module_host.models import ModuleHostMarker, ModuleState
+from apps.module_host.errors import ModuleContextError, ModuleHostError
+from apps.module_host.models import ModuleHostMarker, ModuleNamespaceClaim, ModuleState
 from apps.tasks.handlers import TaskHandler
 from apps.tasks.models import Task
 from apps.tasks.policy import InvalidPayloadError
@@ -901,11 +901,12 @@ class LegacyRequestIntakeTests(review_base.ReviewCase):
         self.registry = support.registry()
         host.sync_modules(self.registry)
 
-    def test_request_intake_cannot_get_a_context_until_mod_2(self):
+    def test_request_intake_gets_a_context_from_the_composition_root_since_mod_2_and_its_submission_still_does_not_use_it(self):
         from config.module_context import module_context
 
+        self.assertEqual(module_context("request_intake").module_id, "request_intake")
         with self.assertRaises(ModuleContextError) as caught:
-            module_context("request_intake")
+            module_context("intake")  # a legacy namespace, not a module id
         self.assertEqual(caught.exception.code, "unknown_module")
 
     def test_the_whole_workflow_runs_with_modules_synced_and_one_disabled(self):
@@ -919,8 +920,23 @@ class LegacyRequestIntakeTests(review_base.ReviewCase):
             submit(self.operator)
         self.assertFalse([q for q in queries.captured_queries if "module_host" in q["sql"] or "FOR SHARE" in q["sql"]])
 
-    def test_the_production_worker_gate_still_lets_the_legacy_kinds_through(self):
-        from config.task_registry import LEGACY_UNGATED_KINDS
+    def test_the_production_worker_gate_holds_request_intake_and_namespace_continuity_refuses_the_production_sync_after_a_synthetic_one(self):
+        from config.task_registry import LEGACY_UNGATED_KINDS, MODULE_REGISTRY
 
+        # setUp synced a SYNTHETIC registry (modules ctx_mod and other_mod, namespaces ctx_mod, intake and other_mod): the initialization marker exists and Request
+        # Intake has no state row, so the production gate fails closed for its kind (MOD-2).
         self.assertEqual(COMPOSITION.kind_gate(), LEGACY_UNGATED_KINDS)
-        self.assertIn("request_intake.extract", COMPOSITION.kind_gate())
+        self.assertNotIn("request_intake.extract", COMPOSITION.kind_gate())
+        before = (list(ModuleState.objects.values_list("module_id", flat=True).order_by("module_id")), list(ModuleNamespaceClaim.objects.values_list("namespace", "module_id").order_by("namespace")))
+        # The production registry can never follow that sync: it releases ctx_mod and other_mod and gives `intake` to request_intake. Namespace continuity
+        # (S4) refuses it as it must, changes nothing, and the gate stays closed. Real installations never synced a synthetic registry; the production
+        # sync after an earlier empty-registry sync is tested in test_request_intake_module_postgres.py.
+        with self.assertRaises(ModuleHostError) as caught:
+            host.sync_modules(MODULE_REGISTRY)
+        self.assertIn(caught.exception.code, ("namespace_released", "namespace_ownership_changed"))
+        self.assertEqual(
+            (list(ModuleState.objects.values_list("module_id", flat=True).order_by("module_id")), list(ModuleNamespaceClaim.objects.values_list("namespace", "module_id").order_by("namespace"))),
+            before,
+        )
+        self.assertFalse(ModuleState.objects.filter(module_id="request_intake").exists())
+        self.assertEqual(COMPOSITION.kind_gate(), LEGACY_UNGATED_KINDS)

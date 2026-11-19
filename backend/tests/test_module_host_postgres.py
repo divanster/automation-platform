@@ -10,8 +10,8 @@ Their DB-free counterparts are tests/test_module_host_rules.py, _services.py, _g
 What they cover: the migration (additive, round trip, existing data untouched); the stored constraints; namespace ownership that persists and cannot be
 reassigned or deleted; sync, enable and disable against real rows, with the row locks and the audit event in one transaction; rollback when the audit write
 fails; concurrent enables, disables and syncs; and the worker with the module gate on committed data: tasks held (never failed) while a module is disabled,
-resumed after it is enabled, a running attempt finishing, recovery and retry unchanged, version mismatch, missing state after the sync, and Request
-Intake's legacy task kind working with the production composition. The existing suites (test_tasks_postgres, test_tasks_gating_postgres,
+resumed after it is enabled, a running attempt finishing, recovery and retry unchanged, version mismatch and missing state after the sync. (Request Intake's
+worker behaviour as a registered module moved to test_request_intake_module_postgres.py in MOD-2.) The existing suites (test_tasks_postgres, test_tasks_gating_postgres,
 test_tasks_recovery_postgres, test_intake_postgres, test_api_postgres, test_audit_vocabulary_postgres) must still pass UNCHANGED.
 
 Run (from backend\\, after the runbook's database setup):
@@ -34,8 +34,6 @@ from apps.audit import events
 from apps.audit.models import AuditEvent
 from apps.audit.recorder import record_event
 from apps.cases.errors import ImmutableRecordError
-from apps.cases.models import WorkflowRun
-from apps.intake.submission import submit_request
 from apps.module_host import gate
 from apps.module_host import services as host
 from apps.module_host.errors import ModuleHostError
@@ -46,9 +44,7 @@ from apps.tasks import handlers, worker
 from apps.tasks import services as task_services
 from apps.tasks.models import Task, TaskAttempt
 from apps.tasks.policy import TaskRetryableError
-from config import task_registry
 from tests import test_tasks_postgres as base
-from tests.intake_support import VALID_TEXT
 from tests.module_support import FakeHandler, dep, named
 
 requires_postgres = base.requires_postgres
@@ -856,47 +852,6 @@ class GatedWorkerTests(base.DedicatedTestDatabaseMixin, TransactionTestCase):
         self.assertEqual((Task.objects.get(pk=first.pk).state, Task.objects.get(pk=second.pk).state), ("succeeded", "queued"))
 
 
-@tag("requires_postgres")
-@requires_postgres
-class RequestIntakeRegressionTests(base.DedicatedTestDatabaseMixin, TransactionTestCase):
-    """Request Intake is not a module: the production composition (with its gate) runs its task exactly as before, whatever the module state says."""
-
-    def setUp(self):
-        super().setUp()
-        self.addCleanup(setattr, worker, "_composition", worker._composition)
-        worker.install_composition(task_registry.COMPOSITION)
-        self.user = get_user_model().objects.create_user(username="requester")
-
-    def test_the_extraction_task_runs_with_no_module_state_at_all(self):
-        result = submit_request(text=VALID_TEXT, submitted_by=self.user)
-        self.assertEqual(ModuleState.objects.count(), 0)
-        outcome = worker.process_one(worker_id="w-intake", lease_seconds=60)
-        self.assertEqual(outcome.status, worker.ProcessStatus.SUCCEEDED)
-        self.assertEqual(outcome.kind, "request_intake.extract")
-        self.assertEqual(WorkflowRun.objects.get(pk=result.run.pk).state, "needs_review")
-
-    def test_the_extraction_task_runs_even_when_every_unrelated_module_is_disabled(self):
-        synced()
-        for module_id in (LEAF, SOLO, BASE):
-            host.disable_module(REG, module_id, now=at(1))
-        result = submit_request(text=VALID_TEXT, submitted_by=self.user)
-        self.assertEqual(worker.process_one(worker_id="w-intake", lease_seconds=60).status, worker.ProcessStatus.SUCCEEDED)
-        self.assertEqual(WorkflowRun.objects.get(pk=result.run.pk).state, "needs_review")
-
-    def test_the_test_handler_task_still_runs_through_the_production_composition(self):
-        task = task_services.enqueue_task(kind="test.add_numbers", payload={"values": [2, 3]}).task
-        self.assertEqual(worker.process_one(worker_id="w", lease_seconds=60).status, worker.ProcessStatus.SUCCEEDED)
-        self.assertEqual(Task.objects.get(pk=task.pk).result, {"count": 2, "sum": 5})
-
-    def test_the_extraction_task_runs_when_the_state_rows_are_gone_but_the_marker_exists(self):
-        synced()
-        with connection.cursor() as cursor:
-            cursor.execute("DELETE FROM module_host_modulestate")
-        result = submit_request(text=VALID_TEXT, submitted_by=self.user)
-        self.assertEqual(worker.process_one(worker_id="w-intake", lease_seconds=60).status, worker.ProcessStatus.SUCCEEDED)
-        self.assertEqual(WorkflowRun.objects.get(pk=result.run.pk).state, "needs_review")
-
-    def test_the_production_gate_reads_no_module_state(self):
-        synced()
-        with mock.patch.object(gate, "read_host_state", side_effect=AssertionError("must not read")):
-            self.assertEqual(task_registry.COMPOSITION.kind_gate(), task_registry.LEGACY_UNGATED_KINDS)
+# MOD-2: Request Intake is a registered module, so its worker behaviour with the production composition (state creation, held and resumed tasks, a running
+# attempt finishing, recovery, retry, the permission matrix) is tested in tests/test_request_intake_module_postgres.py. The class that used to be here asserted
+# that Request Intake was NOT a module and had a legacy ungated task kind; it no longer describes the system.

@@ -8,26 +8,33 @@ setting, no dynamic import, no registration at run time.
 * ``registry``: ``apps.intake.registry.PRODUCTION_REGISTRY`` (the queue's handlers plus the request-intake
   extraction handler), a read-only mapping.
 * ``after_iteration``: the request-intake failure reconciler, run after every worker iteration.
-* ``kind_gate`` (MOD-1b S4): ``apps.module_host.gate.make_kind_gate`` over the approved static module registry and the stored module
-  state. ``LEGACY_UNGATED_KINDS`` are the task kinds that existed before modules; they stay claimable with no module state, so Request Intake's
-  ``request_intake.extract`` works exactly as before. Request Intake is NOT a module yet: MOD-2 registers it and must remove its kind from the
-  legacy set in the same change (``make_kind_gate`` refuses a kind that is both legacy and declared by a registered module).
+* ``kind_gate`` (MOD-1b S4, MOD-2): ``apps.module_host.gate.make_kind_gate`` over the approved static module registry and the stored module
+  state. ``LEGACY_UNGATED_KINDS`` are the task kinds that existed before modules and belong to no module: only ``test.add_numbers`` now. It stays claimable
+  with no module state. Request Intake is a registered module since MOD-2, so ``request_intake.extract`` left the legacy set: it is claimable only while
+  the module is enabled, version-matched and has state (``module_sync`` creates the state). A disabled module's tasks stay queued, never failed.
+* The handler allowlist is still ``PRODUCTION_REGISTRY`` (the handler object is the one it always was). ``check_handler_composition`` verifies at import that its
+  kinds are exactly the legacy kinds plus the task kinds the registry declares, so a module kind without a handler, or a handler nobody owns, stops the process
+  at start instead of being silently gated or allowed. There is still one worker, one reconciler (``after_iteration``) and no maintenance hook.
 """
 
-from apps.intake.handlers import EXTRACT_HANDLER
 from apps.intake.registry import PRODUCTION_REGISTRY
 from apps.intake.services import reconcile_after_iteration
 from apps.module_host.gate import make_kind_gate
+from apps.module_host.rules import check_handler_composition
 from apps.tasks.handlers import TEST_ADD_NUMBERS
 from apps.tasks.worker import Composition
 from config.modules import build_registry
 
-# Task kinds that predate modules and need no module state. A test pins this set against PRODUCTION_REGISTRY, so a new production kind has to be
-# decided on (a module's, or legacy) rather than silently held or silently allowed.
-LEGACY_UNGATED_KINDS = frozenset({TEST_ADD_NUMBERS, EXTRACT_HANDLER.kind})
+# Task kinds that predate modules and belong to none: the queue's deterministic test handler. They need no module state. (Request Intake's
+# ``request_intake.extract`` was legacy before MOD-2; a registered module may not also be legacy, ``make_kind_gate`` refuses it.) A new production kind has to
+# be decided on, a module's or legacy, rather than silently held or silently allowed: ``check_handler_composition`` enforces it.
+LEGACY_UNGATED_KINDS = frozenset({TEST_ADD_NUMBERS})
+
+MODULE_REGISTRY = build_registry()
+check_handler_composition(MODULE_REGISTRY, PRODUCTION_REGISTRY, LEGACY_UNGATED_KINDS)
 
 COMPOSITION = Composition(
     registry=PRODUCTION_REGISTRY,
     after_iteration=reconcile_after_iteration,
-    kind_gate=make_kind_gate(build_registry(), LEGACY_UNGATED_KINDS),
+    kind_gate=make_kind_gate(MODULE_REGISTRY, LEGACY_UNGATED_KINDS),
 )
