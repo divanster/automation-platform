@@ -313,7 +313,7 @@ report the number you get if it differs.
 
 ## 13. AI extraction mode (AI-2a)
 
-> **Status: written on `feat/ai-request-intake-extraction`; DB-free tests and a mocked transport only; the 35 PostgreSQL tests in `tests/test_intake_ai_postgres.py` are written and have not been run.** Everything above describes
+> **Status: implemented on `feat/ai-request-intake-extraction` (implementation `e2fac8a`); DB-free tests and a mocked transport in the VM; the owner reported locally that the 35 PostgreSQL tests in `tests/test_intake_ai_postgres.py` and a 736-test selected regression passed (238.962 s, exit code 0; owner-supplied, not run or observed by the VM; tested scenarios only; see the [local validation record](local-validation-record.md)).** Everything above describes
 > the default (`deterministic`) mode, which AI-2a does not change.
 
 **What it is.** A second `RequestExtractor`, `apps.intake.ai_extraction.AIRequestExtractor`, that asks the AI Gateway (profile `workbench-gpt5`, KPMG Workbench) for a structured answer and returns the same kind of candidate the fixture parser returns.

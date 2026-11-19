@@ -3,7 +3,7 @@
 > **AI-2a status (added after AI-1b was merged, PR #20): Request Intake can now extract with the gateway, but only when an operator explicitly enables it.** The default
 > is unchanged: with nothing set, the worker uses the deterministic fixture parser and no AI provider is called. Section 15 describes the extraction modes, the policy and
 > failure rules and what was not done. AI-2a was checked in the development VM with DB-free tests and a MOCKED transport only (the VM never contacts the Workbench);
-> its PostgreSQL tests are written and **have not been run**. Where an older statement below says that nothing calls the gateway, it describes AI-1a and AI-1b as merged;
+> its 35 PostgreSQL tests and a 736-test selected regression passed in the owner's local run (owner-supplied; tested scenarios only; section 15, status). Where an older statement below says that nothing calls the gateway, it describes AI-1a and AI-1b as merged;
 > since AI-2a the only caller is Request Intake's AI extractor, in ai mode only.
 
 > **AI-1b status (added after AI-1a was merged, PR #19; AI-1b itself was merged as PR #20): the KPMG Workbench provider adapter is written, aligned with the client-side HTTP
@@ -487,9 +487,11 @@ these tests. Not tested: the real Workbench, a real proxy, real TLS certificates
 
 ## 15. Request Intake extraction with the gateway (AI-2a)
 
-> **Status: written; checked in the development VM with DB-free tests and a MOCKED HTTP transport (148 new tests, 2636 DB-free tests in all pass); the 35 PostgreSQL tests in
-> `tests/test_intake_ai_postgres.py` are written and have NOT been run.** The VM never contacts the Workbench and holds no key. The only live evidence is the owner's single local GPT-5 smoke
-> test of the provider (section 14.10(d)), which did not use Request Intake's prompt or schema. Nothing here is production-ready, and no accuracy of AI extraction has been measured.
+> **Status: implemented on `feat/ai-request-intake-extraction` (implementation `e2fac8a`); checked in the development VM with DB-free tests and a MOCKED HTTP transport (148 new tests, 2636 DB-free tests in all pass). The project owner
+> ran the 35 PostgreSQL tests in `tests/test_intake_ai_postgres.py` and a selected PostgreSQL regression locally: all 35 passed, and the regression passed with 736 tests in 238.962 s, exit code 0, test database destroyed (owner-supplied; the VM did
+> not run or observe them; no output is stored; see the [local validation record](../development/local-validation-record.md)). That covers the tested scenarios only, with a scripted provider: existing review, approval, audit and worker behaviour were preserved
+> in them.** The VM never contacts the Workbench and holds no key. The only live evidence about the provider is the owner's single local GPT-5 smoke test (section 14.10(d)), which did not use Request Intake's prompt or schema.
+> **There is no real GPT-5 end-to-end test of Request Intake, no extraction accuracy evaluation set, no frontend change and no production-readiness claim.**
 
 ### 15.1 What was added, and what was not
 
@@ -633,7 +635,7 @@ extra-key refusal, the default mode, the lease check, the preflight, policy wide
 | `test_intake_ai_extraction.py` | 37 | the request sent, policy before any send, every failure class with exactly one request, no fallback, no leakage to errors or logs, preflight, and the whole pipeline: revision one, hash equal to the domain's, findings, warnings, no approval |
 | `test_intake_ai_composition.py` | 53 | the settings and defaults, deterministic mode builds nothing, fail-closed start-up, the lease rule, the handler wiring and failure mapping, `prepare_worker`, the `runworker` start-up and logging |
 | `test_intake_ai_boundaries.py` | 16 | the extractor is the only importer of the gateway, no environment or credential in the app, the gateway stays generic, no model, migration, setting, audit action or failure code, the workflows untouched |
-| `test_intake_ai_postgres.py` | 35 (**not run**) | AI extraction through the real worker, revision, validation, review, approval and rejection, retry and exhaustion, recovery, rollback, idempotency, module disabled, competing workers, the deterministic regression |
+| `test_intake_ai_postgres.py` | 35 (**passed in the owner's local run**; owner-supplied, not run by the VM) | AI extraction through the real worker, revision, validation, review, approval and rejection, retry and exhaustion, recovery, rollback, idempotency, module disabled, competing workers, the deterministic regression |
 
 Two existing test files were edited, pins only: `test_intake_composition.py` (the app's source-file list and the list of pure modules) and `test_ai_gateway_boundaries.py` (the importers of the gateway and the files that may name it); the existing extraction, worker, gating and
-module tests pass unchanged. Not tested: the real Workbench with Request Intake's prompt, PostgreSQL (written only), concurrency beyond the written tests, and cost or latency.
+module tests pass unchanged. Not tested: the real Workbench with Request Intake's prompt, concurrency beyond the written PostgreSQL tests, behaviour in a deployed installation, and cost or latency. The PostgreSQL tests ran only in the owner's local run, not in the VM.

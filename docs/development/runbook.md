@@ -646,7 +646,7 @@ answer fields beyond `choices[0].message.content`. Do not point a real key at th
 
 ### 5.6 Request Intake AI extraction (AI-2a): modes, configuration and local validation
 
-**Status: written; checked in the VM with DB-free tests and a mocked transport only; its 35 PostgreSQL tests are written and have NOT been run.** The VM never contacts the Workbench and holds no key. Design, the failure table and
+**Status: PostgreSQL validation passed in the owner's local run (owner-supplied; not run by the VM).** The VM checked the code with DB-free tests and a mocked transport (148 new tests, 2636 in all). The owner ran the 35 tests of `tests/test_intake_ai_postgres.py` and a selected PostgreSQL regression locally: **all 35 passed, and the regression passed with 736 tests in 238.962 s, exit code 0, test database destroyed.** No output is stored; see the [local validation record](local-validation-record.md). Tested scenarios only; no real GPT-5 Request Intake test, accuracy evaluation or production-readiness claim exists. The VM never contacts the Workbench and holds no key. Design, the failure table and
 the remaining limitations: [ai-gateway.md](../architecture/ai-gateway.md) section 15.
 
 **What changes in a running installation: nothing, unless you turn it on.** With none of the variables below set, the worker extracts with the deterministic fixture parser exactly as before, builds no AI gateway, reads no key and
@@ -703,7 +703,7 @@ $Py = "..\.venv\Scripts\python.exe"
 git diff --check
 ```
 
-**PostgreSQL validation (LOCAL COMPUTER ONLY; owner-run; written, not run).** From `backend\`, with `AP_RUN_DB_TESTS` unset in the first part and a dedicated development server, as in section 5.4. The AI tests use a fake transport, so no key is needed and nothing is sent;
+**PostgreSQL validation (LOCAL COMPUTER ONLY; owner-run; passed in the owner's local run; the steps to repeat it).** From `backend\`, with `AP_RUN_DB_TESTS` unset in the first part and a dedicated development server, as in section 5.4. The AI tests use a fake transport, so no key is needed and nothing is sent;
 the test runner removes every `AP_INTAKE_*` and `AP_AI_*` variable from the process so that a key or `ai` mode in your `.env` cannot reach a test.
 
 ```powershell
@@ -725,7 +725,7 @@ try {
 Report the exact `Ran N tests` lines and any failure. The groups to look at first if something fails: the rollback test (`AIFailureSemanticsTests`, which patches `record_event` inside the second transaction), the retry-exhaustion test (it advances the worker's clock past the back-off, as the existing recovery tests do),
 the concurrency test (two threads, each with its own connection), the module-disabled tests (they rely on the gate reading committed state on every iteration) and the review tests on an AI-produced revision.
 
-**What nobody has checked:** a Request Intake extraction against the real Workbench, how often GPT-5 answers inside the schema, the end-to-end latency and cost, a stored company policy, behaviour under load, and every PostgreSQL scenario above.
+**What nobody has checked:** a Request Intake extraction against the real Workbench, how often GPT-5 answers inside the schema, the end-to-end latency and cost, a stored company policy, behaviour under load, and any PostgreSQL scenario beyond the tested ones (the owner's local run passed the tests above).
 
 ## 6. Local Windows computer: setup and validation (reference procedure; owner-operated)
 
@@ -1188,7 +1188,7 @@ be updated when that is done and confirmed.
 | Task queue and background worker ([details](persistent-worker-slice.md)) | **Implemented** (first slice); the PostgreSQL tests passed in the owner's local run, tested scenarios only |
 | AI gateway foundation (AI-1a: contracts, policy, registry, deterministic test provider; [ai-gateway.md](../architecture/ai-gateway.md)) | **Implemented and merged** (PR #19); DB-free tests only; called only by the opt-in Request Intake extractor (AI-2a) |
 | KPMG Workbench provider adapter (AI-1b; [section 5.5](#55-kpmg-workbench-provider-ai-1b-configuration-and-local-validation), [ai-gateway.md](../architecture/ai-gateway.md) section 14) | **Merged** (PR #20); aligned with the client-side contract from the FI audit; 147 new DB-free tests with a mocked transport; the VM never ran it against the Workbench; the owner reports one local GPT-5 smoke test (owner-supplied, [section 14.10(d)](../architecture/ai-gateway.md)); not in the production composition (`config/ai_gateway.py` is empty); built only by the opt-in Request Intake composition |
-| Request Intake extraction through the gateway (AI-2a; [section 5.6](#56-request-intake-ai-extraction-ai-2a-modes-configuration-and-local-validation), [ai-gateway.md](../architecture/ai-gateway.md) section 15) | **Written on `feat/ai-request-intake-extraction`** (committed locally, not pushed; awaiting review); explicit opt-in (`AP_INTAKE_EXTRACTION_MODE=ai`), default unchanged; 148 new DB-free tests with a mocked transport; 35 PostgreSQL tests written, **not run**; never run end to end against the Workbench |
+| Request Intake extraction through the gateway (AI-2a; [section 5.6](#56-request-intake-ai-extraction-ai-2a-modes-configuration-and-local-validation), [ai-gateway.md](../architecture/ai-gateway.md) section 15) | **Implemented on `feat/ai-request-intake-extraction`** (implementation `e2fac8a`; pushed, PR not yet merged); explicit opt-in (`AP_INTAKE_EXTRACTION_MODE=ai`), default unchanged; 148 new DB-free tests with a mocked transport; the owner's local run passed the 35 PostgreSQL tests and a 736-test regression (owner-supplied; tested scenarios only); never run end to end against the Workbench |
 | Any AI feature a user can reach | Only in `ai` mode, which an operator must enable explicitly (AI-2a); not validated against the real service |
 | Frontend (`frontend/`; React, TypeScript, Vite; [details](frontend-slice.md)) | **Written.** UI-1 (login, request list, new request, request detail with polling) was reported by the owner as run in a real browser (no output recorded). UI-2 (draft editing, approve with warning acknowledgement, reject, per-request audit history, stale-revision handling; [section 13](frontend-slice.md#13-ui-2-review-and-approval)): 264 frontend tests, typecheck and build pass on the VM against a stubbed `fetch` and the 1246 backend DB-free tests pass; one UI-2 workflow (submit, extract, edit, approve by a second user, audit) was reported by the owner as run in a real browser against the local API, PostgreSQL and worker ([record](local-validation-record.md); screenshots described, not stored), so **UI-2 is development-validated for that workflow only**; the stale-revision conflict and rejection were not shown. Not served by Django; run with `npm run dev` |
 | Local `.env` loading (`manage.py` only, development settings only, existing variables win; [section 3](#3-environment-configuration)) | **Implemented**; 42 DB-free tests; checked end to end on the VM with a temporary fake `.env` (deleted); **not yet used with the real local database** |

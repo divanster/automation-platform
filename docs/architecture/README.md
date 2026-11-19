@@ -12,7 +12,7 @@
 > owner's local run, tested scenarios only; [slice document](../development/review-services-slice.md)) and a REST API slice (session
 > login with CSRF protection and throttling, request endpoints over those services; DB-free tests pass, 96 of the first 98 PostgreSQL
 > tests passed in the owner's local run and 2 failed on test defects now corrected, rerun pending; [slice document](../development/rest-api-slice.md)). Export, a React UI, password reset,
-> the installer does not exist; the AI gateway is a standalone foundation with one provider adapter (KPMG Workbench; the owner reports one local GPT-5 smoke test), and Request Intake can extract through it only when an operator explicitly enables `ai` mode (AI-2a: off by default, no automatic fallback, DB-free tests and a mocked transport only, PostgreSQL tests written and not run; [ai-gateway.md](ai-gateway.md), section 15). Everything below is a design unless an Accepted ADR says otherwise.
+> the installer does not exist; the AI gateway is a standalone foundation with one provider adapter (KPMG Workbench; the owner reports one local GPT-5 smoke test), and Request Intake can extract through it only when an operator explicitly enables `ai` mode (AI-2a: off by default, no automatic fallback, DB-free tests and a mocked transport in the VM, 35 PostgreSQL tests and a 736-test regression passed in the owner's local run, tested scenarios only, never run end to end against the Workbench; [ai-gateway.md](ai-gateway.md), section 15). Everything below is a design unless an Accepted ADR says otherwise.
 
 This directory contains the initial architecture specification and
 implementation plan for the Automation Platform.
