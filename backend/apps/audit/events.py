@@ -33,6 +33,9 @@ ACTION_REJECTION_RECORDED = "rejection.recorded"
 # Core, so no module can declare these two; they are Core's own actions, recorded with the ``module`` subject type.
 ACTION_MODULE_ENABLED = "module.enabled"
 ACTION_MODULE_DISABLED = "module.disabled"
+# The AI settings API (apps.ai_settings): a successful change of how Request Intake extracts. Core's own action in the Core-reserved ``ai_settings`` namespace;
+# no module can declare it. The subject is the singleton settings row (see ``SUBJECT_AI_SETTINGS``).
+ACTION_AI_SETTINGS_UPDATED = "ai_settings.updated"
 
 ACTIONS = (
     ACTION_REQUEST_SUBMITTED,
@@ -44,6 +47,7 @@ ACTIONS = (
     ACTION_REJECTION_RECORDED,
     ACTION_MODULE_ENABLED,
     ACTION_MODULE_DISABLED,
+    ACTION_AI_SETTINGS_UPDATED,
 )
 
 SUBJECT_RUN = "run"
@@ -51,7 +55,8 @@ SUBJECT_REVISION = "revision"
 SUBJECT_APPROVAL = "approval"
 SUBJECT_REJECTION = "rejection"
 SUBJECT_MODULE = "module"  # a module as a subject: ``module.enabled`` and ``module.disabled`` (S4); ``subject_id`` is the ModuleState id
-SUBJECT_TYPES = (SUBJECT_RUN, SUBJECT_REVISION, SUBJECT_APPROVAL, SUBJECT_REJECTION, SUBJECT_MODULE)
+SUBJECT_AI_SETTINGS = "ai_settings"  # the singleton AI extraction settings row; ``subject_id`` is the constant ``apps.ai_settings.models.SETTINGS_SUBJECT_ID``
+SUBJECT_TYPES = (SUBJECT_RUN, SUBJECT_REVISION, SUBJECT_APPROVAL, SUBJECT_REJECTION, SUBJECT_MODULE, SUBJECT_AI_SETTINGS)
 
 ACTOR_USER = "user"  # a login user, identified by ``User.public_id``
 ACTOR_SYSTEM = "system"  # the worker or the application itself; not a login user
@@ -70,6 +75,8 @@ DETAIL_KEYS = MappingProxyType(
         # identifiers, a version and a fingerprint only; ``cause`` is a short token such as ``admin_command`` or ``sync``
         ACTION_MODULE_ENABLED: frozenset({"module_id", "installed_version", "registry_fingerprint", "cause"}),
         ACTION_MODULE_DISABLED: frozenset({"module_id", "installed_version", "registry_fingerprint", "cause"}),
+        # the saved settings as identifiers and numbers only: never a key, header, endpoint, proxy or free text (every value was checked against the catalog)
+        ACTION_AI_SETTINGS_UPDATED: frozenset({"revision", "extraction_mode", "provider_id", "profile_id", "policy_mode", "timeout_seconds"}),
     }
 )
 

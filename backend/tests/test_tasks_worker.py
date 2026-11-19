@@ -385,6 +385,9 @@ class WorkerIdTests(SimpleTestCase):
 
 class RunWorkerCommandTests(SimpleTestCase):
     def setUp(self):
+        patcher = mock.patch("config.task_registry.load_stored_settings", return_value=None)  # no stored AI settings row, and no database in a SimpleTestCase
+        patcher.start()
+        self.addCleanup(patcher.stop)
         patcher = mock.patch.object(runworker, "connections")
         self.connections = patcher.start()
         self.addCleanup(patcher.stop)

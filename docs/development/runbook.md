@@ -727,6 +727,45 @@ the concurrency test (two threads, each with its own connection), the module-dis
 
 **What nobody has checked:** a Request Intake extraction against the real Workbench, how often GPT-5 answers inside the schema, the end-to-end latency and cost, a stored company policy, behaviour under load, and any PostgreSQL scenario beyond the tested ones (the owner's local run passed the tests above).
 
+### 5.6a AI settings API: stored extraction settings, restart and checks
+
+**Status: written and DB-free tested in the development VM only (145 new tests, 2841 DB-free tests in all pass). Its PostgreSQL tests (`tests/test_ai_settings_postgres.py`, including the audit and `audit.0003` migration tests) are written and have never been run; PostgreSQL validation is pending; nothing was sent to the Workbench; there is no frontend yet.** Design and contract:
+[ai-gateway.md](../architecture/ai-gateway.md) section 16.
+
+**What changes in a running installation:** one new table (`ai_settings.0001_initial`), one new endpoint (`GET`/`PUT /api/ai-settings/extraction/`, administrators only) and a start-up read in `runworker`. With no stored row nothing changes: the worker keeps using the
+variables of section 5.6, and the default is deterministic.
+
+**Order matters.** Run `python manage.py migrate` **before** starting the worker; a worker started against a database without the `ai_settings` table refuses to start (it never falls back to the environment).
+
+**Precedence.** Once an administrator has saved settings, the stored row replaces `AP_INTAKE_EXTRACTION_MODE`, `AP_AI_POLICY_MODE` and `AP_INTAKE_AI_TIMEOUT_SECONDS` for the worker. `AP_AI_WORKBENCH_*` (the key above all) is always read from the environment of the worker; the API
+neither accepts nor returns a key. To return to environment control there is no API call yet: an administrator saves `deterministic`, or the row is removed deliberately (for example with `manage.py shell`) after you have decided to.
+
+**A change needs a worker restart; there is no hot reload.** `runworker` reads the row once at start-up. After a save: stop the worker, start it again, and read its first log line (`Request Intake extraction mode: ... Source: stored settings, revision N.`) to confirm which
+revision it runs. The API cannot tell you what a running worker uses, and the provider status it reports (`configured`, `missing_api_key` / `invalid_configuration`) is that of the **web** process's environment; make sure the worker's environment has the key. The web process needs no restart
+for a save, only for a changed `WORKER_LEASE_SECONDS` or Workbench variable.
+
+**If the worker refuses to start** with `Extraction configuration error: stored AI extraction settings ...`, the row is no longer valid (edited by hand, or written for an older catalog). The message names the field and a code, never a value. Save a valid configuration through the API
+(an administrator session is needed) and restart the worker; tasks stay queued meanwhile. A `local_only` row, a profile other than `workbench-gpt5`, a timeout outside 5 to 300, or a timeout the worker's lease cannot cover (timeout + 15 s ≤ lease) is refused the same way.
+
+**Audit.** Every successful save writes one `ai_settings.updated` event (actor public id, time, new revision, mode, provider, profile, policy, timeout; no secret) in the same transaction as the row; refused, invalid and stale saves write none (contract: ai-gateway.md 16.9). It needs `audit.0003`, so apply migrations (`manage.py migrate`) before the first save; do not run it against a shared database before the owner has validated it on a dedicated one. Reversing `audit.0003` is refused while an `ai_settings` event exists. The event keeps the new values only and audit immutability is ORM-level only.
+
+**Restart.** A saved change still takes effect only after the worker is restarted (no hot reload); the audit event records the change, not that a worker has picked it up.
+
+**Checks (DB-free; from `backend\`; no network, no key, no PostgreSQL):**
+
+```powershell
+$Py = "..\.venv\Scripts\python.exe"
+& $Py manage.py test tests.test_ai_settings_rules tests.test_ai_settings_api tests.test_ai_settings_worker tests.test_ai_settings_boundaries   # expect OK (112; add tests.test_ai_settings_audit, 32 more)
+& $Py manage.py test                                                                  # expect OK (2841 at this checkpoint; re-check the number)
+& $Py manage.py check
+& $Py manage.py makemigrations --check --dry-run                                      # in the VM this needs the history check patched (no database)
+& $Py -m compileall -q apps config tests workflows
+git diff --check
+```
+
+**PostgreSQL validation (LOCAL COMPUTER ONLY; owner-run; NOT YET RUN).** As in section 5.4, with a dedicated development server and `AP_RUN_DB_TESTS` unset except around the command:
+`& $Py manage.py test tests.test_ai_settings_postgres --tag requires_postgres -v 2`. Report the exact `Ran N tests` line and any failure; passing would cover the tested scenarios only.
+
 ## 5.7 Dashboard summary API (BE-DASH-1): checks and PostgreSQL validation
 
 Backend only: `GET /api/dashboard/summary/` (contract, permissions and query strategy in `rest-api-slice.md` section 18). No model, migration or

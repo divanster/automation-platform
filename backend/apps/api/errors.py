@@ -26,6 +26,7 @@ from rest_framework import exceptions as drf
 from rest_framework.response import Response
 
 from apps.accounts.errors import AuthorizationError
+from apps.ai_settings.errors import AISettingsConflictError, AISettingsValidationError
 from apps.cases.errors import RecordNotFoundError
 from apps.intake.errors import (
     ClientRequestConflictError,
@@ -73,6 +74,7 @@ MESSAGES = {
     "unsupported_media_type": "The request must be application/json.",
     "stale_base_revision": "The revision is not the current revision.",
     "stale_revision": "The revision is not the current revision.",
+    "stale_settings_revision": "The settings were changed since they were read.",
     "content_hash_mismatch": "The content hash is not the current revision's hash.",
     "run_not_in_review": "The request is not waiting for review.",
     "run_state_not_editable": "The request cannot be edited in its current state.",
@@ -104,6 +106,10 @@ _REVIEW_STATUS = {
 }
 
 SAFE_KEY = re.compile(r"[A-Za-z0-9_]{1,64}")
+
+
+def _safe_field(name) -> str:
+    return name if isinstance(name, str) and (name == "_" or SAFE_KEY.fullmatch(name)) else "_unknown"
 
 
 def _pairs(pairs):
@@ -176,6 +182,10 @@ def problem_for(exc) -> Problem:
         return Problem(400, "invalid_request_text", {"reason": exc.reason})
     if isinstance(exc, ClientRequestConflictError):
         return Problem(409, "idempotency_conflict")
+    if isinstance(exc, AISettingsValidationError):
+        return Problem(400, "validation_error", {"fields": {_safe_field(name): list(codes) for name, codes in exc.fields.items()}})
+    if isinstance(exc, AISettingsConflictError):
+        return Problem(409, "stale_settings_revision")
 
     # --- framework errors ---
     if isinstance(exc, InvalidCredentials):

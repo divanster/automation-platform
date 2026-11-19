@@ -50,8 +50,9 @@ STDLIB = set(sys.stdlib_module_names)
 ACTOR, SUBJECT, CASE, RUN = (uuid.uuid4() for _ in range(4))
 
 # A frozen copy of Core's vocabulary: the seven actions that existed before S3, plus "module.enabled" and "module.disabled", which MOD-1b S4 added as Core's
-# own actions (the "module" namespace is reserved for Core, so no module can declare them). The new "module" subject type is asserted separately. If an
-# action or a detail key of Core ever changes, this table is what makes the change visible.
+# own actions (the "module" namespace is reserved for Core, so no module can declare them), plus "ai_settings.updated" (the AI settings API; the
+# "ai_settings" namespace is Core's too). The "module" and "ai_settings" subject types are asserted separately. If an action or a detail key of Core ever
+# changes, this table is what makes the change visible.
 CORE_ACTIONS = (
     "request.submitted",
     "revision.created",
@@ -62,6 +63,7 @@ CORE_ACTIONS = (
     "rejection.recorded",
     "module.enabled",
     "module.disabled",
+    "ai_settings.updated",
 )
 CORE_KEYS = {
     "request.submitted": {"byte_length", "client_request_id_used"},
@@ -73,8 +75,9 @@ CORE_KEYS = {
     "rejection.recorded": {"revision_id", "content_hash", "reason_code"},
     "module.enabled": {"module_id", "installed_version", "registry_fingerprint", "cause"},
     "module.disabled": {"module_id", "installed_version", "registry_fingerprint", "cause"},
+    "ai_settings.updated": {"revision", "extraction_mode", "provider_id", "profile_id", "policy_mode", "timeout_seconds"},
 }
-CORE_SUBJECTS = ("run", "revision", "approval", "rejection", "module")
+CORE_SUBJECTS = ("run", "revision", "approval", "rejection", "module", "ai_settings")
 
 
 def owners_of(**namespaces):
@@ -97,10 +100,11 @@ class CoreVocabularyIsUnchangedTests(CleanAuditVocabularyMixin, SimpleTestCase):
         self.assertEqual(events.CORE_VOCABULARY.core_actions, CORE_ACTIONS)
         self.assertEqual({a: set(k) for a, k in events.CORE_VOCABULARY.detail_keys.items()}, CORE_KEYS)
 
-    def test_core_subject_types_are_the_old_four_plus_module(self):
+    def test_core_subject_types_are_the_old_four_plus_module_and_ai_settings(self):
         self.assertEqual(events.SUBJECT_TYPES, CORE_SUBJECTS)
         self.assertEqual(events.CORE_VOCABULARY.subject_types, CORE_SUBJECTS)
         self.assertEqual(events.SUBJECT_MODULE, "module")
+        self.assertEqual(events.SUBJECT_AI_SETTINGS, "ai_settings")
 
     def test_the_core_fingerprint_equals_one_built_from_the_frozen_copy(self):
         rebuilt = AuditVocabulary.core(actions=CORE_ACTIONS, detail_keys=CORE_KEYS, subject_types=CORE_SUBJECTS)
@@ -717,8 +721,12 @@ class ShapeAgreementTests(SimpleTestCase):
         self.assertEqual(set(added), {"audit_event_action_shape", "audit_event_subject_type_valid"})
         self.assertEqual(added["audit_event_action_shape"].condition.children[0], ("action__regex", ACTION_SHAPE_PATTERN))
         model = {c.name: c for c in AuditEvent._meta.constraints}
-        for name, constraint in added.items():
-            self.assertEqual(constraint, model[name], name)
+        self.assertEqual(added["audit_event_action_shape"], model["audit_event_action_shape"])
+        # migration 0003 replaced the subject-type list of 0002 (it added "ai_settings"); the current literal is 0003's and equals the model's
+        later = importlib.import_module("apps.audit.migrations.0003_ai_settings_subject_type").Migration
+        replaced = {op.constraint.name: op.constraint for op in later.operations if isinstance(op, django_migrations.AddConstraint)}
+        self.assertEqual(set(replaced), {"audit_event_subject_type_valid"})
+        self.assertEqual(replaced["audit_event_subject_type_valid"], model["audit_event_subject_type_valid"])
 
 
 class DetailKeyRulesAgreeTests(SimpleTestCase):
@@ -960,13 +968,13 @@ class ArchitectureTests(SimpleTestCase):
         for word in ("RunSQL", "DeleteModel", "RemoveField", "AlterField", ".delete(", ".update(", ".bulk_update(", "DELETE", "UPDATE", "TRUNCATE", "cursor", "execute"):
             self.assertNotIn(word, code, word)
 
-    def test_the_audit_migration_depends_only_on_its_own_first_migration_and_is_the_leaf(self):
+    def test_the_audit_migrations_form_one_chain_and_0003_is_the_leaf(self):
         from django.db.migrations.loader import MigrationLoader
 
         loader = MigrationLoader(None, ignore_no_migrations=True)
-        migration = loader.get_migration("audit", "0002_extensible_audit_vocabulary")
-        self.assertEqual(migration.dependencies, [("audit", "0001_initial")])
-        self.assertEqual([node for node in loader.graph.leaf_nodes() if node[0] == "audit"], [("audit", "0002_extensible_audit_vocabulary")])
+        self.assertEqual(loader.get_migration("audit", "0002_extensible_audit_vocabulary").dependencies, [("audit", "0001_initial")])
+        self.assertEqual(loader.get_migration("audit", "0003_ai_settings_subject_type").dependencies, [("audit", "0002_extensible_audit_vocabulary")])
+        self.assertEqual([node for node in loader.graph.leaf_nodes() if node[0] == "audit"], [("audit", "0003_ai_settings_subject_type")])
 
     def test_model_state_and_migrations_agree_without_a_database(self):
         from django.apps import apps as django_apps
@@ -1012,7 +1020,7 @@ class OldSchemaHelperTests(SimpleTestCase):
 
     def test_the_live_vocabulary_has_actions_the_old_schema_refuses_which_is_why_the_helper_failed(self):
         refused_by_the_old_schema = set(events.ACTIONS) - set(self.old_fixed_list_of_migration_0001())
-        self.assertEqual(refused_by_the_old_schema, {events.ACTION_MODULE_ENABLED, events.ACTION_MODULE_DISABLED})
+        self.assertEqual(refused_by_the_old_schema, {events.ACTION_MODULE_ENABLED, events.ACTION_MODULE_DISABLED, events.ACTION_AI_SETTINGS_UPDATED})
 
     def test_the_old_schema_helper_does_not_read_the_live_vocabulary(self):
         tree = ast.parse((BACKEND / "tests" / "test_audit_vocabulary_postgres.py").read_text(encoding="utf-8"))

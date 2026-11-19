@@ -207,6 +207,11 @@ class InstallCompositionTests(SimpleTestCase):
 
 
 class RunWorkerInstallsTheCompositionTests(SimpleTestCase):
+    def setUp(self):
+        patcher = mock.patch("config.task_registry.load_stored_settings", return_value=None)  # no stored AI settings row, and no database in a SimpleTestCase
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_the_command_installs_the_composition_root_before_working(self):
         import io
 

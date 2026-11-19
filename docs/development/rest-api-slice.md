@@ -503,3 +503,9 @@ PostgreSQL (**written, NOT run**; `tests/test_dashboard_summary_postgres.py`, ta
 * Throttling is per process, as for every endpoint. One summary per refresh is 6 requests a minute per open tab at the current 10 s interval, against 54 for the nine-request version; the load has not been measured.
 * No history, trend, period counts, or AI, worker and provider figures; no per-module breakdown (the endpoint is Core-routed but its data is Request Intake's: a module-aware dashboard is a later design decision).
 * The endpoint does not check whether Request Intake is enabled; nothing blocks the API for a disabled module (an existing limitation).
+
+## 19. AI settings endpoint (backend only)
+
+`GET` and `PUT /api/ai-settings/extraction/`: an administrator (`is_superuser`) reads and changes how Request Intake extracts (deterministic or AI, provider, model profile, data policy, call deadline). Like every view it validates the shape and calls one service
+(`apps.ai_settings.services`); the contract, the error codes (`400 validation_error` with per-field codes, `409 stale_settings_revision`, `403`), the security behaviour and the limits are in [ai-gateway.md](../architecture/ai-gateway.md) section 16, and the operator steps in the
+[runbook](runbook.md) section 5.6a. In short: no secret is accepted or returned, a saved change reaches a worker only after it is restarted (`apply: "worker_restart_required"`), every successful save records one `ai_settings.updated` audit event (actor, time, revision, mode, provider, profile, policy and timeout identifiers; no secret) in the same transaction (audit migration `0003`), a refused, invalid or stale save records none, its PostgreSQL tests are written and unrun (PostgreSQL validation pending; 2841 DB-free tests pass), and no frontend uses it.

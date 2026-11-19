@@ -2,8 +2,14 @@
 
 TWO MODES, NO AUTOMATIC SWITCH. ``deterministic`` (the default, and the behaviour of every installation that sets nothing) leaves the worker on the fixture
 parser. ``ai`` must be asked for by name. There is no fallback from either to the other: with ``ai`` a failure is a failure, and an unset or invalid value
-of any setting below stops the worker at start-up (``runworker``) instead of choosing a default. Nothing here touches the database and no setting is a
-database field, so no credential can be stored there; the Workbench key is read by ``config/ai_workbench.py`` from the environment, as in AI-1b.
+of any setting below stops the worker at start-up (``runworker``) instead of choosing a default. This module itself touches no database; the Workbench key is
+read by ``config/ai_workbench.py`` from the environment, as in AI-1b, and is never stored.
+
+STORED SETTINGS (AI settings API). ``build_extractor_source(stored=...)`` takes the mode, profile, data policy and timeout from the row an administrator saved
+through ``/api/ai-settings/extraction/`` (read by ``config/task_registry.prepare_worker`` ONCE, at worker start-up; a running worker never re-reads it). When a
+row exists it takes precedence over the three ``AP_INTAKE_*`` / ``AP_AI_POLICY_MODE`` variables below, which are then not read; with no row the variables
+decide as before. It is the precedence of two configuration sources, not a provider fallback, and an invalid row is an error, never replaced by the
+environment. ``build_catalog`` is what the API offers an administrator, derived from the gateway's declarations.
 
 Variables (docs/development/runbook.md, section 5.6):
 
@@ -29,6 +35,16 @@ from dataclasses import dataclass
 
 from apps.ai_gateway import AIGatewayError, DataLocality, PolicyContext, PolicyMode, enforce_policy
 from apps.ai_gateway.transport import HttpTransport
+from apps.ai_settings.errors import AISettingsValidationError
+from apps.ai_settings.rules import (
+    ISSUE_INVALID_CONFIGURATION,
+    ISSUE_MISSING_API_KEY,
+    ExtractionCatalog,
+    ProfileEntry,
+    ProviderEntry,
+    ProviderStatus,
+    validate_values,
+)
 from apps.intake.ai_extraction import AIRequestExtractor
 from apps.intake.errors import AIExtractionError, ExtractionConfigurationError
 from apps.intake.policy import KIND_EXTRACT
@@ -57,10 +73,67 @@ class IntakeExtractionSettings:
     mode: str
     policy_mode: PolicyMode | None = None  # set only in ai mode
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
+    profile_id: str | None = None  # set only for stored settings in ai mode; the environment path uses INTAKE_AI_PROFILE_ID
+    stored_revision: int | None = None  # set only when the settings came from the stored row (AI settings API)
 
 
 def _read(environ, name):
     return environ.get(name, "").strip() or None  # an empty value counts as unset, the convention of config/env.py
+
+
+def build_catalog() -> ExtractionCatalog:
+    """What an administrator may choose, built from the gateway's own declarations. Pure: reads no environment and no database, calls nothing.
+
+    Providers: the Workbench only. Profiles: the Workbench profiles that ``APPROVED_INTAKE_AI_PROFILES`` approves for Request Intake. A profile's permitted
+    policy modes are not listed by hand: the gateway's own ``enforce_policy`` is asked, so the locality rule has one source. The gateway still enforces
+    it on every call and ``build_extractor_source`` again at start-up.
+    """
+    provider_id = ai_workbench.workbench.PROVIDER_ID
+    profiles = []
+    for profile in ai_workbench.build_workbench_profiles(float(DEFAULT_TIMEOUT_SECONDS)):
+        if profile.profile_id not in APPROVED_INTAKE_AI_PROFILES:
+            continue
+        permitted = []
+        for mode in PolicyMode:
+            try:
+                enforce_policy(PolicyContext(mode), profile_mode=profile.policy_mode, provider_id=profile.provider_id, locality=DataLocality.COMPANY_ENDPOINT, profile_id=profile.profile_id)
+            except AIGatewayError:
+                continue
+            permitted.append(mode.value)
+        profiles.append(ProfileEntry(profile.profile_id, profile.provider_id, profile.model_id, tuple(permitted)))
+    provider = ProviderEntry(provider_id, "KPMG Workbench", DataLocality.COMPANY_ENDPOINT.value, workbench_status)
+    return ExtractionCatalog(
+        providers=(provider,),
+        profiles=tuple(profiles),
+        policy_modes=tuple(mode.value for mode in PolicyMode),
+        timeout_min=MIN_TIMEOUT_SECONDS,
+        timeout_max=MAX_TIMEOUT_SECONDS,
+        timeout_default=DEFAULT_TIMEOUT_SECONDS,
+        lease_margin_seconds=LEASE_MARGIN_SECONDS,
+    )
+
+
+def workbench_status(environ=None) -> ProviderStatus:
+    """Whether the Workbench's own variables are usable in THIS process: a fixed code, never a value, the key included. Reads the environment; no network."""
+    try:
+        ai_workbench.load_workbench_settings(os.environ if environ is None else environ)
+    except AIGatewayError as error:
+        missing = (error.reason or "").startswith("missing_")
+        return ProviderStatus(False, ISSUE_MISSING_API_KEY if missing else ISSUE_INVALID_CONFIGURATION)
+    return ProviderStatus(True)
+
+
+def settings_from_stored(stored) -> IntakeExtractionSettings:
+    """The settings a stored row describes, validated again with the same rules the API used: a row that no longer passes (edited elsewhere, or written
+    for an older catalog) stops the worker instead of being trusted. Raises ``ExtractionConfigurationError`` naming fields and codes, never values."""
+    try:
+        values = validate_values(stored.values.as_mapping(), build_catalog())
+    except AISettingsValidationError as error:
+        problems = ", ".join(f"{name}: {'/'.join(codes)}" for name, codes in sorted(error.fields.items()))
+        raise ExtractionConfigurationError(f"The stored AI extraction settings (revision {stored.revision}) are not valid ({problems}).") from None
+    if values.extraction_mode == MODE_DETERMINISTIC:
+        return IntakeExtractionSettings(MODE_DETERMINISTIC, stored_revision=stored.revision)
+    return IntakeExtractionSettings(MODE_AI, PolicyMode(values.policy_mode), values.timeout_seconds, values.profile_id, stored.revision)
 
 
 def load_intake_extraction_settings(environ=None) -> IntakeExtractionSettings:
@@ -128,11 +201,12 @@ class IntakeExtractorSource:
 
     def describe(self) -> str:
         """One line for the operator: the mode and, for ai, the profile, the policy and the deadline. No setting that could be secret."""
+        source = "" if self.settings.stored_revision is None else f" Source: stored settings, revision {self.settings.stored_revision}."
         if self.extractor is None:
-            return f"Request Intake extraction mode: {MODE_DETERMINISTIC} (fixture parser; no AI provider is called)."
+            return f"Request Intake extraction mode: {MODE_DETERMINISTIC} (fixture parser; no AI provider is called).{source}"
         return (
             f"Request Intake extraction mode: {MODE_AI} (profile {self.extractor.profile_id}, data policy {self.settings.policy_mode.value}, "
-            f"call deadline {self.effective_timeout_seconds:g}s)."
+            f"call deadline {self.effective_timeout_seconds:g}s).{source}"
         )
 
 
@@ -140,7 +214,7 @@ def check_lease(effective_timeout_seconds: float, lease_seconds: int) -> None:
     if lease_seconds < effective_timeout_seconds + LEASE_MARGIN_SECONDS:
         raise ExtractionConfigurationError(
             f"In {MODE_AI} mode the worker lease ({lease_seconds}s) must be at least the AI call deadline ({effective_timeout_seconds:g}s) "
-            f"plus {LEASE_MARGIN_SECONDS}s. Raise AP_WORKER_LEASE_SECONDS or lower {ENV_TIMEOUT_SECONDS}."
+            f"plus {LEASE_MARGIN_SECONDS}s. Raise AP_WORKER_LEASE_SECONDS or lower {ENV_TIMEOUT_SECONDS} (or the stored timeout)."
         )
 
 
@@ -150,8 +224,14 @@ def build_extractor_source(
     module_gate=None,
     lease_seconds: int | None = None,
     transport: HttpTransport | None = None,
+    stored=None,
 ) -> IntakeExtractorSource:
     """The extractor source for this process, or ``ExtractionConfigurationError``. Opens no connection and makes no network call.
+
+    ``stored`` (a ``StoredSettings`` read by the worker from the database, or ``None``) takes precedence over ``AP_INTAKE_EXTRACTION_MODE``,
+    ``AP_AI_POLICY_MODE`` and ``AP_INTAKE_AI_TIMEOUT_SECONDS``, which are then not read; with ``None`` those variables decide exactly as before. This is
+    the precedence of two configuration SOURCES, not a provider fallback: a stored row that is invalid is an error and never replaced by the environment.
+    ``AP_AI_WORKBENCH_*`` (the key and the provider's own settings) always come from the environment.
 
     ``deterministic`` mode reads nothing else and builds no gateway. ``ai`` mode additionally needs ``module_gate`` (the worker's kind gate: without
     it the module's state could not be re-checked before sending, so it is refused) and builds the Workbench gateway from ``AP_AI_WORKBENCH_*``
@@ -159,7 +239,7 @@ def build_extractor_source(
     workflow, that the data policy permits its provider, and (with ``lease_seconds``) that the lease covers the call deadline.
     """
     environ = os.environ if environ is None else environ
-    settings = load_intake_extraction_settings(environ)
+    settings = load_intake_extraction_settings(environ) if stored is None else settings_from_stored(stored)
     if settings.mode == MODE_DETERMINISTIC:
         return IntakeExtractorSource(settings)
 
@@ -167,7 +247,7 @@ def build_extractor_source(
         raise ExtractionConfigurationError("AI extraction needs the worker's module gate to confirm the module is enabled before sending text.")
     try:
         gateway = ai_workbench.build_workbench_gateway(environ, transport=transport)
-        profile_id = INTAKE_AI_PROFILE_ID
+        profile_id = settings.profile_id or INTAKE_AI_PROFILE_ID
         if profile_id not in APPROVED_INTAKE_AI_PROFILES:
             raise ExtractionConfigurationError("The profile is not approved for Request Intake extraction.")
         profile = gateway.profile(profile_id)

@@ -653,3 +653,121 @@ extra-key refusal, the default mode, the lease check, the preflight, policy wide
 
 Two existing test files were edited, pins only: `test_intake_composition.py` (the app's source-file list and the list of pure modules) and `test_ai_gateway_boundaries.py` (the importers of the gateway and the files that may name it); the existing extraction, worker, gating and
 module tests pass unchanged. Not tested: the real Workbench with Request Intake's prompt, concurrency beyond the written PostgreSQL tests, behaviour in a deployed installation, and cost or latency. The PostgreSQL tests ran only in the owner's local run, not in the VM.
+
+## 16. AI settings backend (administrator-configured extraction)
+
+> **Status: written, DB-free tested in the development VM, NOT run against PostgreSQL, NOT run against the Workbench, no frontend.** Branch `feat/ai-settings-api`; not committed or merged when this was written.
+
+### 16.1 What was added, and what was not
+
+An administrator can read and change how Request Intake extracts through a small API, instead of editing the worker's `.env`. Added: the Django app `apps.ai_settings` (one singleton row, pure validation rules, two services), `GET` and `PUT /api/ai-settings/extraction/`
+(`apps/api/views_ai_settings.py`), a stored-settings read in the worker's composition (`config/intake_extraction.py`, `config/task_registry.py`) one additive migration (`ai_settings.0001`), and an audit event for every successful change (`ai_settings.updated`, with audit migration `0003`; section 16.9).
+
+Not added: any frontend, any credential store (the Workbench key stays in the process environment and is never stored, accepted or returned), a hot reload (16.5), a second provider, a model other than `workbench-gpt5`, a per-company policy,
+a worker status or heartbeat, or any change to the gateway package, to Request Intake's extraction path, its review and approval, or its default (deterministic).
+
+### 16.2 Where AI configuration comes from
+
+| Source | When used | Read by | When |
+| --- | --- | --- | --- |
+| Environment (`AP_INTAKE_EXTRACTION_MODE`, `AP_AI_POLICY_MODE`, `AP_INTAKE_AI_TIMEOUT_SECONDS`) | no stored row exists | the worker | once, at start-up |
+| The stored row (`ai_settings_aiextractionsettings`, id 1) | a row exists; it then **replaces** those three variables | the worker | once, at start-up |
+| `AP_AI_WORKBENCH_*` (the key, endpoint, charge code, proxy, TLS) | always, in `ai` mode | the worker | once, at start-up |
+
+With no row, behaviour is exactly what section 15 describes. Precedence is between two sources of one decision; it is **not** a provider fallback: a stored `ai` row that cannot be honoured (no key, invalid values, lease too short) stops the worker, and an invalid or unreadable row
+is never replaced by the environment or by deterministic mode. A table that has not been migrated also stops the worker. The profile of a stored row must be one the composition root approves for Request Intake (`workbench-gpt5`), and is re-validated at start-up against the same rules as the API.
+
+### 16.3 API contract
+
+Both methods need a logged-in **administrator** (`is_superuser`; reloaded from the database on every call). Operator, Approver and Auditor roles, and Django model permissions, never grant access. Authorization is decided before validation, so a refused caller learns nothing about the catalog.
+`PUT` needs the CSRF token like every state-changing API call. Other methods: 405.
+
+`GET /api/ai-settings/extraction/` and a successful `PUT` return:
+
+```json
+{
+  "settings": {"extraction_mode": "deterministic|ai", "provider_id": null, "profile_id": null, "policy_mode": null, "timeout_seconds": null},
+  "stored": false, "revision": 0, "updated_at": null, "updated_by": null,
+  "apply": "worker_restart_required",
+  "catalog": {
+    "providers": [{"provider_id": "kpmg_workbench", "label": "...", "locality": "company_endpoint",
+                   "status": {"configured": true, "issue": null},
+                   "profiles": [{"profile_id": "workbench-gpt5", "model_id": "...", "permitted_policy_modes": ["company_endpoint", "approved_cloud"]}]}],
+    "policy_modes": ["company_endpoint", "approved_cloud"],
+    "timeout": {"min": 5, "max": 300, "default": 45}
+  }
+}
+```
+
+`PUT` body: `extraction_mode` (`deterministic` or `ai`); in `ai` mode also `provider_id`, `profile_id`, `policy_mode` and `timeout_seconds` (all required; there is no default, as for the environment path), in `deterministic` mode none of them (null or absent); `expected_revision` (0 when
+`stored` is false). A save is accepted or refused as a whole.
+
+* `status.issue` is `missing_api_key` or `invalid_configuration`; it never contains a value. It is the status **in the web process's environment**; the worker has its own environment, and the API cannot see it.
+* `400 validation_error` with `details.fields`, one fixed code per field (`invalid_choice`, `required`, `not_allowed_in_deterministic_mode`, `unknown_provider`, `unknown_profile`, `profile_not_of_provider`, `policy_forbids_provider`, `out_of_range`, `exceeds_worker_lease`,
+  `invalid_value`, `unknown_field`, `invalid_type`). Submitted values are never echoed. `local_only` is `policy_forbids_provider` (the only provider is a company endpoint).
+* `409 stale_settings_revision` when `expected_revision` is not the stored revision (checked under a row lock).
+* The timeout must satisfy timeout + 15 s ≤ the web process's `WORKER_LEASE_SECONDS` (default 60). The worker checks this again with **its** lease; a worker started with a shorter lease than the web process refuses to start.
+
+### 16.4 Security behaviour
+
+* **No secret anywhere.** No column, serializer field or response can hold a key, header or endpoint; a submitted `api_key` or any unknown field is refused as `unknown_field` and not echoed. The key is read only from the worker's (and, for the yes/no status, the web process's) environment.
+* **Admin only**, refusals logged by identifier (`ai_settings.read` / `ai_settings.update`), no role grant, CSRF enforced, authentication required.
+* **Policy enforced twice.** The catalog's `permitted_policy_modes` is computed by the gateway's own `enforce_policy`, so the API cannot offer a pairing the gateway would refuse; the gateway enforces it again before every provider call.
+* **No provider or model fallback, no automatic mode switch.** The catalog contains only what the composition root approves; the model profile is never chosen by the client beyond that list.
+* **Fail closed** at the worker for an invalid or unreadable row. Logging of a save: actor public id, revision, mode, profile and policy only.
+* **Audited.** A successful save writes one `ai_settings.updated` audit event in the same transaction (section 16.9); the event holds identifiers and numbers only, never a key, proxy, charge code or text.
+* The model's CHECK constraints enforce a singleton row, a known mode, a positive revision and all-or-nothing (deterministic: no AI field; ai: all of them). Which provider, profile and policy are acceptable is checked in Python (API and worker), not by the database; raw SQL can store a value
+  that the worker will then refuse at start-up.
+
+### 16.5 Runtime behaviour: restart required, no hot reload
+
+`runworker` reads the stored row **once**, in `prepare_worker`, and installs an immutable extractor source; nothing on the task path reads the settings or the environment again. **A saved change therefore reaches no running worker.** Every response carries
+`apply: "worker_restart_required"`; the change takes effect only when the worker process is stopped and started again. There is no heartbeat, so neither the API nor a future UI can say which revision a running worker uses; until that exists a UI must say "saved; restart the worker".
+The web process does not need a restart for a saved change (it reads the row per request), but it must be restarted for a changed `WORKER_LEASE_SECONDS` or Workbench variable to show in its validation and status. The migration must be applied before the worker starts.
+
+### 16.6 Not changed
+
+Request Intake's handler, extractor, validation, canonicalization, hashing, revisions, review, approval and the queue are untouched; no task kind, failure code or setting was added, and the only audit addition is the `ai_settings.updated` action and `ai_settings` subject type (16.9); `runworker` is unchanged. With no stored row, the deterministic default and the environment
+path behave as before (existing tests pass unchanged apart from pins: the installed-apps and route lists, and `load_stored_settings` patched in the tests that call `prepare_worker` without a database).
+
+### 16.7 Limitations
+
+* **Audit is partial.** Each successful change is recorded (16.9), but only the new values: the previous values are not in the event (the previous revision is `revision - 1`), refused and failed attempts are not audited, and audit immutability is ORM-level only (no database trigger, no hash chain). It is not the approved company policy record of `ai-policy.md` section 4: there is no approval step.
+* Provider status is the web process's view; the worker may differ. No worker status or active-revision report.
+* Login throttling is per process; TLS, HSTS and the HTTPS redirect remain undecided (see `rest-api-slice.md`).
+* One provider, one approved profile, one policy-locality rule; the credential store, a company-level policy record, approvals and evaluation remain open (ai-policy.md).
+* Never exercised against a real PostgreSQL server or the Workbench; `tests/test_ai_settings_postgres.py` (including its audit and migration tests) is **written but never run**. PostgreSQL validation is pending.
+
+### 16.8 Tests
+
+DB-free, in the development VM, no network and no key: 145 new tests (2841 DB-free tests in all, OK).
+
+| File | Tests | Covers |
+| --- | --- | --- |
+| `test_ai_settings_rules.py` | 29 | the catalog built by the composition root (only the Workbench and `workbench-gpt5`, gateway-derived permitted policies, no environment read) and the pure rules: all-or-nothing, membership, `local_only`, timeout bounds and lease, strict types, unknown fields, codes only |
+| `test_ai_settings_api.py` | 41 | authorization (every role, anonymous, inactive), CSRF, contract shape, validation errors, conflict, secret redaction, status probe failures, no write on refusal |
+| `test_ai_settings_worker.py` | 25 | stored-row precedence, invalid or tampered rows fail closed with no environment fallback, `local_only`, lease, unreadable database, no hot reload, the unchanged environment path |
+| `test_ai_settings_boundaries.py` | 18 | no gateway import outside the composition root, pure rules, a thin view, no secret column, an additive `ai_settings` migration plus only the audit `0003` one, `runworker` unchanged |
+| `test_ai_settings_audit.py` | 32 | one event per successful save with the contract fields, none for validation failure, refusal, stale revision, lost race or a read, rollback when the audit write fails, no secret in the event, the contract pins |
+| `test_ai_settings_postgres.py` | not run | singleton and CHECK constraints, loader, round trip, revision conflict, concurrent first save, authorization against real users; the stored audit event, no event on refusal/400/409, a real rollback, ORM immutability, audit `0003` and its reverse guard |
+
+Existing tests edited (pins and patches only): `test_api_boundaries`, `test_module_boundaries`, `test_request_intake_django`, `test_settings`, `test_intake_ai_composition`, `test_intake_composition`, `test_tasks_worker`, and, for the new audit vocabulary and migration, `test_audit_vocabulary`, `test_review_audit`, `test_workflow_attribution`, `test_intake_ai_boundaries` (its audit-vocabulary pin now ignores the `ai_settings` names only).
+
+### 16.9 Audit event for a settings change
+
+| Item | Value |
+| --- | --- |
+| Action / subject type | `ai_settings.updated` / `ai_settings` (a Core action; the `ai_settings` namespace is reserved against modules) |
+| Subject id | the constant `SETTINGS_SUBJECT_ID` (a UUIDv5 of `urn:automation-platform:ai-settings:extraction`): there is one settings record |
+| Actor | kind `user`, `actor_public_id` = the administrator's `User.public_id` (never a client-supplied value) |
+| Timestamp | `occurred_at`, set by the audit row (`auto_now_add`) |
+| Details (exactly these keys) | `revision` (the new revision), `extraction_mode`, `provider_id`, `profile_id`, `policy_mode`, `timeout_seconds` (the AI fields are `null` for a deterministic save) |
+| Not recorded | any key, header, proxy URL, charge code, endpoint or text; the previous values; `case_id` and `run_id` are empty |
+| Transaction | written with `apps.audit.recorder.record_event` inside the save's `transaction.atomic()`, after the row write: they commit or roll back together, and a failed audit write rolls the change back (the error propagates; the API answers 500) |
+| No event | validation error, authorization refusal, stale revision (409), a lost first-save race, a read |
+
+Detail values are checked by the existing event builder (booleans, integers, null or short identifier tokens), so free text and secret-shaped values are refused.
+
+**Migration `audit.0003_ai_settings_subject_type`** (depends on `0002`): the subject-type CHECK `audit_event_subject_type_valid` gains `ai_settings`. The action CHECK is shape-only and needs no change. No row is read, changed or deleted; PostgreSQL scans the existing rows while it adds the constraint. **Reverse** restores the previous list only while no `ai_settings` event is stored; otherwise it raises `IrreversibleError` naming a count, and never deletes an event. The migration has not been executed against PostgreSQL by the development VM (the owner has not yet run it).
+
+**Runtime:** unchanged. The audit event is written by the web process at save time; a saved change still reaches the worker only after a worker restart (16.5).
