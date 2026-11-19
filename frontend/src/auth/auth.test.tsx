@@ -10,6 +10,10 @@ import { signedIn, signedOut } from "../test/server";
 
 const listOk: Handler = (call) => {
   if (call.method === "GET" && call.path === "/api/requests/") return json(200, page([listItem()]));
+  if (call.method === "GET" && call.path === "/api/dashboard/summary/") {
+    const by_state = { queued: 0, extracting: 0, needs_review: 1, approved: 0, exporting: 0, exported: 0, failed: 0, cancelled: 0 };
+    return json(200, { total: 1, processing: 0, needs_review: 1, approved: 0, failed: 0, by_state, recent_requests: [listItem()] });
+  }
   if (call.method === "GET" && call.path === `/api/requests/${RUN_ID}/`) return json(200, detail());
   return apiError(404, "not_found");
 };

@@ -257,16 +257,6 @@ a.metric-body:hover {
   line-height: var(--leading-tight);
   font-variant-numeric: tabular-nums;
 }
-.metric-value[data-available="false"],
-.distribution-count[data-available="false"] {
-  font-size: var(--text-base);
-  font-weight: 600;
-  color: var(--muted);
-  font-style: italic;
-}
-.metric-value[data-available="false"] {
-  line-height: calc(var(--text-2xl) * var(--leading-tight));
-}
 .metric-caption {
   font-size: var(--text-xs);
   color: var(--muted);

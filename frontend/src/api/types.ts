@@ -59,6 +59,20 @@ export interface Page<T> {
   results: T[];
 }
 
+// GET /api/dashboard/summary/ (backend DashboardSummaryOutput). Every figure is computed by the server.
+export interface DashboardSummary {
+  total: number;
+  /** queued + extracting + exporting, summed by the server. */
+  processing: number;
+  needs_review: number;
+  approved: number;
+  failed: number;
+  /** Every run state, zero when there is none. */
+  by_state: Record<RunState, number>;
+  /** The newest requests the user may view, newest first (the server fixes how many). */
+  recent_requests: RequestListItem[];
+}
+
 export interface Finding {
   code: string;
   field_path: string;
