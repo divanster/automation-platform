@@ -27,6 +27,7 @@ from unittest import mock
 
 from django.contrib.auth.models import Group
 from django.core.management import call_command
+from django.db import connection
 from django.test import TestCase, TransactionTestCase, tag
 from django.utils import timezone
 
@@ -243,7 +244,9 @@ class GatedWorkerTests(WorkerCase):
 
     def test_a_missing_state_row_after_the_sync_fails_closed(self):
         self.sync()
-        ModuleState.objects.all().delete()  # only a hand edit can do this: the marker stays
+        with connection.cursor() as cursor:
+            cursor.execute("DELETE FROM module_host_modulestate")  # raw SQL: the ORM refuses to delete state rows; only a hand edit can do this. The marker stays.
+        self.assertEqual((ModuleState.objects.count(), ModuleHostMarker.objects.count()), (0, 1))  # the row is really gone and the initialization marker is intact
         result = submit(self.user)
         self.assertEqual(self.process().status, worker.ProcessStatus.IDLE)
         self.assertTrue(task_untouched(result.task))
