@@ -667,3 +667,42 @@ one in [runbook.md](runbook.md), section 5.3; that the 676 tests are those modul
 - **`ModuleContext` is not a security sandbox**: it is a naming and authority boundary inside one process; code admitted to the process can bypass it.
 - There is no module installation and no Update Manager, no module endpoint and no API-side write blocking for a disabled module.
 - It does not prove that no other race or edge case exists (the S2 gate race window is unchanged). One machine, one operating system, one PostgreSQL. **This is not a production-readiness claim.**
+
+## MOD-2 Request Intake as the first built-in module: owner-supplied local PostgreSQL results (2026-11-19)
+
+> **Scope.** MOD-2 declares Request Intake as a module (`apps/intake/module.py`), registers it in the static registry (`config/modules.py`) and gates its task kind `request_intake.extract` on the stored module state (`config/task_registry.py`; branch `feat/request-intake-module`: implementation `871bf2d`, test-only corrections `8915925` and `05cf1a7`;
+> see [module-contract.md](../architecture/module-contract.md), section 3.14, and [runbook.md](runbook.md), section 5.4). MOD-2 adds no migration, model, endpoint, screen, permission or audit action. The project owner ran the PostgreSQL tests and `module_sync` **locally on the Windows computer**. **These are owner-supplied results.**
+> The development VM has no PostgreSQL, never connected to one, and did not run, repeat or observe any of it. No output or log is stored in this repository.
+
+**Reported by the owner:**
+
+| Item | Reported result |
+| --- | --- |
+| Focused MOD-2 PostgreSQL tests (`tests/test_request_intake_module_postgres.py`) | **30 passed** (the first run had one error, a test setup defect corrected in `8915925`) |
+| Namespace continuity tests (`tests.test_module_context_postgres.LegacyRequestIntakeTests`) | **4 passed** (the combined regression had one error, a test setup defect corrected in `05cf1a7`) |
+| Full selected PostgreSQL regression | **701 tests passed, 220.591 seconds, exit code 0** |
+| Test database | The dedicated test database was destroyed successfully |
+| DB-free regression in the development VM | 2172 tests passed |
+| `module_sync` on the local development database | Executed |
+| `module_status` afterwards | Registry `d07104ee7579`; synced: yes; `request_intake`: enabled; registered 1.0.0; installed 1.0.0; **claimable: yes**; task kind `request_intake.extract` |
+
+**The two corrected test defects** (tests only; production code, models and migrations did not change): (1) a missing-state test deleted a `ModuleState` row through the ORM, which refuses it by design; it now uses raw SQL as the S4 tests do and asserts that zero state rows and one initialization marker remain. (2) a context test synced a synthetic registry and then the production registry; namespace
+continuity refuses that (`ctx_mod` released, `intake` reassigned), so the test now asserts the refusal, that the stored state and claims are unchanged, that no `request_intake` row appears and that the gate stays closed. The production sync after an earlier empty-registry sync is covered by the MOD-2 tests.
+
+**What was not supplied:** the command lines and module list of the runs, the output, a backup record before `module_sync`, whether the development database held an initialization marker from an earlier empty-registry sync before `module_sync`, and any manual smoke test after the sync (a submission, a worker run, a browser walk-through): **not reported; not claimed**. `claimable: yes` is the status command's report of the gate's decision, not an
+observed worker claim. For orientation only (the VM's arithmetic, not stated by the owner): 701 is 25 more than the 676 of the S6 selection; the intended selection is the one in [runbook.md](runbook.md), section 5.4.
+
+**What this supports (this environment and these scenarios only):**
+
+- **Registration and state.** Request Intake is registered as the first built-in module; `module_sync` created its state on the development database; the host reports it enabled, version-matched and claimable.
+- **The worker gate.** The tests passed for the production composition: tasks held and never failed while the module is disabled, version-mismatched or without state after initialization; resumed in order after re-enable; a running attempt finishing after a disable; an expired lease recovered and then held; retry unchanged; the reconciler still moving permanently failed runs to failed; `test.add_numbers` unaffected.
+- **Preserved contracts in the tested scenarios.** The groups `setup_roles` writes and the profile permissions equal the manifest's derivation; the `ModuleContext` decision equals Request Intake's own authorization for every user, action and owner; the audit vocabulary is Core's and existing events stayed readable; historical run attribution was untouched; the selected regression, which includes the unchanged intake, review, API, queue, worker,
+  attribution, module host and context suites, passed, so submission, extraction, edit, approval, rejection and the REST API behaved as before in those scenarios (inferred from the all-passed result, not itemized).
+
+**What it does not validate, and what does not exist.**
+
+- **No API-side write blocking:** the API still accepts submissions while the module is disabled or has no state; the runs and their tasks stay queued.
+- **The S2 gate race window remains.** No concurrency guarantee beyond the tested scenarios is claimed.
+- Request Intake does **not** use `ModuleContext` internally; `revision.approval` has no facade; the manifest's capability list is a declaration. Nothing is sandboxed.
+- There is no real AI integration, no module installation and no Update Manager, no module endpoint, and no licence or signature enforcement.
+- It does not prove that no other race or edge case exists. One machine, one operating system, one PostgreSQL. **This is not a production-readiness claim.**
