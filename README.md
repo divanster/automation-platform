@@ -20,7 +20,7 @@ A local-first business process automation platform.
 > and UI-2 review actions in it (draft editing, approval with warning acknowledgement, rejection, per-request audit history,
 > stale-revision handling; tested in the development VM against a stubbed `fetch`, and one workflow reported by the owner as
 > passing in a real browser against the local Django, PostgreSQL and worker: development-validated for that workflow only,
-> not production-ready). The source text in the UI, document upload, export, real AI adapters, password reset, and an installer are **not** built; nothing here is production-ready. Everything else described below is planned, not built. See the
+> not production-ready). The source text in the UI, document upload, export, password reset, and an installer are **not** built; AI extraction (AI-2a) exists only as an explicit opt-in of the worker (`AP_INTAKE_EXTRACTION_MODE=ai`), is not validated end to end and is off by default; nothing here is production-ready. Everything else described below is planned, not built. See the
 > [development runbook](docs/development/runbook.md) for exactly what exists.
 
 ## Purpose

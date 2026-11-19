@@ -15,14 +15,20 @@ setting, no dynamic import, no registration at run time.
 * The handler allowlist is still ``PRODUCTION_REGISTRY`` (the handler object is the one it always was). ``check_handler_composition`` verifies at import that its
   kinds are exactly the legacy kinds plus the task kinds the registry declares, so a module kind without a handler, or a handler nobody owns, stops the process
   at start instead of being silently gated or allowed. There is still one worker, one reconciler (``after_iteration``) and no maintenance hook.
+* ``prepare_worker`` (AI-2a): called once by ``runworker`` before the first task. It decides, from the environment and explicitly, which extractor the
+  ``request_intake.extract`` handler uses (``config/intake_extraction.py``: ``deterministic`` by default, ``ai`` only when asked for, no automatic fallback),
+  fails the start-up on a missing or invalid setting, and installs the extractor source. The composition above is unchanged by it.
 """
 
+from apps.intake.errors import ExtractionConfigurationError
+from apps.intake.handlers import install_extractor_source
 from apps.intake.registry import PRODUCTION_REGISTRY
 from apps.intake.services import reconcile_after_iteration
 from apps.module_host.gate import make_kind_gate
 from apps.module_host.rules import check_handler_composition
 from apps.tasks.handlers import TEST_ADD_NUMBERS
 from apps.tasks.worker import Composition
+from config.intake_extraction import build_extractor_source
 from config.modules import build_registry
 
 # Task kinds that predate modules and belong to none: the queue's deterministic test handler. They need no module state. (Request Intake's
@@ -38,3 +44,21 @@ COMPOSITION = Composition(
     after_iteration=reconcile_after_iteration,
     kind_gate=make_kind_gate(MODULE_REGISTRY, LEGACY_UNGATED_KINDS),
 )
+
+
+class WorkerConfigurationError(Exception):
+    """The worker cannot start with the current settings. The message names the setting, never its value."""
+
+
+def prepare_worker(lease_seconds: int, environ=None, *, transport=None) -> str:
+    """Choose and install the Request Intake extractor for this worker process; return one line describing it for the operator.
+
+    Raises ``WorkerConfigurationError`` (the message names the setting, never its value) when the extraction settings are missing or invalid, so the
+    worker does not start with a half-configured AI mode and nothing is installed. ``transport`` is for tests. Nothing is connected to.
+    """
+    try:
+        source = build_extractor_source(environ, module_gate=COMPOSITION.kind_gate, lease_seconds=lease_seconds, transport=transport)
+    except ExtractionConfigurationError as error:
+        raise WorkerConfigurationError(str(error)) from None
+    install_extractor_source(source)
+    return source.describe()

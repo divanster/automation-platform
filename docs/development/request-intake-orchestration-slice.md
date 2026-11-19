@@ -8,6 +8,9 @@
 > [local validation record](local-validation-record.md)). As merged, this slice has no authentication, no
 > authorization, no API, no UI, and no real AI; it extracts with the deterministic fixture parser only.
 >
+> **Update (AI-2a).** Extraction can now use the AI Gateway instead of the fixture parser, **only when an operator explicitly sets `AP_INTAKE_EXTRACTION_MODE=ai`**; the default and every statement below about the
+> deterministic extractor are unchanged. See section 13 here and [ai-gateway.md](../architecture/ai-gateway.md) section 15.
+>
 > **Update.** The [review-services slice](review-services-slice.md) was built on top of this one and adds
 > authorization, edit, approval, rejection and audit events. The "out of scope" and "limitations" statements
 > below, and the PostgreSQL-status wording in sections 10 to 12, describe this slice as it was merged.
@@ -300,10 +303,38 @@ report the number you get if it differs.
 * No authentication or authorization: anyone with the Python API can submit. No API, no UI, no audit events.
 * No review, edit, approval, rejection, export, run cancellation, or manual retry. A failed run stays failed.
 * The 65,536-byte limit, the 3 attempts, and the lease and backoff values are provisional, not measured.
-  A handler must finish within the 60-second lease (no heartbeat): fine for the fixture parser, not for a model.
+  A handler must finish within the 60-second lease (no heartbeat): fine for the fixture parser; for a model (AI-2a, section 13) the worker refuses to start in `ai` mode unless the lease covers the call deadline plus 15 seconds.
 * The extractor is a fixture parser for one labelled-line template; text in any other form is extracted as an
   invalid draft (nothing is invented). It is not an AI model.
 * The source text, drafts and findings are plaintext in PostgreSQL; nothing here encrypts or access-controls
   them. `test.add_numbers` is still in the production allowlist.
 * A worker that is not running is not detected; a run waits `queued`.
 * Reconciliation runs inside the worker loop. If no worker runs, a failed task is not reflected on its run.
+
+## 13. AI extraction mode (AI-2a)
+
+> **Status: written on `feat/ai-request-intake-extraction`; DB-free tests and a mocked transport only; the 35 PostgreSQL tests in `tests/test_intake_ai_postgres.py` are written and have not been run.** Everything above describes
+> the default (`deterministic`) mode, which AI-2a does not change.
+
+**What it is.** A second `RequestExtractor`, `apps.intake.ai_extraction.AIRequestExtractor`, that asks the AI Gateway (profile `workbench-gpt5`, KPMG Workbench) for a structured answer and returns the same kind of candidate the fixture parser returns.
+It is used by the same handler (`request_intake.extract`), the same queue and the same `run_extraction`: no new kind, queue, worker, state, model, migration, endpoint, audit action or failure code.
+
+**Modes.** `AP_INTAKE_EXTRACTION_MODE` is `deterministic` (default) or `ai`. There is no automatic fallback in either direction, no provider or model fallback, and the worker refuses to start in `ai` mode without an explicit
+`AP_AI_POLICY_MODE` that permits a company endpoint, the Workbench key, and a lease long enough for the call (section 5.6 of the [runbook](runbook.md)). The worker installs the extractor source once at start-up (`config.task_registry.prepare_worker`);
+with nothing installed (the API process, every existing test) the handler calls `run_extraction(run_id)` exactly as before.
+
+**Request Intake's own parts.** The prompt, the output schema and the conversion are in `apps/intake/ai_output.py` (pure; the gateway stays generic). The schema has four required keys and no place for a decision; `quantity` is a string and becomes an exact
+`Decimal`; an answer with an unreadable quantity, an unknown ambiguity path or an excerpt that is not in the text is refused, not repaired. `source_refs` are not requested. See ai-gateway.md section 15.4.
+
+**What is unchanged.** The candidate goes through `create_request_intake_revision`, so validation, canonicalization, the content hash, revision 1 (valid drafts only), the `ExtractionOutcome`, `needs_review`, the audit events (`revision.created` with
+`origin: "extraction"`), the review services (a different approver, acknowledged warnings, the exact hash) and approval are the existing code. The AI answer cannot approve anything. The outcome's `extractor_name` is `ai-request-extractor` and its
+`extractor_version` is `<prompt version>|<profile>|<reported model>`, which is the only record of which model produced a draft; a draft with blocking findings is an `invalid` outcome for a person to fix, exactly as with the fixture parser.
+
+**Transactions and idempotency.** The AI call runs between the two short transactions, with no transaction open and no lock held. Nothing is written until the second one commits, so a failed call leaves no revision, no outcome and no approval. At most one
+outcome exists per run: a retry after a post-commit crash finds it and does not call the provider again; a late worker's answer is discarded. A retry after a pre-commit failure asks the provider again, so provider calls are at-least-once.
+
+**Failures.** Retryable provider failures (unavailable, timeout, rate limit) and a module that became unavailable between claim and call are retried by the queue within its attempt limit (`temporary_failure`); every other AI failure (policy,
+authentication, configuration, invalid structured output, an answer Request Intake refuses) is permanent (`rejected`), and the existing reconciler then moves the run to `failed`. There is no manual retry yet. Table and limits: ai-gateway.md section 15.7.
+
+**Not done / remaining.** Never run end to end against the real service; no evaluation set or accuracy measurement; no source references from the model; no stored policy or credential store; the 45-second call deadline, the 15-second lease margin and the
+bounds are provisional; the API still accepts submissions while the module is disabled. Frontend, document upload, connectors, other providers and AI-2b are not part of this slice.

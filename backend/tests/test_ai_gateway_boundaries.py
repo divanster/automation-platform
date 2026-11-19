@@ -135,23 +135,34 @@ class GatewayStaysOutOfCoreAndBusinessModulesTests(unittest.TestCase):
             if any(name == "apps.ai_gateway" or name.startswith("apps.ai_gateway.") for name in absolute_imports(path)):
                 importers.append(path.relative_to(BACKEND).as_posix())
         outside = sorted(p for p in importers if not p.startswith("apps/ai_gateway/"))
-        # AI-1b: the opt-in Workbench composition and the one real transport; the production root is still config/ai_gateway.py alone
-        self.assertEqual(outside, ["config/ai_gateway.py", "config/ai_http_transport.py", "config/ai_workbench.py"])
+        # AI-1b: the opt-in Workbench composition and the one real transport; the production root is still config/ai_gateway.py alone.
+        # AI-2a: Request Intake's AI extractor (the ONE file of the app that names the gateway) and the composition that builds it.
+        self.assertEqual(
+            outside,
+            ["apps/intake/ai_extraction.py", "config/ai_gateway.py", "config/ai_http_transport.py", "config/ai_workbench.py", "config/intake_extraction.py"],
+        )
 
     def test_nothing_imports_the_composition_root_yet(self):
         for path in non_test_sources():
             names = absolute_imports(path)
             with self.subTest(file=path.relative_to(BACKEND).as_posix()):
                 self.assertFalse({n for n in names if n == "config.ai_gateway" or n.startswith("config.ai_gateway.")})
-                self.assertFalse({n for n in names if n.startswith(("config.ai_workbench", "config.ai_http_transport")) and path.name != "ai_workbench.py"})
+                # AI-2a: config/intake_extraction.py is the one other composition that builds the Workbench gateway (for Request Intake only)
+                self.assertFalse({n for n in names if n.startswith(("config.ai_workbench", "config.ai_http_transport")) and path.name not in ("ai_workbench.py", "intake_extraction.py")})
 
     def test_request_intake_the_workflows_and_core_do_not_use_the_gateway(self):
+        # AI-2a: Request Intake's two AI files may name the gateway (ai_extraction.py imports it; ai_output.py says in its docstring that it does not), and the
+        # worker command names the gateway's LOGGER ("apps.ai_gateway") so its identifier-only log lines reach the console. No other file of these apps does.
+        allowed = {"apps/intake/ai_extraction.py", "apps/intake/ai_output.py", "apps/tasks/management/commands/runworker.py"}
         for package in ("intake", "tasks", "cases", "audit", "accounts", "api", "health", "modules", "module_host"):
             for path in BACKEND.joinpath("apps", package).rglob("*.py"):
                 if "__pycache__" in path.parts:
                     continue
-                with self.subTest(file=path.relative_to(BACKEND).as_posix()):
+                relative = path.relative_to(BACKEND).as_posix()
+                with self.subTest(file=relative):
                     text = path.read_text(encoding="utf-8")
+                    if relative in allowed:
+                        continue
                     self.assertNotIn("ai_gateway", text)
         for path in BACKEND.joinpath("workflows").rglob("*.py"):
             self.assertNotIn("ai_gateway", path.read_text(encoding="utf-8"), path.name)

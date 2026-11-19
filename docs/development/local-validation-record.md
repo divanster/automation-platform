@@ -706,3 +706,24 @@ observed worker claim. For orientation only (the VM's arithmetic, not stated by 
 - Request Intake does **not** use `ModuleContext` internally; `revision.approval` has no facade; the manifest's capability list is a declaration. Nothing is sandboxed.
 - There is no real AI integration, no module installation and no Update Manager, no module endpoint, and no licence or signature enforcement.
 - It does not prove that no other race or edge case exists. One machine, one operating system, one PostgreSQL. **This is not a production-readiness claim.**
+
+## AI-1b KPMG Workbench: owner-supplied local smoke test with GPT-5 (reported with AI-2a, 2026-11-19)
+
+> **Scope.** One real call through the AI-1b Workbench provider, run by the project owner **locally**, reported in the instructions for AI-2a. The development VM did not run, repeat or observe it, never contacts the Workbench and holds no key. No output or log is
+> stored in this repository, and no key, charge code or request text was shared with the VM.
+
+**Reported by the owner:**
+
+| Item | Reported value |
+| --- | --- |
+| Provider and profile | `kpmg_workbench`, `workbench-gpt5` |
+| Deployment | `gpt-5-2025-08-07-dzs-sdc` |
+| Reported model | `gpt-5-2025-08-07` |
+| Structured JSON | valid |
+| Duration | 2.33 seconds |
+| Tokens | 107 input, 148 output |
+
+**What this supports (that one call only):** the AI-1b request shape was accepted for the GPT-5 deployment, `choices[0].message.content` held valid JSON, and the answer reported a model and token usage ([ai-gateway.md](../architecture/ai-gateway.md) section 14.10(d)).
+
+**What it does not validate:** the GPT-4.1 deployment, the HTTP status codes for failures, a proxy or TLS inspection, rate limits, Request Intake's prompt and schema (AI-2a), larger inputs, repeatability, retention or logging at the Workbench, or cost. It says nothing about extraction accuracy.
+No PostgreSQL was involved. **The AI-2a PostgreSQL tests (`tests/test_intake_ai_postgres.py`, 35 tests) have not been run by anyone; nothing is recorded for them here.**

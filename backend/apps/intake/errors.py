@@ -17,6 +17,26 @@ class UnsupportedDraftError(IntakeError):
     """A draft holds a value the draft JSON form cannot store exactly (for example a non-Decimal quantity)."""
 
 
+class AIExtractionError(IntakeError):
+    """AI extraction failed before a candidate existed. Nothing was written; the queue decides about a retry from ``retryable`` alone.
+
+    ``code`` is a stable token: an AI Gateway error code (``provider_unavailable``, ``policy_violation``, ``invalid_structured_output``, ...), or
+    ``invalid_ai_output`` (the answer passed the schema but not Request Intake's own checks), or ``module_unavailable`` (the module was disabled or
+    version-mismatched between the claim and the call). ``reason`` is an optional finer token. The message is built from the code only: it never holds
+    the request text, a prompt, a model answer, a provider message or a credential.
+    """
+
+    def __init__(self, code: str, reason: str | None = None, *, retryable: bool = False):
+        self.code = code
+        self.reason = reason
+        self.retryable = bool(retryable)
+        super().__init__(f"AI extraction failed ({code}).")
+
+
+class ExtractionConfigurationError(IntakeError):
+    """The extraction mode or its AI settings are missing or invalid. The message names the setting, never its value."""
+
+
 class ReviewRefusedError(IntakeError):
     """A review operation (edit, approve, reject) is refused. Nothing was written.
 
