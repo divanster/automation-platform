@@ -3,14 +3,24 @@ import { Link, useSearchParams } from "react-router";
 import { listRequests } from "../api/requests";
 import { RUN_STATES, type RunState } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
+import { PageHeader } from "../components/PageHeader";
 import { Pagination } from "../components/Pagination";
 import { StateBadge } from "../components/StateBadge";
 import { EmptyState, ErrorState, LoadingState } from "../components/Status";
+import { Icon } from "../components/ui/Icon";
 import { describeError, isPermissionError } from "../lib/errors";
 import { formatDateTime, isRunState, shortId, stateLabel } from "../lib/format";
 import { useResource } from "../lib/useResource";
 
 const PAGE_SIZE = 20;
+
+// Shortcuts for the states people look for most. They set the same `state` parameter as the select below.
+const QUICK_FILTERS: { label: string; state: RunState | undefined }[] = [
+  { label: "All", state: undefined },
+  { label: "Needs review", state: "needs_review" },
+  { label: "Approved", state: "approved" },
+  { label: "Failed", state: "failed" },
+];
 
 /** URL parameters are untrusted input: anything that is not a valid page or a known state is ignored, not sent. */
 function readParams(params: URLSearchParams): { page: number; state: RunState | undefined } {
@@ -39,14 +49,18 @@ export function RequestsPage() {
 
   return (
     <section>
-      <div className="page-head">
-        <h1>Requests</h1>
-        {can("intake.submit_request") ? (
-          <Link className="button button-primary" to="/requests/new">
-            New request
-          </Link>
-        ) : null}
-      </div>
+      <PageHeader
+        title="Requests"
+        description="Submitted requests and where each one stands."
+        actions={
+          can("intake.submit_request") ? (
+            <Link className="button button-primary" to="/requests/new">
+              <Icon name="plus" />
+              New request
+            </Link>
+          ) : null
+        }
+      />
 
       <div className="toolbar">
         <label>
@@ -60,12 +74,26 @@ export function RequestsPage() {
             ))}
           </select>
         </label>
-        <button type="button" className="button" onClick={reload}>
+        <div className="chip-group" role="group" aria-label="Quick filters">
+          {QUICK_FILTERS.map((chip) => (
+            <button
+              key={chip.label}
+              type="button"
+              className="chip"
+              aria-pressed={chip.state === state}
+              onClick={() => update({ state: chip.state ?? "", page: 1 })}
+            >
+              {chip.label}
+            </button>
+          ))}
+        </div>
+        <button type="button" className="button toolbar-end" onClick={reload}>
+          <Icon name="refresh" />
           Refresh
         </button>
       </div>
 
-      {result.status === "loading" ? <LoadingState label="Loading requests…" /> : null}
+      {result.status === "loading" ? <LoadingState label="Loading requests…" skeleton={5} /> : null}
       {result.status === "error" ? (
         <ErrorState
           title={isPermissionError(result.error) ? "Not available for your account" : "Could not load requests"}
@@ -75,46 +103,76 @@ export function RequestsPage() {
       ) : null}
       {result.status === "ready" ? (
         result.data.results.length === 0 ? (
-          <EmptyState>
-            {state || page > 1 ? (
-              <>
-                No requests match.{" "}
-                <button type="button" className="link-button" onClick={() => setParams(new URLSearchParams())}>
-                  Clear filter
-                </button>
-              </>
-            ) : (
-              "There are no requests yet."
-            )}
-          </EmptyState>
+          state || page > 1 ? (
+            <EmptyState icon="inbox" title="Nothing to show">
+              No requests match.{" "}
+              <button type="button" className="link-button" onClick={() => setParams(new URLSearchParams())}>
+                Clear filter
+              </button>
+            </EmptyState>
+          ) : (
+            <EmptyState
+              icon="inbox"
+              title="Nothing here yet"
+              action={
+                can("intake.submit_request") ? (
+                  <Link className="button button-primary" to="/requests/new">
+                    <Icon name="plus" />
+                    New request
+                  </Link>
+                ) : undefined
+              }
+            >
+              There are no requests yet.
+            </EmptyState>
+          )
         ) : (
           <>
             <div className="table-wrap">
-              <table>
+              <table className="requests-table">
+                <caption className="sr-only">Requests</caption>
                 <thead>
                   <tr>
                     <th scope="col">Reference</th>
                     <th scope="col">State</th>
-                    <th scope="col">Revision</th>
-                    <th scope="col">Extraction</th>
-                    <th scope="col">Submitted by</th>
-                    <th scope="col">Created</th>
+                    <th scope="col" className="num">Revision</th>
+                    <th scope="col" className="col-optional">
+                      Extraction
+                    </th>
+                    <th scope="col" className="col-optional">
+                      Submitted by
+                    </th>
+                    <th scope="col" className="col-date">Created</th>
+                    <th scope="col">
+                      <span className="sr-only">Action</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {result.data.results.map((item) => (
                     <tr key={item.run_id}>
                       <td>
-                        <Link to={`/requests/${item.run_id}`}>{item.reference}</Link>
+                        <Link className="ref-link" to={`/requests/${item.run_id}`}>{item.reference}</Link>
                       </td>
                       <td>
                         <StateBadge state={item.state} />
                         {item.failed_step ? <span className="muted"> at {item.failed_step}</span> : null}
                       </td>
-                      <td>{item.current_revision_number ?? <span className="muted">—</span>}</td>
-                      <td>{item.outcome_status ?? <span className="muted">—</span>}</td>
-                      <td title={item.submitted_by}>{item.submitted_by === me ? "You" : shortId(item.submitted_by)}</td>
-                      <td>{formatDateTime(item.created_at)}</td>
+                      <td className="num">{item.current_revision_number ?? <span className="muted">—</span>}</td>
+                      <td className="col-optional">{item.outcome_status ?? <span className="muted">—</span>}</td>
+                      <td className="col-optional" title={item.submitted_by}>
+                        {item.submitted_by === me ? "You" : shortId(item.submitted_by)}
+                      </td>
+                      <td className="col-date">{formatDateTime(item.created_at)}</td>
+                      <td className="table-actions">
+                        <Link
+                          className={item.state === "needs_review" ? "button button-small button-primary" : "button button-small"}
+                          to={`/requests/${item.run_id}`}
+                          aria-label={`${item.state === "needs_review" ? "Review" : "View"} ${item.reference}`}
+                        >
+                          {item.state === "needs_review" ? "Review" : "View"}
+                        </Link>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

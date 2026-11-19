@@ -1,0 +1,194 @@
+/* Page-level layouts: requests list, request detail, review panels. */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3) var(--space-5);
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+.toolbar label {
+  margin-bottom: 0;
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+.toolbar select {
+  width: auto;
+  min-width: 12rem;
+  color: var(--text);
+}
+.toolbar .chip-group {
+  align-self: flex-end;
+}
+.toolbar .chip {
+  min-height: 2.5rem;
+}
+.toolbar-group {
+  display: grid;
+  gap: var(--space-1);
+}
+.toolbar-group-label {
+  font-weight: 600;
+}
+.toolbar-end {
+  margin-left: auto;
+}
+.result-summary {
+  margin: 0 0 var(--space-3);
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+/* requests table: denser rows, one line per request on wide screens */
+.requests-table th,
+.requests-table td {
+  padding: 0.7rem var(--space-4);
+  vertical-align: middle;
+}
+.requests-table td {
+  font-size: var(--text-sm);
+}
+.requests-table tbody tr {
+  transition: background-color var(--dur) var(--ease);
+}
+.requests-table tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--surface-2) 45%, transparent);
+}
+.requests-table tbody tr:hover,
+.requests-table tbody tr:focus-within {
+  background: var(--accent-soft);
+}
+.requests-table .ref-link {
+  white-space: nowrap;
+}
+.requests-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.requests-table .col-date {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.requests-table .table-actions {
+  width: 1%;
+}
+
+/* request detail */
+.detail-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0 var(--space-5);
+  align-items: start;
+}
+.detail-main,
+.detail-side {
+  min-width: 0;
+}
+.detail-summary {
+  margin-bottom: var(--space-4);
+}
+.review-column-title {
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin: 0 0 var(--space-2);
+}
+
+/* Operator (edit) and Approver (approve / reject) actions are visibly separate groups. */
+.role-group {
+  margin: var(--space-3) 0 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.role-group h3 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-sm);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.role-group ul {
+  margin: 0;
+  padding-left: var(--space-5);
+}
+.role-operator {
+  border-left-color: var(--accent);
+}
+.role-approver {
+  border-left-color: var(--ok-fg);
+}
+.decision-group {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4) var(--space-4) 0;
+  margin-bottom: var(--space-4);
+  background: var(--surface-2);
+}
+.decision-group > .review-column-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.decision-group .card {
+  box-shadow: none;
+}
+.revision-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1rem 0.6rem;
+  margin-left: var(--space-2);
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent-soft-text);
+  font-size: var(--text-xs);
+  font-weight: 650;
+  vertical-align: middle;
+}
+
+@media (min-width: 1100px) {
+  .detail-layout {
+    grid-template-columns: minmax(0, 1fr) 24rem;
+  }
+  .detail-side {
+    position: sticky;
+    top: calc(var(--topbar-h) + var(--space-4));
+    max-height: calc(100vh - var(--topbar-h) - var(--space-5));
+    overflow-y: auto;
+  }
+}
+
+@media (max-width: 759.98px) {
+  .col-optional {
+    display: none;
+  }
+}
+
+@media (max-width: 639.98px) {
+  .page-header {
+    flex-direction: column;
+  }
+  .card {
+    padding: var(--space-4);
+  }
+  th,
+  td {
+    padding: var(--space-2) var(--space-3);
+  }
+  .item-row {
+    grid-template-columns: 1fr;
+  }
+  .toolbar select {
+    width: 100%;
+  }
+  .toolbar-end {
+    margin-left: 0;
+  }
+}

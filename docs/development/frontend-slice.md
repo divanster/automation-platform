@@ -520,3 +520,64 @@ New: `frontend/src/api/review.ts`, `lib/draftForm.ts`, `components/DraftEditor.t
 Changed: `frontend/src/api/types.ts`, `lib/errors.ts`, `components/Pagination.tsx`, `pages/RequestDetailPage.tsx`, `styles.css`, one
 UI-1 test, `README.md`, `CLAUDE.md`, `docs/development/runbook.md`, and this document. No backend behavior, model, migration or
 dependency changed.
+
+## 14. FE-4: app shell and design system
+
+Presentation only. No API call, request or response shape, permission check, or authorization rule changed, and no dependency was added.
+Every control still follows the server's `allowed_actions` and the profile's `permissions`; nothing was added that decides who may do what.
+
+### 14.1 What it adds
+
+- **Design system** (`src/styles/`, imported by `src/styles.css`): `tokens.css` (palette, type, spacing, radius, shadow, layout and motion
+  tokens; breakpoints 640, 900 and 1100 px), `base.css` (reset, visible `:focus-visible` ring, skip link, reduced-motion and
+  forced-colors rules), `components.css`, `shell.css`, `pages.css`. Plain CSS with custom properties; no UI or icon library (icons are
+  inline SVG in `components/ui/Icon.tsx`).
+- **Themes:** light and dark palettes. `src/theme/ThemeProvider.tsx` offers Light, Dark and System (the default: follows the operating
+  system). The choice sets `data-theme` on the document element.
+- **Shell** (`components/Layout.tsx`, `components/shell/`): a collapsible sidebar (icons only when collapsed), a top bar, an account menu
+  (user, roles, theme, Sign out) and one content container. Below 900 px the sidebar is an off-canvas drawer: the page behind it is
+  `inert`, Escape, the backdrop, the close button or following a link closes it, and focus returns to a sensible element. The navigation
+  lists only what exists: **Requests** and **New request** (shown only with `intake.submit_request`). There is no Audit page: audit history
+  is part of the request page, as before, and all routes are unchanged.
+- **Components:** `PageHeader` (breadcrumbs, one `<h1>`, tab title), `ui/Toast` (`role=status` for success and info, auto-dismissed after
+  6 s and paused on hover or focus; `role=alert` for errors, which stay until dismissed), `ui/Skeleton`, status/empty/error states,
+  `StateBadge` with a dot and always a text label.
+- **Requests:** quick-filter chips (same `state` parameter as the select), a table with a per-row Review/View link, optional columns hidden
+  on narrow screens, skeleton loading and richer empty states (the original texts are kept).
+- **Request page:** two columns from 1100 px (content, then a review column). Allowed actions are grouped under **Operator** (edit) and
+  **Approver** (approve, reject); Approve and Reject sit together under "Approver decision". The grouping only presents what the server
+  allows; it grants nothing. Audit history is below.
+- **Toast use:** only the "Request submitted and queued for extraction." confirmation. Results of review actions stay as inline notices.
+
+### 14.2 Decisions and limitations
+
+- **The theme choice is not saved.** `security.test.ts` forbids `localStorage`, `sessionStorage` and `document.cookie` in application code,
+  so the choice lasts until the page is reloaded and then returns to System. Persisting it needs a narrowly scoped, owner-approved
+  exception to that guard (or a server-side preference); it was not changed here.
+- **No ESLint.** The project has no ESLint dependency or configuration, and none was added. The checks that exist are the TypeScript
+  compiler (`npm run typecheck`, strict) and the tests, including the static source guards.
+- **Not seen in a browser by the development VM.** Vitest does not process CSS, so layout, the drawer's visibility, colours and
+  breakpoints are not exercised by tests (the drawer and collapse tests check state attributes). Text contrast of the palette pairs and
+  non-text border contrast were computed from the token values (all pass 4.5:1 for text and 3:1 for control borders and focus rings, in
+  both themes), which is not a substitute for a visual review or an accessibility audit with assistive technology.
+- The account menu is a disclosure (a button showing a panel), not an ARIA menu; Sign out is reached by opening it first.
+- Collapse state is not remembered (same storage restriction).
+- Everything in sections 10 and 13.9 still applies.
+
+### 14.3 Tests (development VM)
+
+New: `components/shell/shell.test.tsx` (navigation and `aria-current`, permission-gated link, skip link and landmarks, page header and tab
+title, drawer open/close/Escape/link/backdrop and focus, sidebar collapse, account menu, theme switching, toasts) and
+`pages/designSystem.test.tsx` (status badges for every state and an unknown one, table row actions, quick filters, review action grouping
+and availability). `src/test/shell.ts` opens the account menu for the four existing sign-out tests, and one existing assertion
+(`ApproveReject.test.tsx`, "sends nothing at all when no action is allowed") was anchored to button names that *start with* the
+action, because the account button is now named after the signed-in user, who may be called `synthetic.approver`.
+
+### 14.4 Visual polish after browser review
+
+Styling only; no behaviour, API or test change. The sidebar is wider (17rem) and the collapse toggle moved from the header to a footer
+button below the navigation, so the full application name has the whole header width and wraps instead of being truncated. A collapsed
+sidebar keeps the brand mark. The content container is wider (92rem) with fluid padding, the topbar and page header have a clearer
+hierarchy, and the requests table is denser (zebra rows, hover and focus-within highlight, monospace references, right-aligned tabular
+revision numbers, no-wrap dates). Filters, pagination bar, empty and loading states are restyled. These changes are CSS that Vitest does
+not process, so they have not been seen in a browser by the development VM; the theme is still not persisted.
