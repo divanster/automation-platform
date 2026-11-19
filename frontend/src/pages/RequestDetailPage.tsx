@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
 
 import type { RequestDetail } from "../api/types";
@@ -15,6 +15,8 @@ import { ErrorState, LoadingState, Notice } from "../components/Status";
 import { describeError, isNotFound, isOutOfDate } from "../lib/errors";
 import { formatDateTime, isProcessingState, isUuid, shortId } from "../lib/format";
 import { useRequestDetail } from "../lib/useRequestDetail";
+import { useStateTransitionToasts } from "../lib/useStateTransitionToasts";
+import { LiveStatus } from "../components/LiveStatus";
 import { NotFoundPage } from "./NotFoundPage";
 
 const ACTION_LABELS: Record<string, string> = { edit: "Edit the draft", approve: "Approve", reject: "Reject" };
@@ -279,12 +281,26 @@ export function RequestDetailPage() {
 }
 
 function LoadedDetail({ runId }: { runId: string }) {
-  const { state, reload } = useRequestDetail(runId);
+  const { state, reload, refreshing, refreshError, lastUpdated } = useRequestDetail(runId);
   const { state: auth, can } = useAuth();
   const me = auth.status === "authenticated" ? auth.user.public_id : null;
   const [flash, setFlash] = useState<Flash | null>(null);
   const [editing, setEditing] = useState(false);
   const [auditVersion, setAuditVersion] = useState(0);
+
+  const data = state.status === "ready" ? state.data : null;
+  const tracked = useMemo(() => (data ? [{ runId: data.run_id, reference: data.reference, state: data.state }] : null), [data]);
+  useStateTransitionToasts(tracked);
+
+  // The audit history is read separately; load it again when the request changed on the server (an action by someone
+  // else, or the worker), not only after this user's own actions.
+  const changeMarker = data ? `${data.state}|${data.current_revision?.id ?? ""}|${data.approval_count}|${data.rejection_count}` : null;
+  const lastMarker = useRef<string | null>(null);
+  useEffect(() => {
+    if (changeMarker === null) return;
+    if (lastMarker.current !== null && lastMarker.current !== changeMarker) setAuditVersion((v) => v + 1);
+    lastMarker.current = changeMarker;
+  }, [changeMarker]);
 
   // After any action the request and its audit history are loaded again from the server; nothing is updated locally.
   const refresh = () => {
@@ -302,14 +318,7 @@ function LoadedDetail({ runId }: { runId: string }) {
 
   return (
     <section>
-      {state.refreshError ? (
-        <Notice kind="error">
-          Could not refresh: {describeError(state.refreshError)}{" "}
-          <button type="button" className="link-button" onClick={reload}>
-            Try again
-          </button>
-        </Notice>
-      ) : null}
+      <LiveStatus refreshing={refreshing} lastUpdated={lastUpdated} error={refreshError} onRetry={reload} />
       <DetailBody
         detail={detail}
         me={me}
