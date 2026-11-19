@@ -6,6 +6,9 @@ import { isProcessingState } from "./format";
 /** The requests list. */
 export const LIST_POLL_MS = 5000;
 
+/** The dashboard: nine small list requests per refresh (see dashboardData.ts), so it refreshes less often than the list. */
+export const DASHBOARD_POLL_MS = 10000;
+
 /** A request the system is still working on (queued, extracting, exporting). */
 export const ACTIVE_POLL_MS = 3000;
 /** After this many refreshes of a request that is still processing (about three minutes), refresh less often. */

@@ -123,7 +123,8 @@ The session is Django's HttpOnly cookie. JavaScript never sees it, and nothing i
 | Route | Screen | API calls |
 | --- | --- | --- |
 | `/login` | `LoginPage` | `GET /api/auth/csrf/`, `POST /api/auth/login/` |
-| `/` | redirect to `/requests` | |
+| `/` | redirect: `/dashboard` for a user with `intake.view_own_request` or `intake.view_any_request`, else `/requests` (FE-6) | |
+| `/dashboard` | `DashboardPage` (FE-6, section 16) | `GET /api/requests/` ×9 per refresh, polled |
 | `/requests` | `RequestsPage` (table, state badges, filter, pagination; `?page=` and `?state=` in the URL) | `GET /api/requests/?page&page_size=20&state` |
 | `/requests/new` | `NewRequestPage` | `POST /api/requests/` with `{text, client_request_id}` |
 | `/requests/:runId` | `RequestDetailPage` | `GET /api/requests/{run_id}/` (polled) |
@@ -670,3 +671,105 @@ updated for the new intervals. The full run was 17 files, 328 tests passed, with
 - Notifications cover only `needs_review` and `failed`, and are seen only by a user with the page open; there is no notification
   for requests the user is not currently viewing.
 - A 4xx other than 429 stops background polling until the user retries.
+
+## 16. FE-6: dashboard
+
+Frontend only. No backend, API, payload, migration or dependency change, and no Workbench request. The dashboard is a new
+screen inside the existing app shell (`pages/DashboardPage.tsx`, `lib/dashboardData.ts`, `lib/permissions.ts`); it reuses
+`useLiveResource`, `LiveStatus`, `PageHeader`, `StateBadge`, the status components and the FE-4 styles.
+
+### 16.1 Data sources (only `GET /api/requests/`)
+
+The API has no statistics endpoint and the dashboard does not invent one. Every list response carries `count`: the total of all
+requests **the signed-in user may view** that match the optional `state` filter, whatever `page_size` is. One refresh therefore sends,
+all at once:
+
+- one unfiltered request, `page=1&page_size=5`: its `results` are the recent requests (newest first, as the server orders them)
+  and its `count` is **Total requests**;
+- one request per run state (eight), `page=1&page_size=1&state=<state>`: only the `count` is used.
+
+| Card | Source |
+|---|---|
+| Total requests | `count` of the unfiltered request |
+| Processing | `count(queued) + count(extracting) + count(exporting)` (the states `lib/format.ts` calls processing) |
+| Needs review | `count(needs_review)` |
+| Approved | `count(approved)` (`exporting` and `exported` are not included; they appear in the distribution) |
+| Failed | `count(failed)` |
+| Status distribution | all eight per-state counts, with a share of the total when the total is known |
+
+Nothing is ever added up from the rows of a page. Processing is the only derived figure, and it is a sum of server counts.
+
+### 16.2 Accuracy rules and limits
+
+- **Unavailable is not zero.** Each answer stands on its own (`Promise.allSettled`). A figure whose request failed shows
+  "Unavailable" (with a tooltip saying it is not zero). Processing is unavailable when any of its three states is, because a partial
+  sum would be wrong. A real `0` shows as `0`.
+- If **every** request fails the first error is thrown: a first load shows the normal error state (a 403 is "Not available for your
+  account", with no retry button), and a background refresh keeps the last good data with the quiet "Could not refresh" note.
+- If only the recent-requests request fails, that panel shows a warning and the figures still show; if only some counts fail, the
+  rest still show. A background refresh replaces a figure by "Unavailable" if its request failed that time rather than keeping a
+  possibly stale number under a new "Updated" time.
+- **Not a snapshot.** The nine requests are separate and a moment apart. A request that changes state between them can make the
+  per-state counts differ from the total by a little; the dashboard says so when all figures are known and they disagree
+  (`data-testid="counts-disagree"`), and the next refresh corrects it.
+- **Visibility.** The server decides what is counted. A user with only `intake.view_own_request` sees counts of their own requests;
+  a user with `intake.view_any_request` (Approver, Auditor, and so on) sees all of them. The sentence under the title is chosen from
+  the permissions in `/api/auth/me/` and is a wording hint only; it never changes a count.
+- **Cost.** Nine small list requests per refresh, every 10 s per open dashboard tab: 54 requests a minute, against the API's
+  per-user ceiling of 600 a minute (`api_user` in `config/settings/base.py`; each open tab counts, and a 429 is retried with
+  back-off by the hook). The count queries run in PostgreSQL per state and their load has not been measured. A server-side
+  summary endpoint would reduce this to one request and is the recommended follow-up.
+
+### 16.3 UI
+
+Responsive KPI cards (`auto-fit` grid; Total, Needs review, Approved and Failed link to `/requests` with the matching `?state=`;
+Processing is three states and the list filters by one, so it is not a link), a recent-requests table (reference, state, created,
+Review or View), a status-distribution list (each row links to its filter), quick actions (New request only with
+`intake.submit_request`, Review requests, All requests), skeleton cards while the first load runs, and an empty state with a New
+request action (only for users who may submit) when there are no requests. Light, dark and system themes use the existing tokens;
+transitions are disabled under `prefers-reduced-motion`.
+
+Accessibility: one `h1`, `h2` per section (the card group has a visually hidden one), each card's accessible name is its label and
+value, the distribution does not rely on colour or the bar (the state name and exact count are text), and a visually hidden
+`role="status"` region holds a plain-text summary of the five figures; its text changes only when a figure changes, so a
+screen reader is told about changes and not about every poll.
+
+### 16.4 Polling
+
+`useLiveResource` with `DASHBOARD_POLL_MS = 10000` (`lib/liveIntervals.ts`): one refresh at a time (all nine requests belong to one
+refresh, so refreshes cannot overlap), no timer while the tab is hidden, an immediate refresh when it becomes visible, abort on
+unmount, route change and logout, nothing fetched while signed out, refresh in place with the data kept on screen, quiet error with
+back-off. A Refresh button refreshes at once. All behaviour is the hook's, described in section 15.1.
+
+### 16.5 Permissions and navigation
+
+- Sidebar: **Dashboard** is the first entry and is shown only to a user with `intake.view_own_request` or `intake.view_any_request`
+  (`NavItem.anyPermission`); the other entries and their rules are unchanged. The brand link now goes to `/`.
+- `/` redirects to `/dashboard` for those users and to `/requests` for everyone else; the login page's default destination is `/`, so
+  the same rule applies after sign-in. A deep link (for example `/requests/<id>`) still returns the user to it after login.
+- `/dashboard` for a user without a view permission shows "Not available for your account" and makes no request. This is a display
+  hint; the backend still decides every call. `is_superuser` is not special-cased, as elsewhere in the UI: a superuser sees the
+  dashboard when `/api/auth/me/` lists a view permission for them.
+- `/requests`, `/requests/new`, `/requests/:runId` and the not-found page are unchanged.
+
+### 16.6 Tests (development VM, jsdom, `fetch` stubbed, fake timers)
+
+`pages/DashboardPage.test.tsx` (43 tests): routing and landing, permission-based visibility and wording, exact counts with
+22 requests against 5 rows and one row per state, the request shapes (`page_size` 5 and 1, one per state), a real zero, each missing
+figure (a state, the total, the recent list, Processing), disagreement note, distribution shares, card links and accessible names,
+recent requests and empty states, skeleton and error states with retry and 403, no duplicate first load, refresh in place every
+10 s, no overlap, quiet refresh error, hidden-tab pause and visible resume, a hidden first load, abort on logout and on leaving the
+page, the Refresh button, navigation from cards, quick actions and the sidebar, existing routes, and login landing.
+`shell.test.tsx` was updated for the new first sidebar entry. Result: 18 files, 371 tests passed; `npm run typecheck`,
+`npm run build` and `git diff --check` clean.
+
+### 16.7 Remaining gaps
+
+- **Not seen in a real browser.** No owner validation is recorded for FE-6; visual layout, dark theme and the 10 s refresh against a real
+  Django, PostgreSQL and worker are untested.
+- No server-side summary endpoint (nine requests per refresh, see 16.2), no history or trend, and no counts by period.
+- No AI usage, cost, worker or provider-health figures: the API has no endpoint for any of them, so none are shown.
+- "Approved" excludes `exporting` and `exported`; no export exists yet, so both are expected to be 0.
+- No stale-while-error indication per figure: a figure whose refresh failed shows "Unavailable" until the next success.
+- A superuser whose profile lists no view permission lands on `/requests` as before.
+- FE-7, AI Settings and document upload are not part of this slice.

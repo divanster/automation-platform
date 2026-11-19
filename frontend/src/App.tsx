@@ -8,7 +8,17 @@ import { NewRequestPage } from "./pages/NewRequestPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
 import { RequestDetailPage } from "./pages/RequestDetailPage";
 import { RequestsPage } from "./pages/RequestsPage";
+import { DashboardPage } from "./pages/DashboardPage";
 import { ThemeProvider } from "./theme/ThemeProvider";
+import { useAuth } from "./auth/AuthContext";
+import { canViewRequests } from "./lib/permissions";
+
+// The landing page: the dashboard for anyone who may view requests (it would only show an error to anyone else), and the
+// requests list, as before, for everyone else.
+function Home() {
+  const { can } = useAuth();
+  return <Navigate to={canViewRequests(can) ? "/dashboard" : "/requests"} replace />;
+}
 
 // The router and AuthProvider are supplied by the caller (main.tsx in the app, a memory router in tests). Theme and
 // toasts are presentation only and live here so the real application and the tests share them.
@@ -20,7 +30,8 @@ export function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route element={<RequireAuth />}>
             <Route element={<Layout />}>
-              <Route index element={<Navigate to="/requests" replace />} />
+              <Route index element={<Home />} />
+              <Route path="dashboard" element={<DashboardPage />} />
               <Route path="requests" element={<RequestsPage />} />
               <Route path="requests/new" element={<NewRequestPage />} />
               <Route path="requests/:runId" element={<RequestDetailPage />} />

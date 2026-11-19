@@ -30,7 +30,8 @@ describe("navigation", () => {
     await screen.findByText("REQ-20260101-AAAA0001");
 
     const links = mainNav().getAllByRole("link");
-    expect(links.map((l) => l.textContent)).toEqual(["Requests", "New request"]);
+    expect(links.map((l) => l.textContent)).toEqual(["Dashboard", "Requests", "New request"]);
+    expect(mainNav().getByRole("link", { name: "Dashboard" })).not.toHaveAttribute("aria-current");
     expect(mainNav().getByRole("link", { name: "Requests" })).toHaveAttribute("aria-current", "page");
     expect(mainNav().getByRole("link", { name: "New request" })).not.toHaveAttribute("aria-current");
   });

@@ -9,7 +9,7 @@ import { describeError } from "../lib/errors";
 /** Only in-app paths are honoured as a post-login destination. */
 function safeDestination(from: unknown): string {
   if (typeof from === "string" && from.startsWith("/") && !from.startsWith("//") && !from.startsWith("/login")) return from;
-  return "/requests";
+  return "/"; // the index route picks the landing page for the user's permissions
 }
 
 export function LoginPage() {

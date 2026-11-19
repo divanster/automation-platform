@@ -24,12 +24,15 @@ export function Sidebar({
   closeButtonRef: RefObject<HTMLButtonElement | null>;
 }) {
   const { pathname } = useLocation();
-  const items = NAV_ITEMS.filter((item) => item.permission === undefined || can(item.permission));
+  const items = NAV_ITEMS.filter(
+    (item) =>
+      (item.permission === undefined || can(item.permission)) && (item.anyPermission === undefined || item.anyPermission.some((p) => can(p))),
+  );
 
   return (
     <aside className="sidebar" id={id}>
       <div className="sidebar-head">
-        <Link className="brand" to="/requests" onClick={onNavigate}>
+        <Link className="brand" to="/" onClick={onNavigate}>
           <span className="brand-mark" aria-hidden="true">
             <Icon name="bolt" />
           </span>
