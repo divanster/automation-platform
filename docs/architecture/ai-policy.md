@@ -10,6 +10,12 @@
 > handling (section 9), evaluation (section 11) and the rest of this document that ai-gateway.md does not describe remain **proposed**
 > and unproven.
 >
+> **AI-1b: a first real adapter exists, untested against the real service.** The KPMG Workbench provider (`kpmg_workbench`, locality
+> `company_endpoint`, deployments GPT-5 and GPT-4.1) is implemented to the client-side HTTP contract reported from the FI integration audit and
+> tested with a mocked transport only; no request has ever been sent to it, and that contract is not proof of live compatibility (see
+> [ai-gateway.md](ai-gateway.md), section 14, in particular 14.10). It is not registered in the production
+> composition and nothing calls it. Its key comes from a backend environment variable; the credential **store** (section 9) is still open.
+>
 > **Naming used by the code.** The third mode is `approved_cloud` with the locality `cloud` (this document first proposed
 > `approved_external` and `external`; ADR 0004 still uses the old names). The error codes are `provider_unavailable`,
 > `policy_violation`, `timeout`, `invalid_structured_output`, `rate_limit`, `authentication_failure`, `unsupported_model`,
@@ -56,8 +62,9 @@ The gateway does not depend on business workflows
    calls, needs no credentials, and has locality `local`. It exists so the whole
    workflow, including failure paths, can be tested without a real model.
 2. **Local adapter (later, Phase 6).** A model running on the same machine.
-3. **Company-endpoint adapter (later, Phase 6).** A model server operated by the
-   company.
+3. **Company-endpoint adapter.** A model server operated by the
+   company. *AI-1b: the KPMG Workbench adapter is this kind, classified `company_endpoint` by the owner; it refuses to run under `local_only`, may run under
+   `company_endpoint`, and by the cumulative rule under `approved_cloud`. Written, not verified against the service.*
 4. **External adapter (later, Phase 6).** A third-party hosted service, only
    under the approved-cloud mode.
 
@@ -145,6 +152,11 @@ specific capabilities, and human approval for consequential actions.
 - A `ModelProfile` holds only a *reference* to a credential, not the secret.
 - The storage mechanism for credentials on Windows is an open question.
 - Only the worker and gateway code paths that need a credential can resolve it.
+- *As implemented in AI-1b (Workbench only):* the key is read from the backend process environment (`AP_AI_WORKBENCH_API_KEY`; for development, from the
+  git-ignored `.env`) when the Workbench gateway is built, held only in the adapter's configuration object and sent only in the request's authentication
+  header (`Ocp-Apim-Subscription-Key`, raw value); it is not a `ModelProfile` field, not in Django settings, logs, errors, provenance or any API response. A missing key fails
+  closed, and the endpoint host is allowlisted so the key cannot be sent to another destination. This is an interim mechanism, not the decided credential store; the proxy and
+  TLS rules are in [ai-gateway.md](ai-gateway.md), section 14.5.
 
 ## 10. Capability checks
 

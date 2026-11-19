@@ -49,7 +49,7 @@ class GatewayPackageIsPureTests(unittest.TestCase):
         names = {p.relative_to(GATEWAY).as_posix() for p in gateway_sources()}
         self.assertEqual(
             names,
-            {"__init__.py", "contracts.py", "errors.py", "gateway.py", "jsonvalue.py", "policy.py", "provider.py", "registry.py", "structured.py", "adapters/__init__.py", "adapters/deterministic.py"},
+            {"__init__.py", "contracts.py", "errors.py", "gateway.py", "jsonvalue.py", "policy.py", "provider.py", "registry.py", "structured.py", "transport.py", "adapters/__init__.py", "adapters/deterministic.py", "adapters/workbench.py"},
         )
 
     def test_it_imports_only_the_standard_library_and_itself(self):
@@ -96,7 +96,7 @@ class GatewayPackageIsPureTests(unittest.TestCase):
                 self.assertFalse(name.startswith("apps.ai_gateway.adapters"), f"{path.name} imports {name}")
 
     def test_adapters_import_only_the_gateway_contract_above_them(self):
-        allowed = {"contracts", "errors", "jsonvalue", "policy", "provider"}
+        allowed = {"contracts", "errors", "jsonvalue", "policy", "provider", "transport"}
         for path in sorted(ADAPTERS.glob("*.py")):
             for level, module in relative_imports(path):
                 with self.subTest(file=path.name, module=module):
@@ -135,13 +135,15 @@ class GatewayStaysOutOfCoreAndBusinessModulesTests(unittest.TestCase):
             if any(name == "apps.ai_gateway" or name.startswith("apps.ai_gateway.") for name in absolute_imports(path)):
                 importers.append(path.relative_to(BACKEND).as_posix())
         outside = sorted(p for p in importers if not p.startswith("apps/ai_gateway/"))
-        self.assertEqual(outside, ["config/ai_gateway.py"])
+        # AI-1b: the opt-in Workbench composition and the one real transport; the production root is still config/ai_gateway.py alone
+        self.assertEqual(outside, ["config/ai_gateway.py", "config/ai_http_transport.py", "config/ai_workbench.py"])
 
     def test_nothing_imports_the_composition_root_yet(self):
         for path in non_test_sources():
             names = absolute_imports(path)
             with self.subTest(file=path.relative_to(BACKEND).as_posix()):
                 self.assertFalse({n for n in names if n == "config.ai_gateway" or n.startswith("config.ai_gateway.")})
+                self.assertFalse({n for n in names if n.startswith(("config.ai_workbench", "config.ai_http_transport")) and path.name != "ai_workbench.py"})
 
     def test_request_intake_the_workflows_and_core_do_not_use_the_gateway(self):
         for package in ("intake", "tasks", "cases", "audit", "accounts", "api", "health", "modules", "module_host"):
@@ -166,7 +168,10 @@ class GatewayStaysOutOfCoreAndBusinessModulesTests(unittest.TestCase):
             if "adapters" in path.parts and "ai_gateway" in path.parts:
                 continue
             with self.subTest(file=path.relative_to(BACKEND).as_posix()):
-                self.assertFalse({n for n in absolute_imports(path) if n.startswith("apps.ai_gateway.adapters")})
+                imported = {n for n in absolute_imports(path) if n.startswith("apps.ai_gateway.adapters")}
+                if path.relative_to(BACKEND).as_posix() == "config/ai_workbench.py":
+                    imported -= {"apps.ai_gateway.adapters", "apps.ai_gateway.adapters.workbench"}  # AI-1b: the one real adapter, named in the opt-in composition
+                self.assertFalse(imported)
 
     def test_the_module_contract_still_marks_ai_invoke_as_a_future_capability(self):
         from apps.modules.registry import CORE_CAPABILITIES, FUTURE_CAPABILITIES
