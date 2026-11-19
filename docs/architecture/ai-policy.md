@@ -1,10 +1,10 @@
 # AI Gateway and Data Policy
 
-> **Status: foundation implemented (AI-1a); no real AI.** The provider-neutral contracts, the three policy modes with enforcement
+> **Status: foundation implemented (AI-1a); a first workflow use (AI-2a) is written, opt-in and not validated end to end.** The provider-neutral contracts, the three policy modes with enforcement
 > before any provider call, a static provider registry, strict structured-output validation, stable error codes and a deterministic
 > **test** adapter exist as a standalone, standard-library package (`backend/apps/ai_gateway`; see [ai-gateway.md](ai-gateway.md)). The
-> unit tests are DB-free and pass in the development VM. **Nothing calls the gateway**: no workflow, module or API uses it, no real
-> provider, credential, per-company policy setting or administrator approval exists, and Request Intake still extracts with its own
+> unit tests are DB-free and pass in the development VM. **As of AI-1a nothing called the gateway** (since AI-2a only Request Intake's opt-in AI extractor does, see below): no module or API uses it, no
+> credential store, per-company policy setting or administrator approval exists, and by default Request Intake still extracts with its own
 > deterministic fixture parser. Confirmed directions: a provider-neutral gateway, a deterministic test adapter before any real provider,
 > no silent fallback to cloud, and no automatic email sending or ERP writes in the first slice. Embeddings (section 5), credential
 > handling (section 9), evaluation (section 11) and the rest of this document that ai-gateway.md does not describe remain **proposed**
@@ -14,7 +14,13 @@
 > `company_endpoint`, deployments GPT-5 and GPT-4.1) is implemented to the client-side HTTP contract reported from the FI integration audit and
 > tested with a mocked transport only; no request has ever been sent to it, and that contract is not proof of live compatibility (see
 > [ai-gateway.md](ai-gateway.md), section 14, in particular 14.10). It is not registered in the production
-> composition and nothing calls it. Its key comes from a backend environment variable; the credential **store** (section 9) is still open.
+> composition; as of AI-1b nothing called it, and since AI-2a only Request Intake's opt-in extractor builds it. Its key comes from a backend environment variable; the credential **store** (section 9) is still open.
+>
+> **AI-2a: Request Intake can use the gateway, only by explicit opt-in.** `AP_INTAKE_EXTRACTION_MODE=ai` makes the worker extract through the gateway with the `workbench-gpt5` profile; the default is still the deterministic fixture parser,
+> and nothing switches between the two automatically. `ai` mode requires an explicit `AP_AI_POLICY_MODE` (no default; `local_only` is refused) and the Workbench key, and the worker refuses to start otherwise. The policy is enforced at start-up and again by the
+> gateway on every call, before any provider code runs; the module's state is re-checked immediately before the text is sent; failures follow the gateway's retryable and permanent classes with no fallback; the answer is validated by the existing business
+> rules and approved only by a person. Still **not** implemented: a stored company policy, an administrator's approval record, a credential store, an evaluation set and thresholds (section 11), and any measured accuracy. See
+> [ai-gateway.md](ai-gateway.md), section 15. Sections 4, 6, 7, 11 and 12 below remain the policy this follows.
 >
 > **Naming used by the code.** The third mode is `approved_cloud` with the locality `cloud` (this document first proposed
 > `approved_external` and `external`; ADR 0004 still uses the old names). The error codes are `provider_unavailable`,

@@ -22,9 +22,12 @@ from django.db import DatabaseError, connections
 
 from apps.tasks import worker
 from apps.tasks.policy import QueuePolicyError, validate_lease_seconds, validate_poll_seconds
-from config.task_registry import COMPOSITION  # the composition root: the one place the production allowlist is assembled
+from config.task_registry import COMPOSITION, WorkerConfigurationError, prepare_worker  # the composition root: the one place the production allowlist is assembled
+
+_log = logging.getLogger(__name__)
 
 _SIGNAL_NAMES = ("SIGINT", "SIGTERM", "SIGBREAK")  # SIGBREAK exists on Windows only
+_LOGGER_NAMES = ("apps.tasks", "apps.intake", "apps.ai_gateway")
 
 
 @contextmanager
@@ -58,18 +61,21 @@ def shutdown_on_signals(stop: threading.Event):
 
 @contextmanager
 def console_logging(stream=None):
-    """Send the queue's log lines (task ids, kinds, statuses, safe codes) to the console while the command runs."""
-    logger = logging.getLogger("apps.tasks")
+    """Send the log lines of the queue (task ids, kinds, statuses, safe codes), of Request Intake's handler (run id, stable failure tokens) and of the AI
+    gateway (identifiers, a code, a duration) to the console while the command runs. None of them carries content: no text, prompt, answer or credential."""
     handler = logging.StreamHandler(stream or sys.stderr)
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
-    previous_level = logger.level
-    logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
+    loggers = [logging.getLogger(name) for name in _LOGGER_NAMES]
+    previous_levels = [logger.level for logger in loggers]
+    for logger in loggers:
+        logger.addHandler(handler)
+        logger.setLevel(logging.INFO)
     try:
         yield
     finally:
-        logger.removeHandler(handler)
-        logger.setLevel(previous_level)
+        for logger, level in zip(loggers, previous_levels):
+            logger.removeHandler(handler)
+            logger.setLevel(level)
 
 
 class Command(BaseCommand):
@@ -88,9 +94,14 @@ class Command(BaseCommand):
             raise CommandError(str(error)) from None
 
         worker.install_composition(COMPOSITION)
+        try:
+            description = prepare_worker(lease_seconds)  # AI-2a: the extraction mode is decided here, explicitly; a bad setting stops the start-up
+        except WorkerConfigurationError as error:
+            raise CommandError(f"Extraction configuration error: {error}") from None
         worker_id = worker.make_worker_id()
         try:
             with console_logging():
+                _log.info("%s", description)  # the log, not the command's output: what --once and the loop print is unchanged
                 if options["once"]:
                     self._run_once(worker_id, lease_seconds)
                 else:

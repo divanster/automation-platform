@@ -706,3 +706,56 @@ observed worker claim. For orientation only (the VM's arithmetic, not stated by 
 - Request Intake does **not** use `ModuleContext` internally; `revision.approval` has no facade; the manifest's capability list is a declaration. Nothing is sandboxed.
 - There is no real AI integration, no module installation and no Update Manager, no module endpoint, and no licence or signature enforcement.
 - It does not prove that no other race or edge case exists. One machine, one operating system, one PostgreSQL. **This is not a production-readiness claim.**
+
+## AI-1b KPMG Workbench: owner-supplied local smoke test with GPT-5 (reported with AI-2a, 2026-11-19)
+
+> **Scope.** One real call through the AI-1b Workbench provider, run by the project owner **locally**, reported in the instructions for AI-2a. The development VM did not run, repeat or observe it, never contacts the Workbench and holds no key. No output or log is
+> stored in this repository, and no key, charge code or request text was shared with the VM.
+
+**Reported by the owner:**
+
+| Item | Reported value |
+| --- | --- |
+| Provider and profile | `kpmg_workbench`, `workbench-gpt5` |
+| Deployment | `gpt-5-2025-08-07-dzs-sdc` |
+| Reported model | `gpt-5-2025-08-07` |
+| Structured JSON | valid |
+| Duration | 2.33 seconds |
+| Tokens | 107 input, 148 output |
+
+**What this supports (that one call only):** the AI-1b request shape was accepted for the GPT-5 deployment, `choices[0].message.content` held valid JSON, and the answer reported a model and token usage ([ai-gateway.md](../architecture/ai-gateway.md) section 14.10(d)).
+
+**What it does not validate:** the GPT-4.1 deployment, the HTTP status codes for failures, a proxy or TLS inspection, rate limits, Request Intake's prompt and schema (AI-2a), larger inputs, repeatability, retention or logging at the Workbench, or cost. It says nothing about extraction accuracy.
+No PostgreSQL was involved. The AI-2a PostgreSQL results are recorded in the next section.
+
+## AI-2a Request Intake extraction through the AI Gateway: owner-supplied local PostgreSQL results (2026-11-19)
+
+> **Scope.** AI-2a lets Request Intake extract through the AI Gateway (KPMG Workbench, profile `workbench-gpt5`) when an operator explicitly sets `AP_INTAKE_EXTRACTION_MODE=ai`; the default is the deterministic fixture parser
+> (`feat/ai-request-intake-extraction`, implementation `e2fac8a`; see [ai-gateway.md](../architecture/ai-gateway.md), section 15, and [runbook.md](runbook.md), section 5.6). AI-2a adds no migration, model, endpoint, screen, permission, audit action or failure code.
+> The project owner ran the PostgreSQL tests **locally on the Windows computer**. **The development VM has no PostgreSQL, never connected to one, never contacted the Workbench, and did not run, repeat or observe any of it.** No output or log is stored in this repository.
+> The tests use a fake HTTP transport behind the real gateway and Workbench adapter, so the owner's run sent nothing to the Workbench.
+
+**Reported by the owner:**
+
+| Item | Reported result |
+| --- | --- |
+| Focused AI extraction PostgreSQL tests (`tests/test_intake_ai_postgres.py`) | **35 passed** |
+| Full selected PostgreSQL regression | **736 tests passed, 238.962 seconds, exit code 0** |
+| Test database | The dedicated test database was destroyed successfully |
+| DB-free regression in the development VM | 2636 tests passed (148 new for AI-2a) |
+
+**What was not supplied:** the command lines and module list of the runs, the output, and any manual smoke test (a request submitted through the UI and extracted by the AI mode). For orientation only (the VM's arithmetic, not stated by the owner): 736 is 35 more than the 701 of the MOD-2 selection.
+
+**What this supports (this environment and these scenarios only):**
+
+- **AI extraction through the existing worker.** The tests passed for an AI answer becoming an `ExtractionOutcome`, revision 1 (valid drafts), warnings, an invalid outcome for a person to fix, and `needs_review`, with the stored hash equal to the domain's canonicalization, using a scripted provider.
+- **Failure and recovery.** Retryable and permanent provider failures, bounded retries with the run failed by the existing reconciler, rollback of the second transaction, a crash after the commit, a late worker, competing extractions, a cancelled run, and a module disabled before the claim or between the claim and the call: no partial revision, no approval, no fallback to the fixture parser.
+- **Modes.** With no source installed, and with an explicit deterministic source, extraction is the existing deterministic path; switching modes does not rewrite an earlier outcome.
+- **Preserved contracts in the tested scenarios.** Human review of an AI-produced revision (a different approver, acknowledged warnings, rejection with a fixed reason, an edit as a new revision), the audit vocabulary and its safe keys, the worker, the queue, the module gate and the REST API behaved as before: the existing suites in the 736-test selection passed (inferred from the all-passed result, not itemized).
+
+**What it does not validate, and what does not exist.**
+
+- **No real GPT-5 end-to-end test of Request Intake yet.** The provider was never sent Request Intake's prompt and schema by anyone; the owner's earlier smoke test (above) covered the provider call only.
+- **No extraction accuracy or evaluation set.** How often the model answers inside the schema, quotes ambiguities correctly or reads quantities as digits is unknown, and no cost or latency was measured.
+- **No automatic fallback** (by design), no manual retry of a failed run, no frontend change, no document upload, no stored company policy or credential store.
+- It does not prove that no other race or edge case exists. One machine, one operating system, one PostgreSQL. **This is not a production-readiness claim.**

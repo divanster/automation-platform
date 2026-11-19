@@ -305,7 +305,7 @@ class SourceBoundaryTests(SimpleTestCase):
         self.assertEqual(
             names,
             {
-                "__init__.py", "access.py", "apps.py", "authorization.py", "draft_json.py", "editing.py", "errors.py", "extraction.py",
+                "__init__.py", "access.py", "ai_extraction.py", "ai_output.py", "apps.py", "authorization.py", "draft_json.py", "editing.py", "errors.py", "extraction.py",
                 "handlers.py", "models.py", "module.py", "policy.py", "queries.py", "registry.py", "review.py", "review_rules.py", "services.py", "submission.py",
             },
         )  # fmt: skip
@@ -314,7 +314,7 @@ class SourceBoundaryTests(SimpleTestCase):
         self.assertEqual(imported_modules(INTAKE_DIR / "policy.py") - {"re", "uuid", "datetime"}, set())
 
     def test_the_pure_modules_import_no_django_and_no_database_code(self):
-        for name in ("draft_json.py", "extraction.py", "errors.py"):
+        for name in ("draft_json.py", "extraction.py", "errors.py", "ai_output.py"):  # AI-2a: the prompt, schema and answer conversion are pure
             with self.subTest(module=name):
                 self.assertEqual(imported_modules(INTAKE_DIR / name) & {"django", "psycopg", "rest_framework"}, set())
 

@@ -1,8 +1,15 @@
-# AI Gateway Foundation (AI-1a) and the KPMG Workbench provider (AI-1b)
+# AI Gateway Foundation (AI-1a), the KPMG Workbench provider (AI-1b) and Request Intake extraction (AI-2a)
 
-> **AI-1b status (added after AI-1a was merged, PR #19): the KPMG Workbench provider adapter is written, aligned with the client-side HTTP
-> contract reported from the FI integration audit (GP-0299-FI-APP), and tested against a MOCKED transport only. No request has ever been sent to
-> the Workbench, no credential exists in this repository, and nothing calls the gateway.** Section 14 describes it and separates what the audit
+> **AI-2a status (added after AI-1b was merged, PR #20): Request Intake can now extract with the gateway, but only when an operator explicitly enables it.** The default
+> is unchanged: with nothing set, the worker uses the deterministic fixture parser and no AI provider is called. Section 15 describes the extraction modes, the policy and
+> failure rules and what was not done. AI-2a was checked in the development VM with DB-free tests and a MOCKED transport only (the VM never contacts the Workbench);
+> its 35 PostgreSQL tests and a 736-test selected regression passed in the owner's local run (owner-supplied; tested scenarios only; section 15, status). Where an older statement below says that nothing calls the gateway, it describes AI-1a and AI-1b as merged;
+> since AI-2a the only caller is Request Intake's AI extractor, in ai mode only.
+
+> **AI-1b status (added after AI-1a was merged, PR #19; AI-1b itself was merged as PR #20): the KPMG Workbench provider adapter is written, aligned with the client-side HTTP
+> contract reported from the FI integration audit (GP-0299-FI-APP), and tested against a MOCKED transport only. No request has been sent to
+> the Workbench by the development VM or by any test, no credential exists in this repository, and (until AI-2a) nothing called the gateway. The owner has since reported one local
+> smoke test of the Workbench with GPT-5 (section 14.10(d); owner-supplied, not observed by the VM).** Section 14 describes it and separates what the audit
 > reported, what AI-1b added, and what still needs live verification (14.10). The rest of this banner and sections 1 to 13 describe the AI-1a
 > foundation; where AI-1b changes a statement, the section says so.
 
@@ -33,7 +40,7 @@ the existing boundary tests. The boundaries that matter:
 
 | Existing piece | What AI-1a does with it |
 | --- | --- |
-| `workflows.request_intake.RequestExtractor` (text in, candidate out) | Untouched. It is the *workflow's* extraction seam; a later slice may implement it on top of the gateway. Request Intake's extraction behaviour is unchanged. |
+| `workflows.request_intake.RequestExtractor` (text in, candidate out) | Untouched by AI-1a. It is the *workflow's* extraction seam; **AI-2a implements it on top of the gateway** (`apps/intake/ai_extraction.py`, section 15), used only in ai mode. |
 | `apps/modules` (`ai.invoke` in `FUTURE_CAPABILITIES`) | Untouched. A module cannot declare `ai.invoke` yet; pinned by a test. No `ModuleContext` facade. |
 | Static composition roots (`config/modules.py`, `config/task_registry.py`) | Followed: providers are named in one static tuple in `config/ai_gateway.py`, nothing is discovered. |
 | `apps/modules` as a pure, non-Django package | Followed: `apps/ai_gateway` is not an installed app, has no model, migration, URL or command, and imports no Django. |
@@ -214,7 +221,8 @@ Not part of AI-1a, listed so the next slices do not bypass the foundation:
   section 4, mentions `CompanyProfile`, which does not exist). Until then callers pass a `PolicyContext`.
 - **Module access:** an `ai.invoke` facade in `ModuleContext`, guarded by a declared capability.
 - **Workflow use:** a Request Intake extractor built on the gateway, with prompts delimited as data, validated by the existing business
-  rules; this changes extraction behaviour and needs its own slice and evaluation ([ai-policy.md](ai-policy.md), section 11).
+  rules; this changes extraction behaviour and needs its own slice and evaluation ([ai-policy.md](ai-policy.md), section 11). **Done in AI-2a (section 15) behind an explicit
+  mode; the evaluation set and acceptance thresholds this item calls for do not exist yet.**
 - **Provenance recording** on task attempts or revisions, and embeddings under the same policy.
 - **Wiring the Workbench into the production composition** (`config/ai_gateway.py`) and a caller: not done in AI-1b (section 14.1).
 
@@ -265,7 +273,7 @@ Not tested: any real provider, PostgreSQL, concurrency, or behaviour in a deploy
 > **Status: written and aligned with the client-side HTTP contract reported from a read-only audit of the FI integration (GP-0299-FI-APP);
 > tested with a MOCKED transport only; never run against the Workbench.** The contract is client-side evidence: it shows what a working FI client
 > sends and expects, not that this repository's requests are accepted. No live request was made in the development VM and none is made by any
-> test. Nothing calls the provider: Request Intake still extracts with its own deterministic fixture parser. FI business logic was not copied.
+> test. As of AI-1b nothing called the provider; since AI-2a Request Intake's AI extractor calls it, in ai mode only (section 15). FI business logic was not copied.
 
 ### 14.1 What was added, and what was not
 
@@ -456,6 +464,12 @@ reading of 404 as an unknown deployment.
 7. That the output description in the system message gives schema-conforming JSON often enough: `json_object` does not enforce the schema, the gateway validates and rejects, nothing is repaired.
 8. Data handling by the Workbench (locality, retention, logging, charge-code policy): the owner's classification; nothing verifies it.
 
+**(d) Owner-supplied smoke test (reported with AI-2a; not observed by the VM).** The owner ran one local GPT-5 call through the Workbench provider and reported: provider
+`kpmg_workbench`, profile `workbench-gpt5`, deployment `gpt-5-2025-08-07-dzs-sdc`, reported model `gpt-5-2025-08-07`, structured JSON valid, **2.33 seconds**, **107 input
+tokens and 148 output tokens**. No output or log is stored here. In that one run it is evidence that this request shape was accepted for the GPT-5 deployment, that `choices[0].message.content`
+held valid JSON, and that the answer reported a model and token usage (items 1, 2 and 4 below, for GPT-5, in that run). It does **not** cover the GPT-4.1 deployment, the status codes, a proxy,
+Request Intake's prompt and schema, longer inputs, rate limits, retention, or any repeat. The VM made no request.
+
 ### 14.11 Test coverage
 
 DB-free, mocked transport, no network, no credential; 147 new tests (the full DB-free suite is 2485, up from 2338):
@@ -470,3 +484,158 @@ DB-free, mocked transport, no network, no credential; 147 new tests (the full DB
 
 Each of 27 deliberate mutations of the alignment (URL, header, charge code, body contents, destination checks, envelope parsing, mode and parameter limits, retry bounds, key requirement) was caught by
 these tests. Not tested: the real Workbench, a real proxy, real TLS certificates, concurrency, and PostgreSQL.
+
+## 15. Request Intake extraction with the gateway (AI-2a)
+
+> **Status: implemented on `feat/ai-request-intake-extraction` (implementation `e2fac8a`); checked in the development VM with DB-free tests and a MOCKED HTTP transport (148 new tests, 2636 DB-free tests in all pass). The project owner
+> ran the 35 PostgreSQL tests in `tests/test_intake_ai_postgres.py` and a selected PostgreSQL regression locally: all 35 passed, and the regression passed with 736 tests in 238.962 s, exit code 0, test database destroyed (owner-supplied; the VM did
+> not run or observe them; no output is stored; see the [local validation record](../development/local-validation-record.md)). That covers the tested scenarios only, with a scripted provider: existing review, approval, audit and worker behaviour were preserved
+> in them.** The VM never contacts the Workbench and holds no key. The only live evidence about the provider is the owner's single local GPT-5 smoke test (section 14.10(d)), which did not use Request Intake's prompt or schema.
+> **There is no real GPT-5 end-to-end test of Request Intake, no extraction accuracy evaluation set, no frontend change and no production-readiness claim.**
+
+### 15.1 What was added, and what was not
+
+| Added | Where |
+| --- | --- |
+| The prompt, the output JSON schema and the conversion of a validated answer into a candidate (pure; no gateway import) | `backend/apps/intake/ai_output.py` |
+| `AIRequestExtractor`, a `RequestExtractor` that calls `AIGateway.generate` (the only file of the app that names the gateway) | `backend/apps/intake/ai_extraction.py` |
+| `AIExtractionError` (stable code, `retryable`) and `ExtractionConfigurationError` | `backend/apps/intake/errors.py` |
+| An optional extractor source the worker installs; failure mapping onto the queue's existing codes | `backend/apps/intake/handlers.py` |
+| The extraction modes, their environment settings, the start-up checks and the module re-check | `backend/config/intake_extraction.py`; installed by `prepare_worker` in `backend/config/task_registry.py`, called by `runworker` |
+
+Not done, on purpose: no frontend change, no document upload, no connector, no second provider, no AI-2b, no model, migration, endpoint, audit action, failure code, task kind, queue or worker; no
+change to `run_extraction`, validation, canonicalization, hashing, review or approval; no change to the gateway package, the Workbench adapter, `ModuleState` gating or `config/ai_gateway.py` (still empty);
+no stored company policy, credential store or administrator approval; no `ai.invoke` module capability (the module's manifest is unchanged: the worker's composition root builds the gateway, not the module).
+
+### 15.2 Modes and configuration
+
+Two explicit modes, no automatic switch and no fallback in either direction. Read from the **process environment** by `config/intake_extraction.py` when the worker starts (for development
+`manage.py` copies `AP_*` names from the git-ignored `.env`); not Django settings, not database fields, nothing read at import. An empty value counts as unset.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `AP_INTAKE_EXTRACTION_MODE` | `deterministic` | `deterministic`: the fixture parser, no AI provider is built or called, nothing else is read. `ai`: the AI extractor. Any other value stops the worker at start-up. Setting the Workbench variables never switches the mode on. |
+| `AP_AI_POLICY_MODE` | none (**required in `ai` mode**) | `local_only`, `company_endpoint` or `approved_cloud`: the installation's explicit data policy. The Workbench is a `company_endpoint` provider, so `local_only` is refused at start-up (it would fail every call); the gateway enforces the mode again on every call. |
+| `AP_INTAKE_AI_TIMEOUT_SECONDS` | `45` | The deadline of one AI call, retries inside the provider included, 5 to 300. It can only lower the profile's own timeout (`AP_AI_WORKBENCH_TIMEOUT_SECONDS`, 90): the lower of the two is used. |
+| `AP_AI_WORKBENCH_*` | as section 14.3 | The provider's settings. Only `AP_AI_WORKBENCH_API_KEY` is required. |
+
+The profile is not configurable: Request Intake uses `workbench-gpt5` (`INTAKE_AI_PROFILE_ID`), checked against an allowlist (`APPROVED_INTAKE_AI_PROFILES`, one entry). `workbench-gpt41` is
+not approved for this workflow; approving it, or any provider, is a reviewed code edit. Nothing ever switches profile, model or provider.
+
+**Fail closed at start-up.** `runworker` calls `prepare_worker(lease_seconds)` before its first iteration. In `ai` mode it builds the Workbench gateway (key and settings validated, nothing sent),
+checks the profile and the policy with the gateway's own `enforce_policy`, and checks the lease (15.7). Any missing or invalid value stops the command with an error that names the variable and never its
+value; nothing is installed and no task is claimed. The default mode adds one log line (`Request Intake extraction mode: deterministic ...`) and changes no output of the command.
+
+### 15.3 The path, and where the AI call sits
+
+```text
+submit_request -> run(queued) + task                                   (unchanged)
+worker claim (kind gate: module enabled and version-matched)           (unchanged)
+  -> request_intake.extract handler -> run_extraction(run_id, extractor)
+       T1 (short): lock the run, return an existing outcome, move to extracting, read the text
+       no transaction: AIRequestExtractor.extract(text)
+            preflight: the module's kind is still claimable (the worker's own kind gate, read again)
+            AIGateway.generate  -> policy -> Workbench adapter -> schema validation
+            candidate_from_output(...)  -> a StructuredRequest + ambiguities
+       build_extraction -> create_request_intake_revision -> validate, canonicalize, hash   (unchanged)
+       T2 (short, atomic): re-check; revision 1 (valid draft only) + ExtractionOutcome + needs_review + audit events   (unchanged)
+```
+
+A slow model never holds a lock or a connection transaction (the worker refuses to run a handler inside one). Nothing is written before T2, so any failure up to and including the answer leaves no
+revision, no outcome and no approval; the run stays `extracting` until a retry succeeds or the reconciler fails it.
+
+### 15.4 Structured output
+
+The schema (`OUTPUT_SCHEMA`) is the gateway's closed JSON Schema subset and names exactly four keys, each required, with `additionalProperties: false` at every level:
+`requester` (`name`, `contact`), `items` (each `description`, `quantity`, `unit`, `notes`), `notes`, `ambiguities` (each `field_path`, `excerpt`). The field names are the domain's
+(`workflows.request_intake.schema`); a test compares them. There is no key for a decision, status, price or approval, and an answer that adds any key is refused by the gateway. The `quantity` is a
+**string** of digits (a JSON number would reach the code as a float and lose digits such as the trailing zero of `2.50`) and becomes an exact `Decimal`.
+
+The conversion (`candidate_from_output`) is a candidate, not a result. It refuses, rather than repairs, an answer in which: a quantity is not an optionally signed ASCII decimal number (the fixture parser's own
+rule; a quantity that cannot be read is to be reported as an ambiguity with `null`, as the fixture parser reports it); an ambiguity names a field path outside the documented grammar or an item that does not
+exist (the validator would otherwise raise, and an unexpected exception is retried by the queue); an ambiguity excerpt does not occur in the source text (the validator's trim, collapse and case-fold comparison); a text value holds a NUL character or a lone surrogate
+(JSON permits both as escapes; PostgreSQL cannot store the first and UTF-8 cannot encode the second, so the write would fail after the provider was paid and be retried as if transient; the submitted text is refused for the same reasons).
+It does **not** judge the business meaning: a missing requester or a zero quantity is the validator's finding. Strings are kept exactly as given (an empty optional string is not turned into `null`). `source_refs`
+are not requested (a model cannot be trusted to count lines against the fixture convention), so a draft has none; the `value_not_in_source` warning still checks every value against the text.
+
+The request text is sent as data between two marker lines whose marker (`REQUEST_TEXT_<n>`) does not occur in the text, in the user message; the instructions are a constant and contain no request content. This reduces,
+and does not remove, prompt-injection risk: a hostile text can still produce a wrong but well-formed answer, which the validator's warnings and the human reviewer are there to catch.
+
+### 15.5 What is preserved
+
+Validation, canonicalization, the content hash, revision 1, the `ExtractionOutcome`, the run states and the audit events are produced by the **same existing code** for both modes; a test compares the stored
+revision's hash and bytes with an independent `canonicalize_request` of the same candidate, and the provenance is never part of the hashed content. The audit actions and their safe detail keys are Core's and
+unchanged (`revision.created` carries `origin: "extraction"`); no AI detail is added. Approval stays human: the AI answer has no field that could approve, the revision is `needs_review`, the existing
+review rules (a different approver, acknowledged warnings, exact hash) apply, and an invalid outcome is repaired through the existing edit path. The outcome records which extractor produced it:
+`extractor_name` `ai-request-extractor`, `extractor_version` `<prompt version>|<profile>|<model the provider reported>` (for example `1|workbench-gpt5|gpt-5-2025-08-07`; `unreported` when the provider names none;
+a model id too long for the 50-character column is replaced by a fixed token, never cut). Older outcomes are never rewritten.
+
+### 15.6 Data policy and privacy
+
+Before any text leaves the machine, in this order: ai mode was enabled by name; the policy was stated explicitly and permits the provider's declared locality (start-up, then the gateway on every call, before
+provider code runs); the profile is on the approved list; the module's task kind is still claimable (read again immediately before sending; a disabled or version-mismatched module stops the call, which is retried
+and, if the module stays unavailable, held by the claim gate); configuration was complete. Anything missing is an error, never a default.
+
+Not logged and not stored outside the existing outcome: the request text, the prompt, the raw answer, the key and extracted values. The gateway's log lines hold identifiers, a code and a duration; the handler logs the
+run id and the stable `code`, `reason` and `retryable` tokens; errors carry fixed messages and are raised without chaining the provider's exception. `runworker` now also writes the `apps.intake` and `apps.ai_gateway`
+loggers to the console while it runs. The draft, ambiguities and findings of an outcome are plaintext business content in PostgreSQL, as before. **What the Workbench retains or logs, and whether it is acceptable for the data a
+workflow sends, is the owner's decision; no code verifies it** (section 14.8).
+
+### 15.7 Failure semantics
+
+| Failure | Gateway code | `AIExtractionError` | Queue | Task `failure_code` |
+| --- | --- | --- | --- | --- |
+| provider unreachable or 502, 503, 504 | `provider_unavailable` | retryable | retried within the attempt limit (default 3) with the queue's back-off | `temporary_failure`, then terminal after the last attempt |
+| read timeout, late answer | `timeout` | retryable | as above | as above |
+| HTTP 429 | `rate_limit` | retryable | as above | as above |
+| module disabled or version-mismatched between claim and call | (not a gateway code) `module_unavailable` | retryable | as above | as above |
+| HTTP 401 or 403 | `authentication_failure` | permanent | task fails at once | `rejected` |
+| policy forbids the provider, configuration error, unknown profile or deployment, capability, request | `policy_violation`, `configuration_error`, `unsupported_model`, `capability_missing`, `invalid_request` | permanent | task fails at once | `rejected` |
+| not JSON, not an object, wrong shape, extra key, truncated | `invalid_structured_output` | permanent | task fails at once | `rejected` |
+| answer passes the schema but Request Intake refuses it (15.4) | `invalid_ai_output` (not a gateway code) | permanent | task fails at once | `rejected` |
+| any other provider failure | `provider_error` | permanent | task fails at once | `rejected` |
+| invalid extraction setting seen by the handler | (not a gateway code) | permanent | task fails at once | `rejected` |
+| a draft with blocking findings (business validation) | (not a failure) | | the task **succeeds** | none: an `invalid` outcome, no revision, `needs_review`, a person edits it |
+
+Only `retryable` is read; the queue's closed set of failure codes is unchanged (no code was added). A permanently failed task is moved to `failed` (`failed_step` `extract`) by the existing reconciler, and
+**there is no manual retry of a failed run yet**, so an invalid answer or a transient outage that outlasts three attempts needs the request to be submitted again. The handler's retries multiply with the
+provider's own (up to 2 further attempts inside one call): at most 3 attempts times 3 requests. A failed call never falls back to the fixture parser, to another profile or to another provider (a test
+patches the fixture parser to fail and asserts it is not called). The reason for a failure is in the worker's log (code and reason tokens) and the task's safe `failure_code`; no new table records it.
+
+**The lease.** The worker has no heartbeat, so an attempt must finish within `AP_WORKER_LEASE_SECONDS` (default 60). In ai mode `runworker` refuses to start unless the lease is at least the call deadline plus 15
+seconds (default 45 + 15 = 60). A lease that expires anyway (a slow database, a stalled call) lets another worker run the task; a completed outcome is never overwritten (15.8).
+
+### 15.8 Idempotency and recovery
+
+At most one outcome exists per run (a database constraint). A retry after a crash that follows the commit finds the outcome in T1 and **does not call the provider again**; a worker that lost its lease mid-call
+and finishes late finds the other worker's outcome in T2 and discards its answer. Two workers may each pay for one AI call when they race; the first committed result stands. A retry after a failure before T2
+asks the provider again (a different answer is possible: model output is not deterministic), so the AI mode is **at-least-once with respect to provider calls** and exactly-once with respect to stored results.
+
+### 15.9 Limitations (remaining)
+
+* **Never run end to end.** No Request Intake extraction has been sent to the Workbench by anyone; the prompt, schema and refusal rules were written without an evaluation set. How often GPT-5 answers within the
+  schema, quotes ambiguities verbatim, or reads quantities as digits is unknown, and a refused answer fails the whole extraction (there is no partial acceptance).
+* **No evaluation, thresholds or drift detection** (ai-policy.md, section 11), no measured accuracy, cost or latency beyond the owner's single smoke test.
+* **No source references from the model**, no verbatim check of values beyond the existing warning, and no protection against a plausible wrong answer other than that warning and the human review.
+* Prompt injection is mitigated (data markers, no tools, a closed schema, no decision field, a human approver), not eliminated.
+* The policy is an environment setting of the worker, not a stored, audited company decision; the locality is the provider's own declaration (section 12).
+* No manual retry of a failed run; no per-run record of provenance beyond `extractor_name` and `extractor_version`; token usage and duration are in the gateway's response and are not stored.
+* The module re-check narrows, and does not close, the window between the claim and the call (and a module disabled during the call cannot stop it); the API still accepts submissions while the module is disabled.
+* The 45-second deadline, the 15-second lease margin, the 200-item and 100-ambiguity bounds and the 64-character quantity bound are provisional and unmeasured.
+* The request text limit is 65,536 bytes; whether the profile's provisional input limit is adequate for real requests is unmeasured.
+
+### 15.10 Tests
+
+DB-free, no PostgreSQL, no network (the real Workbench adapter behind a fake transport): 148 new tests; each of 16 deliberate mutations of the implementation (retry mapping, exact quantities, excerpt and path checks, the schema's
+extra-key refusal, the default mode, the lease check, the preflight, policy widening, a silent fallback, delimiting, the version bound, the approved profile, the module-gate answer, configuration-error retry, the NUL check) was caught.
+
+| File | Tests | Covers |
+| --- | --- | --- |
+| `test_intake_ai_output.py` | 42 | the schema (accepted by the gateway subset, four keys, no decision field, string quantity), conversion, exact digits, refusals, text PostgreSQL cannot store, ambiguities, delimiting, provenance bounds |
+| `test_intake_ai_extraction.py` | 37 | the request sent, policy before any send, every failure class with exactly one request, no fallback, no leakage to errors or logs, preflight, and the whole pipeline: revision one, hash equal to the domain's, findings, warnings, no approval |
+| `test_intake_ai_composition.py` | 53 | the settings and defaults, deterministic mode builds nothing, fail-closed start-up, the lease rule, the handler wiring and failure mapping, `prepare_worker`, the `runworker` start-up and logging |
+| `test_intake_ai_boundaries.py` | 16 | the extractor is the only importer of the gateway, no environment or credential in the app, the gateway stays generic, no model, migration, setting, audit action or failure code, the workflows untouched |
+| `test_intake_ai_postgres.py` | 35 (**passed in the owner's local run**; owner-supplied, not run by the VM) | AI extraction through the real worker, revision, validation, review, approval and rejection, retry and exhaustion, recovery, rollback, idempotency, module disabled, competing workers, the deterministic regression |
+
+Two existing test files were edited, pins only: `test_intake_composition.py` (the app's source-file list and the list of pure modules) and `test_ai_gateway_boundaries.py` (the importers of the gateway and the files that may name it); the existing extraction, worker, gating and
+module tests pass unchanged. Not tested: the real Workbench with Request Intake's prompt, concurrency beyond the written PostgreSQL tests, behaviour in a deployed installation, and cost or latency. The PostgreSQL tests ran only in the owner's local run, not in the VM.
