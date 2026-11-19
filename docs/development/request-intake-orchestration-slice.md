@@ -324,7 +324,7 @@ It is used by the same handler (`request_intake.extract`), the same queue and th
 with nothing installed (the API process, every existing test) the handler calls `run_extraction(run_id)` exactly as before.
 
 **Request Intake's own parts.** The prompt, the output schema and the conversion are in `apps/intake/ai_output.py` (pure; the gateway stays generic). The schema has four required keys and no place for a decision; `quantity` is a string and becomes an exact
-`Decimal`; an answer with an unreadable quantity, an unknown ambiguity path or an excerpt that is not in the text is refused, not repaired. `source_refs` are not requested. See ai-gateway.md section 15.4.
+`Decimal`; an answer with an unreadable quantity, an unknown ambiguity path or an excerpt that is not in the text is refused, not repaired. `source_refs` are not requested. AI-2b added one narrow, deterministic e-mail repair and prompt version 2 (ai-gateway.md section 15.4a). See ai-gateway.md section 15.4.
 
 **What is unchanged.** The candidate goes through `create_request_intake_revision`, so validation, canonicalization, the content hash, revision 1 (valid drafts only), the `ExtractionOutcome`, `needs_review`, the audit events (`revision.created` with
 `origin: "extraction"`), the review services (a different approver, acknowledged warnings, the exact hash) and approval are the existing code. The AI answer cannot approve anything. The outcome's `extractor_name` is `ai-request-extractor` and its

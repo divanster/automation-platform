@@ -297,6 +297,11 @@ modes, and exponent limits). The draft itself still holds the quantity as given
 hash records a quantity's numeric value, not how it was written. A coefficient of any
 length is accepted.
 
+**Source check after a round trip (AI-2b).** A stored revision holds the canonical `2.5`, so an edit starts from `2.5` while the source text may say `2.50`.
+The `value_not_in_source` check therefore finds a quantity written with the canonical digits **or with extra trailing zeros** (`2.5` is found in `2.50`, `2` in `2.00`) and still
+does not find `2.50` in a text that only says `2.5` (that would claim precision the source lacks), `2.5` in `2.505` or `12.5`, or a number glued to another digit group by a comma (`5` in
+`1,5`). Canonicalization, the hash and historical revisions are unchanged.
+
 **Safety guard.** A quantity needing more than 999,999 padding zeros (for example
 `1E+1000000`) is refused with `SerializationSafetyError`. This is a memory-safety guard,
 not a business or precision limit; see "Serialization safety versus business validation"

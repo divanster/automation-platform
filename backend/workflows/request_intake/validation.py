@@ -230,7 +230,8 @@ def _check_values_in_source(request, source_text, findings):
 
     A simple, deterministic check: text values are compared after trimming, collapsing
     whitespace, and ignoring case; quantities are looked up as standalone numbers written
-    exactly as the canonical Decimal prints (so ``2.50`` is not found in a text that only
+    as the canonical Decimal prints, optionally followed by extra trailing zeros (``2.5``
+    is found in a text that says ``2.50``, but ``2.50`` is not found in a text that only
     says ``2.5``). The exact matching rules are unspecified, so this is deliberately
     conservative and only ever a warning.
     """
@@ -264,6 +265,11 @@ def _check_values_in_source(request, source_text, findings):
 def _number_in_text(value: Decimal, normalized_text: str) -> bool:
     """True when the plain-notation form of the positive finite ``value`` occurs as a standalone number in the text.
 
+    NUMERICALLY EQUAL SPELLINGS (AI-2b). The source may spell the number with MORE trailing zeros than the value: ``2.5`` is found in ``2.50`` and ``2`` in ``2.00``,
+    because a stored revision holds the canonical ``2.5`` (canonicalization removes trailing zeros) while the text says ``2.50``. The reverse is still not found: ``2.50`` is not found in a
+    text that only says ``2.5`` (that would claim a precision the source does not have), and ``2.5`` is never found in ``2.505`` or ``12.5``. A number is also not standalone when it
+    is glued to another digit group by a comma (``5`` in ``1,5``; ``1`` in ``1,000``), the form the extraction prompt treats as ambiguous. Nothing is rounded and no float is used.
+
     RESOURCE SAFETY. The plain form is only built when it is safe and possible to find: (1) a value whose plain
     form would need more than ``MAX_PADDING_ZEROS`` padding zeros (an enormous positive or negative exponent) is
     never formatted; (2) a value whose plain form is longer than the text cannot occur in it, so it is not
@@ -275,7 +281,13 @@ def _number_in_text(value: Decimal, normalized_text: str) -> bool:
     """
     if plain_padding_zeros(value) > MAX_PADDING_ZEROS or plain_notation_length(value) > len(normalized_text):
         return False
-    pattern = r"(?<![0-9.])" + re.escape(format(value, "f")) + r"(?![0-9]|\.[0-9])"
+    plain = format(value, "f")
+    pattern = (
+        r"(?<![0-9.])(?<![0-9],)"
+        + re.escape(plain)
+        + (r"0*" if "." in plain else r"(?:\.0+)?")
+        + r"(?![0-9]|[.,][0-9])"
+    )
     return re.search(pattern, normalized_text) is not None
 
 

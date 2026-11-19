@@ -561,13 +561,27 @@ are not requested (a model cannot be trusted to count lines against the fixture 
 The request text is sent as data between two marker lines whose marker (`REQUEST_TEXT_<n>`) does not occur in the text, in the user message; the instructions are a constant and contain no request content. This reduces,
 and does not remove, prompt-injection risk: a hostile text can still produce a wrong but well-formed answer, which the validator's warnings and the human reviewer are there to catch.
 
+### 15.4a Extraction quality hardening (AI-2b)
+
+Two defects were seen in the owner's first real GPT-5 Request Intake run (owner-reported; not observed by the development VM) and are addressed without touching the workflow, canonicalization, hashing, approval or any stored revision:
+
+* **A sentence full stop copied into the contact** (`jane.example@example.invalid.`). The value was found in the source, so nothing flagged it. The prompt (now **version 2**, so new outcomes record `2|<profile>|<model>`; older outcomes keep `1|...`) tells the model that an address ends at its last letter or digit, and
+  `candidate_from_output` applies one deterministic rule to the answer: a contact that is **exactly one plain ASCII e-mail address plus trailing sentence punctuation** (`. , ; : ! ?`) is stored without the punctuation. Nothing else is changed: a phone number, a name,
+  an address the pattern does not match and any other string are kept as given; a value that holds `@`, ends in punctuation and is not one clean address (`Jane <jane@example.invalid>.`) is kept and reported as an ambiguity on `requester.contact` (an optional field: a warning), when it can be quoted from the source.
+  The raw model answer is not stored, so the removed characters are not recorded anywhere.
+* **`2.50` became `2.5` and then warned.** The extraction kept `2.50`, but canonicalization (unchanged, version 1) stores `2.5`, and an edit starts from the stored revision, so the check "is this number in the source?" looked for `2.5` in a text that says `2.50`. The check now also accepts
+  extra trailing zeros in the source (`2.5` in `2.50`, `2` in `2.00`) and still warns when the value has more precision than the source (`2.50` against `2.5`), for `2.5` against `2.505` or `12.5`, and for a number glued to another digit group by a comma (`5` in `1,5`). It is still only a warning.
+
+Not changed: a quantity that is not a plain number is still refused (`invalid_ai_output`), a zero or negative quantity is still the validator's blocking finding, a value the source does not contain is still a warning that a reviewer must acknowledge, and there is no fallback and no automatic approval.
+Tested with a scripted provider only; **no live Workbench request was made for AI-2b**, so that the model now omits the full stop is not shown (the deterministic rule does not depend on it), and no accuracy measurement exists.
+
 ### 15.5 What is preserved
 
 Validation, canonicalization, the content hash, revision 1, the `ExtractionOutcome`, the run states and the audit events are produced by the **same existing code** for both modes; a test compares the stored
 revision's hash and bytes with an independent `canonicalize_request` of the same candidate, and the provenance is never part of the hashed content. The audit actions and their safe detail keys are Core's and
 unchanged (`revision.created` carries `origin: "extraction"`); no AI detail is added. Approval stays human: the AI answer has no field that could approve, the revision is `needs_review`, the existing
 review rules (a different approver, acknowledged warnings, exact hash) apply, and an invalid outcome is repaired through the existing edit path. The outcome records which extractor produced it:
-`extractor_name` `ai-request-extractor`, `extractor_version` `<prompt version>|<profile>|<model the provider reported>` (for example `1|workbench-gpt5|gpt-5-2025-08-07`; `unreported` when the provider names none;
+`extractor_name` `ai-request-extractor`, `extractor_version` `<prompt version>|<profile>|<model the provider reported>` (for example `2|workbench-gpt5|gpt-5-2025-08-07`; outcomes written before AI-2b hold prompt version `1`; `unreported` when the provider names none;
 a model id too long for the 50-character column is replaced by a fixed token, never cut). Older outcomes are never rewritten.
 
 ### 15.6 Data policy and privacy

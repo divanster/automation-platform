@@ -191,7 +191,13 @@ class OrdinaryQuantitiesAreUnchangedTests(unittest.TestCase):
         cases = [
             (Decimal("10"), "Item: 10 | boxes", True),
             (Decimal("2.50"), "price 2.50 each", True),
-            (Decimal("2.5"), "price 2.50 each", False),  # written exactly as the canonical Decimal prints
+            (Decimal("2.5"), "price 2.50 each", True),  # AI-2b: the canonical 2.5 of a stored revision is found in the source's 2.50
+            (Decimal("2.50"), "price 2.5 each", False),  # but 2.50 is not found in 2.5: that would claim precision the source lacks
+            (Decimal("2"), "need 2.00 pens", True),
+            (Decimal("2.5"), "need 2.505 pens", False),
+            (Decimal("2"), "need 2.5 pens", False),
+            (Decimal("5"), "ratio 1,5", False),
+            (Decimal("1"), "price 1,000", False),
             (Decimal("0.000001"), "need 0.000001 grams", True),
             (Decimal("1E+20"), "need 100000000000000000000 units", True),
             (Decimal("1E+3"), "need 1000 units", True),

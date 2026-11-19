@@ -111,14 +111,14 @@ class SuccessTests(unittest.TestCase):
         extractor, _ = build(answer_with(VALID_OUTPUT, model="gpt-5-2025-08-07"))
         result = extractor.extract(VALID_TEXT)
         self.assertEqual(result.candidate.requester, Requester("Jane Doe", "jane@example.invalid"))
-        self.assertEqual((result.extractor_name, result.extractor_version), ("ai-request-extractor", "1|workbench-gpt5|gpt-5-2025-08-07"))
+        self.assertEqual((result.extractor_name, result.extractor_version), ("ai-request-extractor", "2|workbench-gpt5|gpt-5-2025-08-07"))
 
     def test_an_answer_that_names_no_model_is_recorded_as_unreported(self):
         response = answer_with(VALID_OUTPUT)
         document = json.loads(response.body)
         del document["model"]
         extractor, _ = build(type(response)(200, json.dumps(document).encode()))
-        self.assertEqual(extractor.extract(VALID_TEXT).extractor_version, "1|workbench-gpt5|unreported")
+        self.assertEqual(extractor.extract(VALID_TEXT).extractor_version, "2|workbench-gpt5|unreported")
 
     def test_the_extractor_is_immutable_and_its_repr_holds_identifiers_only(self):
         extractor, _ = build()
@@ -287,7 +287,7 @@ class PipelineTests(unittest.TestCase):
         self.assertTrue(decision.is_valid)
         revision = decision.revision
         self.assertEqual((revision.revision_number, revision.run_id, revision.case_id), (EXTRACTION_REVISION_NUMBER, RUN_ID, CASE_ID))
-        self.assertEqual((decision.extractor_name, decision.extractor_version), ("ai-request-extractor", "1|workbench-gpt5|gpt-5-2025-08-07"))
+        self.assertEqual((decision.extractor_name, decision.extractor_version), ("ai-request-extractor", "2|workbench-gpt5|gpt-5-2025-08-07"))
         self.assertEqual([f for f in decision.findings if f.blocking], [])
 
     def test_the_hash_and_bytes_are_exactly_what_the_domain_canonicalization_produces(self):
@@ -405,10 +405,100 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(decision.extractor_name, "deterministic-test-fixture-parser")
 
 
+class QualityHardeningTests(unittest.TestCase):
+    """AI-2b: the two defects the owner's first real GPT-5 run showed, through the whole pipeline (scripted provider; no live request)."""
+
+    TEXT = "Requester: Jane Doe\nPlease send it to jane.example@example.invalid.\nItem: 2.50 | kg | Coffee beans\n"
+
+    def document(self, contact="jane.example@example.invalid.", quantity="2.50"):
+        return output_for(
+            requester={"name": "Jane Doe", "contact": contact},
+            items=[{"description": "Coffee beans", "quantity": quantity, "unit": "kg", "notes": None}],
+            notes=None,
+        )
+
+    def decide(self, document, text=None):
+        extractor, _ = build(answer_with(document))
+        return extract_decision(extractor, text or self.TEXT)
+
+    def test_the_sentence_full_stop_is_not_stored_as_part_of_the_address(self):
+        decision = self.decide(self.document())
+        self.assertEqual(decision.draft.requester.contact, "jane.example@example.invalid")
+        self.assertTrue(decision.is_valid)
+        self.assertEqual([f for f in decision.findings if f.field_path == "requester.contact"], [])  # found in the source, no warning
+
+    def test_the_repaired_address_is_what_is_hashed(self):
+        repaired = self.decide(self.document())
+        clean = self.decide(self.document(contact="jane.example@example.invalid"))
+        self.assertEqual(repaired.revision.content_hash, clean.revision.content_hash)
+        self.assertIn(b'"contact":"jane.example@example.invalid"', bytes(repaired.revision.canonical_bytes))
+
+    def test_a_trailing_zero_quantity_is_kept_in_the_draft_and_is_found_in_the_source(self):
+        decision = self.decide(self.document())
+        self.assertEqual(str(decision.draft.items[0].quantity), "2.50")  # the outcome's draft keeps the digits as written
+        self.assertEqual([f for f in decision.findings if f.field_path == "items[0].quantity"], [])
+
+    def test_the_stored_revision_re_validates_without_a_source_warning_after_an_edit(self):
+        # An edit starts from the revision's canonical bytes, where 2.50 is 2.5. That is the draft the reviewer saves again.
+        from apps.intake.draft_json import draft_from_canonical_bytes
+        from workflows.request_intake import validate_request
+
+        decision = self.decide(self.document())
+        self.assertIn(b'"quantity":"2.5"', bytes(decision.revision.canonical_bytes))  # canonicalization is unchanged
+        reread = draft_from_canonical_bytes(bytes(decision.revision.canonical_bytes))
+        self.assertEqual(str(reread.items[0].quantity), "2.5")
+        result = validate_request(reread, source_text=self.TEXT)
+        self.assertEqual([f.code.value for f in result.findings], [])
+
+    def test_a_quantity_with_more_precision_than_the_source_is_still_a_warning(self):
+        for quantity, text in (("2.500", self.TEXT), ("2.50", self.TEXT.replace("2.50", "2.5"))):
+            with self.subTest(quantity):
+                decision = self.decide(self.document(quantity=quantity), text)
+                self.assertIn(("value_not_in_source", "items[0].quantity"), [(f.code, f.field_path) for f in decision.findings if not f.blocking])
+
+    def test_a_quantity_the_source_does_not_state_is_a_warning_and_never_approved(self):
+        decision = self.decide(self.document(quantity="3"))
+        self.assertTrue(decision.is_valid)
+        self.assertIn(("value_not_in_source", "items[0].quantity"), [(f.code, f.field_path) for f in decision.findings if not f.blocking])
+
+    def test_an_unreadable_or_invalid_quantity_is_refused_or_blocked_and_never_repaired(self):
+        for quantity in ("2,50", "2.50 kg", "1e3"):
+            with self.subTest(quantity):
+                extractor, _ = build(answer_with(self.document(quantity=quantity)))
+                with self.assertRaises(AIExtractionError) as caught:
+                    extract_decision(extractor, self.TEXT)
+                self.assertEqual((caught.exception.code, caught.exception.reason, caught.exception.retryable), ("invalid_ai_output", "quantity_not_a_plain_number", False))
+        for quantity in ("0", "0.00", "-2.50"):
+            with self.subTest(quantity):
+                decision = self.decide(self.document(quantity=quantity), self.TEXT.replace("2.50", quantity))
+                self.assertIsNone(decision.revision)
+                self.assertIn(("invalid_value", "items[0].quantity"), [(f.code, f.field_path) for f in decision.findings if f.blocking])
+
+    def test_an_address_the_source_does_not_contain_is_still_only_a_warning(self):
+        decision = self.decide(self.document(contact="someone.else@example.invalid."))
+        self.assertTrue(decision.is_valid)
+        self.assertIn(("value_not_in_source", "requester.contact"), [(f.code, f.field_path) for f in decision.findings if not f.blocking])
+
+    def test_an_unclean_contact_is_flagged_and_not_modified(self):
+        text = self.TEXT.replace("jane.example@example.invalid.", "Jane <jane.example@example.invalid>.")
+        decision = self.decide(self.document(contact="Jane <jane.example@example.invalid>."), text)
+        self.assertEqual(decision.draft.requester.contact, "Jane <jane.example@example.invalid>.")
+        self.assertTrue(decision.is_valid)  # a warning on an optional field, never a block
+        self.assertIn(("ambiguous_optional_value", "requester.contact"), [(f.code, f.field_path) for f in decision.findings if not f.blocking])
+
+    def test_no_approval_or_fallback_is_involved(self):
+        decision = self.decide(self.document())
+        self.assertFalse(hasattr(decision.revision, "approval"))
+        extractor, transport = build(status(503))
+        with self.assertRaises(AIExtractionError):
+            extract_decision(extractor, self.TEXT)
+        self.assertEqual(len(transport.requests), 1)  # no second provider or profile was tried
+
+
 class ExtractorContractTests(unittest.TestCase):
     def test_it_satisfies_the_request_extractor_protocol(self):
         extractor, _ = build()
-        self.assertEqual((extractor.name, extractor.version), ("ai-request-extractor", "1"))
+        self.assertEqual((extractor.name, extractor.version), ("ai-request-extractor", "2"))
         self.assertTrue(callable(extractor.extract))
 
     def test_wrong_construction_is_refused(self):
