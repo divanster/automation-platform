@@ -128,7 +128,7 @@ class AIExtractionThroughTheWorkerTests(AIWorkerCase):
         self.assertEqual((run.state, run.current_revision_id), ("needs_review", stored.revision_id))
         revision = ResultRevision.objects.get(run=run)
         self.assertEqual((revision.revision_number, revision.pk), (1, stored.revision_id))
-        self.assertEqual((stored.status, stored.extractor_name, stored.extractor_version), ("valid", "ai-request-extractor", "1|workbench-gpt5|gpt-5-2025-08-07"))
+        self.assertEqual((stored.status, stored.extractor_name, stored.extractor_version), ("valid", "ai-request-extractor", "2|workbench-gpt5|gpt-5-2025-08-07"))
         self.assertEqual(stored.draft["requester"], {"name": "Jane Doe", "contact": "jane@example.invalid"})
         self.assertEqual(stored.draft["items"][0]["quantity"], "10")  # the exact digits, as text, like every stored draft
         self.assertEqual(stored.draft["source_refs"], [])

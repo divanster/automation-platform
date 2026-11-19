@@ -262,6 +262,68 @@ class AmbiguityTests(unittest.TestCase):
         self.assertEqual(ambiguities, ())
 
 
+class ContactTests(unittest.TestCase):
+    """AI-2b: only an address followed by sentence punctuation is repaired; every other contact is kept as given."""
+
+    def contact_of(self, contact, text="Contact: x"):
+        candidate, ambiguities = convert(output_for(requester={"name": "Jane", "contact": contact}), text)
+        return candidate.requester.contact, ambiguities
+
+    def test_trailing_sentence_punctuation_is_removed_from_an_address_and_nothing_else(self):
+        for given, expected in (
+            ("jane.example@example.invalid.", "jane.example@example.invalid"),
+            ("jane@example.invalid,", "jane@example.invalid"),
+            ("jane@example.invalid;", "jane@example.invalid"),
+            ("jane@example.invalid:", "jane@example.invalid"),
+            ("jane@example.invalid!?", "jane@example.invalid"),
+            ("jane@example.invalid..", "jane@example.invalid"),
+            ("first.last+tag@sub.example.co.uk.", "first.last+tag@sub.example.co.uk"),
+        ):
+            with self.subTest(given):
+                self.assertEqual(self.contact_of(given), (expected, ()))
+
+    def test_a_clean_address_is_preserved_exactly(self):
+        for value in ("jane@example.invalid", "JANE@Example.INVALID", "a.b-c_d+e@x-y.example.invalid", "jane@example.invalid1"):
+            with self.subTest(value):
+                self.assertEqual(self.contact_of(value), (value, ()))
+
+    def test_other_contacts_are_never_modified(self):
+        for value in ("+49 30 1234567.", "call Jane.", "Jane Doe", "", " ", "jane@example.invalid ", " jane@example.invalid", "jane at example dot invalid.", "Room 5, floor 2;", "..."):
+            with self.subTest(repr(value)):
+                self.assertEqual(self.contact_of(value, "irrelevant"), (value, ()))
+
+    def test_an_unclean_value_with_an_at_sign_and_punctuation_is_flagged_not_changed(self):
+        for value in ("Jane <jane@example.invalid>.", "jane@@example.invalid.", "jane@example.invalid, jane2@example.invalid.", "jane@localhost."):
+            with self.subTest(value):
+                contact, ambiguities = self.contact_of(value, f"Contact: {value}")
+                self.assertEqual(contact, value)
+                self.assertEqual(ambiguities, (Ambiguity("requester.contact", value),))
+
+    def test_an_unclean_value_that_the_source_does_not_contain_is_not_quoted(self):
+        self.assertEqual(self.contact_of("Jane <jane@example.invalid>.", "Contact: something else"), ("Jane <jane@example.invalid>.", ()))  # the validator's value_not_in_source covers it
+        long_value = "Jane <" + "x" * 201 + "@example.invalid>;"
+        self.assertEqual(self.contact_of(long_value, long_value), (long_value, ()))  # an excerpt is at most 200 characters
+
+    def test_the_flag_is_not_repeated_when_the_model_already_reported_it(self):
+        value = "Jane <jane@example.invalid>."
+        document = output_for(requester={"name": "Jane", "contact": value}, ambiguities=[{"field_path": "requester.contact", "excerpt": value}])
+        _, ambiguities = convert(document, f"Contact: {value}")
+        self.assertEqual(ambiguities, (Ambiguity("requester.contact", value),))
+
+    def test_null_and_a_contact_with_a_nul_character(self):
+        self.assertEqual(self.contact_of(None), (None, ()))
+        with self.assertRaises(AIOutputError) as caught:
+            self.contact_of("jane@example.invalid.\x00")
+        self.assertEqual(caught.exception.reason, "text_not_storable")
+
+    def test_the_repair_is_deterministic(self):
+        first = self.contact_of("jane@example.invalid.")
+        self.assertEqual(first, self.contact_of("jane@example.invalid."))
+
+    def test_the_prompt_tells_the_model_not_to_copy_the_full_stop(self):
+        self.assertIn("e-mail address ends at its last letter or digit", ai_output.INSTRUCTIONS)
+
+
 class ErrorTests(unittest.TestCase):
     def test_an_error_carries_a_token_and_never_a_value(self):
         text = "SECRET-TEXT 5 | | x"
@@ -310,10 +372,10 @@ class PromptTests(unittest.TestCase):
 
 class ProvenanceTests(unittest.TestCase):
     def test_the_version_names_the_prompt_the_profile_and_the_reported_model(self):
-        self.assertEqual(extractor_version("workbench-gpt5", "gpt-5-2025-08-07"), "1|workbench-gpt5|gpt-5-2025-08-07")
+        self.assertEqual(extractor_version("workbench-gpt5", "gpt-5-2025-08-07"), "2|workbench-gpt5|gpt-5-2025-08-07")
 
     def test_an_unreported_model_is_recorded_as_such(self):
-        self.assertEqual(extractor_version("workbench-gpt5", "unreported"), "1|workbench-gpt5|unreported")
+        self.assertEqual(extractor_version("workbench-gpt5", "unreported"), "2|workbench-gpt5|unreported")
 
     def test_a_reported_model_id_that_would_not_fit_the_column_is_replaced_not_cut(self):
         for model in ("m" * 128, "gpt-5-" + "x" * 60):
@@ -327,7 +389,7 @@ class ProvenanceTests(unittest.TestCase):
 
     def test_the_result_is_a_domain_extraction_result(self):
         result = ai_output.build_result(frozen(VALID_OUTPUT), VALID_TEXT, profile_id="workbench-gpt5", reported_model_id="gpt-5-2025-08-07")
-        self.assertEqual((result.extractor_name, result.extractor_version), ("ai-request-extractor", "1|workbench-gpt5|gpt-5-2025-08-07"))
+        self.assertEqual((result.extractor_name, result.extractor_version), ("ai-request-extractor", "2|workbench-gpt5|gpt-5-2025-08-07"))
         self.assertLessEqual(len(result.extractor_name), 100)
         self.assertIsInstance(result.candidate, StructuredRequest)
         self.assertEqual(result.ambiguities, ())

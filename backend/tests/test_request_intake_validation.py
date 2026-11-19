@@ -345,6 +345,33 @@ class ValueInSourceTests(unittest.TestCase):
         self.assertEqual(summary(validate_request(item(0.5), source_text="Jane Pens 10.5")), [("value_not_in_source", "items[0].quantity")])
         self.assertEqual(validate_request(item(Decimal("2.50")), source_text="Jane Pens 2.50").findings, ())
 
+    def test_quantity_matching_accepts_extra_trailing_zeros_in_the_source_but_never_invents_precision(self):
+        def item(q):
+            return make_request(items=(RequestedItem(description="Pens", quantity=q),), notes=None, requester=Requester(name="Jane"))
+
+        cases = [
+            (Decimal("2.5"), "Jane Pens 2.50", True),  # the canonical value of a stored revision against the text the operator sees
+            (Decimal("2.5"), "Jane Pens 2.500.", True),
+            (Decimal("2"), "Jane Pens 2.00", True),
+            (Decimal("2"), "Jane Pens 2.0 each", True),
+            (Decimal("10"), "Jane Pens 10.00", True),
+            (Decimal("2.50"), "Jane Pens 2.5", False),  # more precision than the source states
+            (Decimal("2.500"), "Jane Pens 2.50", False),
+            (Decimal("2.5"), "Jane Pens 2.505", False),
+            (Decimal("2.5"), "Jane Pens 12.50", False),
+            (Decimal("2"), "Jane Pens 2.5", False),
+            (Decimal("2"), "Jane Pens 2.05", False),
+            (Decimal("2"), "Jane Pens 20.0", False),
+            (Decimal("5"), "Jane Pens 1,5", False),  # a comma between digits is not a standalone number (the prompt treats it as ambiguous)
+            (Decimal("1"), "Jane Pens 1,000", False),
+            (Decimal("10"), "Jane Pens, 10 of them", True),
+            (Decimal("10"), "Jane Pens: 10, 20", True),
+        ]
+        for value, source, expected in cases:
+            with self.subTest(value=str(value), source=source):
+                findings = validate_request(item(value), source_text=source).findings
+                self.assertEqual(findings == (), expected)
+
     def test_source_check_is_skipped_without_source_text(self):
         request = make_request(requester=Requester(name="Nobody In Particular"))
         self.assertEqual(validate_request(request).findings, ())

@@ -25,6 +25,11 @@ answer (``AIOutputError``) instead of fixing it when:
   second, so storing it would fail AFTER the provider was paid, and the queue would retry that failure as if it were transient. The submitted text is refused for the same
   two reasons (``apps.intake.policy.validate_request_text``).
 
+ONE NARROW REPAIR (AI-2b, e-mail only). A requester contact that is exactly one plain ASCII e-mail address followed by sentence punctuation (``jane@example.invalid.``, the
+sentence's full stop copied with it) is stored without that punctuation, deterministically and from the answer alone; the prompt also asks the model not to copy it. No other value is
+changed: a contact that merely ends in punctuation and holds ``@`` but is not one clean address is kept and reported as a warning ambiguity on ``requester.contact``, and a phone number, a
+name or an address the pattern does not match is kept as given. The raw model answer is not stored, so the removed characters are not recorded anywhere.
+
 NOT DONE. ``source_refs`` are not requested: a model cannot be trusted to count lines, and the validator checks references against the fixture's line
 convention. The draft therefore has none; the existing ``value_not_in_source`` warning still runs on every value. Strings are kept as given (an empty
 optional string is not turned into ``null``); the model is told to use ``null``.
@@ -36,7 +41,7 @@ from decimal import Decimal
 
 from workflows.request_intake import Ambiguity, ExtractionResult, RequestedItem, Requester, StructuredRequest, parse_field_path
 
-PROMPT_VERSION = "1"  # the version of THIS prompt and schema; it is stored in the outcome's extractor version. Change it with either.
+PROMPT_VERSION = "2"  # the version of THIS prompt and schema; it is stored in the outcome's extractor version. Change it with either. 2 (AI-2b): e-mail punctuation rule.
 EXTRACTOR_NAME = "ai-request-extractor"
 MAX_ITEMS = 200
 MAX_AMBIGUITIES = 100
@@ -45,6 +50,14 @@ MAX_EXCERPT_CHARS = 200  # the excerpt convention of workflows.request_intake.sc
 
 # The fixture parser's number rule (workflows.request_intake.extraction): optionally signed, ASCII digits, an optional fraction. "[0-9]", not "\d".
 _NUMBER = re.compile(r"[+-]?[0-9]+(?:\.[0-9]+)?")
+
+# AI-2b. A plain ASCII e-mail address (a dot-atom local part and a dotted domain). Deliberately narrow: an address it does not match (a quoted local part,
+# an international domain, "Name <a@b>") is never touched. Trailing sentence punctuation is the only thing that is ever removed, and only from a value that is
+# otherwise exactly one such address.
+_EMAIL = re.compile(
+    r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+"
+)
+_SENTENCE_PUNCTUATION = ".,;:!?"
 
 def _text(description):
     return {"type": ["string", "null"], "description": description}
@@ -125,7 +138,8 @@ You do not approve, reject, price or decide anything, and there is no field for 
 Rules:
 1. Use only what the text states. Never guess, infer, complete or invent a value. Use null for anything the text does not state. Do not add an item \
 the text does not request.
-2. Copy text values as written. Do not translate, correct, reword or normalise them.
+2. Copy text values as written. Do not translate, correct, reword or normalise them. The one exception: an e-mail address ends at its last letter or digit, so \
+leave out any sentence punctuation (a full stop, comma, semicolon, colon, exclamation or question mark) that follows it in the text.
 3. Keep items in the order the text lists them: one entry per requested item. Never merge, split, sum or drop items.
 4. quantity is a JSON string of digits (optional sign, one optional decimal point) exactly as written, for example "10" or "2.50", never a JSON number. \
 If the text gives a quantity that is not such a number (for example "a few", "about ten" or "1,5"), set quantity to null and add an ambiguity for it.
@@ -184,6 +198,25 @@ def _quantity(value):
     return Decimal(value)  # exactly the digits as written: no float, no rounding
 
 
+def _contact(value, haystack):
+    """``(contact, ambiguity)`` for the requester contact the model returned. Deterministic; nothing is invented.
+
+    * a value that is exactly one e-mail address plus trailing sentence punctuation (``jane@example.invalid.``) loses that punctuation and nothing else: the
+      punctuation belongs to the sentence, not to the address, and what remains occurs in the source because it is a prefix of what the model copied;
+    * a value that contains ``@`` and ends in sentence punctuation but is NOT a clean address after that (``Jane <jane@example.invalid>.``) is kept as given and
+      reported as an ambiguity on ``requester.contact`` (an optional field, so a warning), when its excerpt can be quoted from the source;
+    * every other value, whatever it holds, is kept exactly as given.
+    """
+    if not value or value[-1] not in _SENTENCE_PUNCTUATION or "@" not in value:
+        return value, None
+    stripped = value.rstrip(_SENTENCE_PUNCTUATION)
+    if _EMAIL.fullmatch(stripped) is not None:
+        return stripped, None
+    if len(value) <= MAX_EXCERPT_CHARS and _normalize(value) in haystack:
+        return value, Ambiguity(field_path="requester.contact", excerpt=value)
+    return value, None
+
+
 def _ambiguity(entry, item_count, haystack) -> Ambiguity:
     path = entry["field_path"]
     parsed = parse_field_path(path)
@@ -212,9 +245,12 @@ def candidate_from_output(output: Mapping, source_text: str) -> tuple[Structured
         for raw in output["items"]
     )
     haystack = _normalize(source_text)
+    contact, contact_ambiguity = _contact(_storable(requester["contact"]), haystack)
     ambiguities = tuple(_ambiguity(entry, len(items), haystack) for entry in output["ambiguities"])
+    if contact_ambiguity is not None and contact_ambiguity not in ambiguities:
+        ambiguities += (contact_ambiguity,)
     candidate = StructuredRequest(
-        requester=Requester(name=_storable(requester["name"]), contact=_storable(requester["contact"])),
+        requester=Requester(name=_storable(requester["name"]), contact=contact),
         items=items,
         notes=_storable(output["notes"]),
         source_refs=(),
