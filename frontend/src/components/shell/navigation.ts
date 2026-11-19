@@ -10,10 +10,21 @@ export interface NavItem {
   icon: IconName;
   /** Shown only to users who hold this permission (a hint; the server decides). */
   permission?: string;
+  /** Shown only to users who hold at least one of these permissions (a hint; the server decides). */
+  anyPermission?: readonly string[];
   isActive(pathname: string): boolean;
 }
 
 export const NAV_ITEMS: readonly NavItem[] = [
+  {
+    id: "dashboard",
+    label: "Dashboard",
+    to: "/dashboard",
+    icon: "grid",
+    // The same condition as the dashboard's own check (lib/permissions.ts): without a view permission it has no data.
+    anyPermission: ["intake.view_own_request", "intake.view_any_request"],
+    isActive: (pathname) => pathname === "/dashboard",
+  },
   {
     id: "requests",
     label: "Requests",

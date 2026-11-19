@@ -5,6 +5,7 @@ const PATHS = {
   menu: "M4 6h16M4 12h16M4 18h16",
   close: "M6 6l12 12M18 6L6 18",
   "panel-left": "M4 5h16v14H4zM9 5v14",
+  grid: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z",
   list: "M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01",
   plus: "M12 5v14M5 12h14",
   logout: "M9 4H5v16h4M16 8l4 4-4 4M20 12H9",
