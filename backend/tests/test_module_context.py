@@ -862,14 +862,23 @@ class FinalClassTests(ContextCase):
 
 
 class RequestIntakeCompatibilityTests(SimpleTestCase):
-    def test_the_production_registry_is_empty_so_no_module_can_get_a_context(self):
+    def test_the_production_registry_holds_only_request_intake_so_every_other_id_is_refused(self):
         from config import module_context
 
-        self.assertEqual(len(module_context.REGISTRY), 0)
-        for module_id in ("request_intake", "intake", support.CTX):
+        self.assertEqual(module_context.REGISTRY.module_ids, ("request_intake",))
+        for module_id in ("intake", support.CTX):  # ``intake`` is a legacy NAMESPACE of the module, not a module id
             with self.assertRaises(ModuleContextError) as caught:
                 module_context.module_context(module_id)
             self.assertEqual(caught.exception.code, "unknown_module")
+
+    def test_request_intake_can_get_a_context_with_the_four_capabilities_that_have_a_facade(self):
+        from apps.intake.module import MANIFEST
+        from config import module_context
+
+        context = module_context.module_context("request_intake")
+        self.assertEqual(context.module_id, "request_intake")
+        self.assertEqual(context.capabilities, {"task.enqueue", "audit.record", "case.run", "permissions.check"})  # revision.approval is declared but has no facade
+        self.assertIs(module_context.REGISTRY.get("request_intake"), MANIFEST)
 
     def test_the_composition_root_uses_the_production_handler_allowlist(self):
         source = (BACKEND / "config" / "module_context.py").read_text(encoding="utf-8")
@@ -879,25 +888,25 @@ class RequestIntakeCompatibilityTests(SimpleTestCase):
     def test_request_intakes_submission_path_does_not_use_a_context(self):
         for path in sorted((BACKEND / "apps" / "intake").glob("*.py")) + sorted((BACKEND / "apps" / "api").glob("*.py")):
             text = path.read_text(encoding="utf-8")
-            for word in ("module_context", "ModuleContext", "module_host", "SYSTEM_ACTOR"):
+            for word in ("module_context", "ModuleContext", "module_host", "SYSTEM_ACTOR"):  # MOD-2: registering the manifest does not route Request Intake through a context
                 with self.subTest(file=path.name, word=word):
                     self.assertNotIn(word, text)
 
-    def test_the_worker_composition_and_the_legacy_kinds_are_unchanged(self):
+    def test_the_worker_composition_keeps_the_handlers_and_only_the_test_kind_is_legacy(self):
         from apps.intake.registry import PRODUCTION_REGISTRY
         from config.task_registry import COMPOSITION, LEGACY_UNGATED_KINDS
 
-        self.assertEqual(LEGACY_UNGATED_KINDS, {"test.add_numbers", "request_intake.extract"})
+        self.assertEqual(LEGACY_UNGATED_KINDS, {"test.add_numbers"})  # MOD-2: request_intake.extract is the registered module's kind
         self.assertIs(COMPOSITION.registry, PRODUCTION_REGISTRY)
-        self.assertEqual(COMPOSITION.kind_gate(), LEGACY_UNGATED_KINDS)  # no module is registered: the gate answers the legacy kinds without reading state
 
-    def test_the_synthetic_request_intake_manifest_would_work_with_a_context_but_is_not_registered(self):
+    def test_the_synthetic_request_intake_manifest_still_works_with_a_context_and_is_not_the_registered_one(self):
         from tests.module_support import intake_like_manifest
 
         registry = support.registry(intake_like_manifest(capabilities_required=("task.enqueue", "audit.record", "case.run", "permissions.check")))
         context = ModuleContext.open(registry, "request_intake")  # MOD-2 will do this for real; nothing does it now
         self.assertEqual(context.capabilities, {"task.enqueue", "audit.record", "case.run", "permissions.check"})
-        self.assertNotIn("request_intake", __import__("config.modules", fromlist=["BUILTIN_MODULES"]).BUILTIN_MODULES)
+        registered = __import__("config.modules", fromlist=["BUILTIN_MODULES"]).BUILTIN_MODULES
+        self.assertNotIn(intake_like_manifest(), registered)  # the synthetic object is a test fixture; the registered manifest is apps.intake.module.MANIFEST
 
 
 # --- architecture boundaries --------------------------------------------------------------------------------------------------

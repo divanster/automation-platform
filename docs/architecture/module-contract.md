@@ -1,5 +1,7 @@
 # Module contract (MOD-1a): manifests and the static registry
 
+> **MOD-2 (current state): Request Intake is registered as the first built-in module** (`apps/intake/module.py`, registered in `config/modules.py`; section 3.14). Statements below that say the registry is empty, that Request Intake is not a module, or that its task kind is legacy describe the slice they were written for and are superseded by section 3.14. On `feat/request-intake-module`, uncommitted; DB-free tests pass in the development VM; **the PostgreSQL tests are NOT RUN**. No production-readiness claim.
+
 > **Status: implemented as a foundation; nothing uses it yet.** MOD-1a adds a pure-Python package, `backend/apps/modules`, and a
 > composition root, `backend/config/modules.py`, whose built-in module tuple is **empty**. No module is registered, activated,
 > enabled or run, no application code calls the registry, and Request Intake is **not** a module yet (that is MOD-2). It was
@@ -593,7 +595,7 @@ exclusive lock); another PostgreSQL version or machine; or that no other race ex
 
 **Status.** Implemented and validated, merged into `main` (PR #15, merge commit `97cdc98`). DB-free tests pass in the development VM; the PostgreSQL tests
 and the migration were run **by the project owner locally** (section "Owner-supplied local PostgreSQL result" below), not by the VM. `apps/modules` stays pure and gains no model; the runtime state is a separate Django app, `apps/module_host`
-(label `module_host`), installed in `INSTALLED_APPS`. **No module is registered** (`BUILTIN_MODULES` is empty), Request Intake is **not** a module, there is **no
+(label `module_host`), installed in `INSTALLED_APPS`. **[MOD-2 update: see section 3.14. Request Intake is a registered built-in module and `BUILTIN_MODULES` holds it; the statement below describes the slice it was written for.]** **No module is registered** (`BUILTIN_MODULES` is empty), Request Intake is **not** a module, there is **no
 public API** (no route, view or serializer), and nothing is installed, downloaded, imported by name or migrated by the host.
 
 **Schema (migration `module_host.0001_initial`: three `CREATE TABLE`s and their indexes, nothing else; no existing migration was modified).**
@@ -701,7 +703,7 @@ unchanged. The state is read once per iteration; the S2 race window (a kind gate
   state at all: **Request Intake's `request_intake.extract` is not gated, and works as before, with or without any `ModuleState` row, even if every other module is
   disabled.** `make_kind_gate` refuses (`legacy_kind_claimed`, when `config.task_registry` is imported) a legacy kind that a registered module also declares, so
   MOD-2 cannot register Request Intake without removing its kind from the legacy set in the same change; gating cannot start or fail to start by accident.
-* **Today** the registry is empty, so the production gate answers the legacy set **without reading the database**. Its first read happens with the first
+* **S4 statement (MOD-2: the registry holds Request Intake, so the production gate now reads the state every iteration and `request_intake.extract` is gated, section 3.14).** The registry was empty, so the production gate answered the legacy set **without reading the database**. Its first read happens with the first
   registered module.
 * **One visible difference from before S4.** The production composition now carries a gate, so the worker's claim is filtered to the allowed, known kinds. A task
   whose kind this worker has no handler for (a hand-inserted row, or a task from a newer release) is therefore left queued instead of being claimed and failed as
@@ -912,7 +914,7 @@ installation or Update Manager, and no real AI integration. Not a production-rea
 * ORM-level protection only; raw SQL, a migration or an administrator can change a value and nothing detects it.
 * An installation holding a run that Request Intake did not create cannot complete the migration until its owner attributes that run (by design).
 * The PostgreSQL validation is the owner's, on one machine (below); it covers the tested scenarios only.
-* No module activation, and Request Intake is not a module. (`case.run` has a facade since S6, section 3.13; it is what stamps a module's runs.)
+* No module activation, and Request Intake is not a module (MOD-2 registers it, section 3.14). (`case.run` has a facade since S6, section 3.13; it is what stamps a module's runs.)
 
 **Owner decisions (S5 review).** (1) Request Intake's identity is `request_intake` / `request_intake` / `1`. (2) The historical backfill is strict: a run is attributed only on evidence and unknown runs are never guessed at.
 (3) Immutability stays ORM-level: no database trigger in S5. (4) `workflow_version` is a positive 32-bit integer, in the manifest, the attribution and the database. (5) No index without a demonstrated need. (6) No
@@ -1004,7 +1006,7 @@ that took its lock before. The lock is held until the outermost transaction ends
 `audit_subject_type_not_allowed`, `permission_not_declared`, `no_permission_requested`, `actor_required`. Everything the Core services raise (`IdempotencyConflictError`, `InvalidPayloadError`, `InvalidTransitionError`,
 `RecordNotFoundError`, `AuditEventError`, `AuditTransactionError`, `AuthorizationError`) passes through unchanged.
 
-**Request Intake stays legacy.** Its registry is empty, so `module_context("request_intake")` is `unknown_module`; its submission path, the API and the worker composition do not mention the context (a test scans them), its task kind
+**Request Intake stays legacy (S6 statement; MOD-2 superseded it, section 3.14: the module is registered, `module_context("request_intake")` opens, its kind is the module's and no longer legacy, and its code still does not use a context).** Its registry is empty, so `module_context("request_intake")` is `unknown_module`; its submission path, the API and the worker composition do not mention the context (a test scans them), its task kind
 stays a legacy ungated kind, and a submission takes no state lock and reads no module state (a PostgreSQL test captures the SQL). The synthetic Request Intake manifest of `tests/module_support.py` opens a context in a test, which is what MOD-2
 will do for real: MOD-2 must remove the kind from the legacy set, register the manifest, route its code through the facades and install the audit vocabulary in each process (nothing in S6 installs it; `audit.record` then fails
 loudly with `AuditEventError` for a declared action, which is the S3 design).
@@ -1036,7 +1038,7 @@ race window for the worker's claim is unchanged.
 
 **Remaining limitations.**
 
-* No module is registered and Request Intake is not a module, so nothing uses the context outside tests; the four facades are validated by tests with a synthetic module only.
+* (S6 statement; since MOD-2 Request Intake is registered and `module_context("request_intake")` opens, but nothing in the application calls it, section 3.14.) No module is registered and Request Intake is not a module, so nothing uses the context outside tests; the four facades are validated by tests with a synthetic module only.
 * `revision.approval` has no facade (a module cannot create revisions or approvals through Core yet), there is no configuration or secret access, no document access and no AI access.
 * The PostgreSQL behaviour (the shared lock, the transaction joining, real users and roles, concurrency) passed the 72 focused tests and the 676-test selected regression in the owner's local run (owner-supplied; the VM did not run or observe them). That supports the tested scenarios on one machine only: it does not prove that no other race or edge case exists.
 * `permissions.authorize` is a Core decision only; Request Intake's own `apps/intake/authorization.py` is unchanged and still its own glue (they agree, by a PostgreSQL test over every user and owner).
@@ -1055,6 +1057,61 @@ real runs with attribution and the state machine, audit inside and rolled back w
 disable, enable, version mismatch, missing state and the pre-sync transition against real rows, concurrency including a disable that waits for an in-flight call, and the legacy Request Intake path). Commands: runbook section 5.3.
 
 **Owner-supplied PostgreSQL validation (S6).** The owner ran the S6 tests on the local Windows computer: the 72 focused PostgreSQL tests passed, and the full selected PostgreSQL regression passed (676 tests, 191.518 s, exit code 0; the test database was destroyed successfully). The VM ran only the 2129 DB-free tests; it did not run, repeat or observe any PostgreSQL test, and no output is stored. The branch state under test was `5b61298` (implementation `ee4198d` plus the test-only fix of the second context's setup in the concurrency test); the exact command lines and module list were not supplied. This supports, for the tested scenarios on one machine only, that the four facades behave as designed against real rows, locks, users and roles, and that existing Request Intake behaviour was preserved in the tested scenarios (the intended selection, runbook section 5.3, includes the unchanged intake, review, API, queue, worker, attribution and audit suites; that the 676 were those is inferred from the all-passed result, not itemized). It does not make Request Intake a module, add real AI integration, make `ModuleContext` a security sandbox, add module installation or an Update Manager, or establish production readiness. See the [local validation record](../development/local-validation-record.md).
+
+### 3.14 Request Intake as the first built-in module (MOD-2)
+
+**Status.** Implemented on `feat/request-intake-module` (uncommitted, not pushed, no PR). DB-free tests pass in the development VM (2172 in all; 43 more than before this slice, after updating the pins that described an empty registry). **The PostgreSQL tests have NOT been run** (the VM has no
+PostgreSQL and never connects to one): the new `tests/test_request_intake_module_postgres.py` (30 tests) and the edited `test_module_host_postgres.py` (the class that asserted Request Intake was not a module was replaced, 70 tests remain) and `test_module_context_postgres.py` (two tests updated). The owner's commands are in the
+[runbook](../development/runbook.md), section 5.4. **No migration, no model, no endpoint, no screen, no permission and no audit action changed.** Request Intake's business behaviour (submission, extraction, review, approval, rejection, audit history, hashes) is untouched.
+
+**Goal.** Declare Request Intake as a module, register it in the static registry and gate its task kind by the stored module state, without changing what it does.
+
+**The manifest** (`apps/intake/module.py`, `MANIFEST`; a pure module that imports only `apps.modules.manifest` and the pure `apps.intake.policy`). Everything in it already existed; a test compares each part with the code that is the source of truth.
+
+| Field | Value | Compared with |
+| --- | --- | --- |
+| `module_id`, kind, version | `request_intake`, `business`, `1.0.0` | `policy.MODULE_ID`; the value stored on every run since S5 |
+| `core_api_compatibility`, `license_feature` | `>=1.0.0,<2.0.0`, `mod.request_intake` | the registry's Core API version (1.0.0) |
+| `extra_namespaces` | `intake` | the six `intake.*` permission identifiers, not renamed |
+| `workflows` | key `request_intake`, definition version 1, task kind `request_intake.extract` | `REQUEST_INTAKE_ATTRIBUTION`, `policy.KIND_EXTRACT` |
+| `task_handlers` | `request_intake.extract`, **no handler object** | `EXTRACT_HANDLER.kind` (identity checked in `PRODUCTION_REGISTRY`) |
+| `permissions` | `intake.submit_request` (global); `intake.view_own_request`, `intake.edit_own_request` (own); `intake.view_any_request`, `intake.approve_request`, `intake.reject_request` (any), with the model's own names as descriptions | `RequestSource._meta.permissions`; the scopes against `apps/intake/access.py`'s tables |
+| `role_grants` | Operator: submit, view own, edit own. Approver: view any, approve, reject. Auditor: view any (Core adds the audit view permission) | `derive_role_permissions` equals `apps.accounts.roles.ROLE_PERMISSIONS` exactly |
+| `capabilities_required` | `task.enqueue`, `audit.record`, `case.run`, `revision.approval`, `permissions.check` | Core's five capabilities (a declaration; `revision.approval` still has no facade) |
+| `ui_contributions` | routes `/requests`, `/requests/new`, `/requests/:run_id`; navigation `/requests`, `/requests/new` (hint: `intake.submit_request`) | `frontend/src/App.tsx` and `Layout.tsx`, read as text |
+| `api_contributions` | `requests` | the first path segment `apps/api/urls.py` serves besides `auth` |
+
+**Deliberately not declared.** (1) *No audit action:* every action Request Intake emits (`request.submitted`, `request.edited`, `revision.created`, `run.state_changed`, `approval.recorded`, `approval.invalidated`, `rejection.recorded`) is **Core's** (the `request`, `revision`, `run`, `approval` and `rejection` namespaces are
+reserved for Core and Core's recorder emits them), so declaring one would be refused; the vocabulary composed from the registry equals Core's, its fingerprint included. (2) *No handler object:* importing it would import Django models into a file that must stay importable before Django is ready; the handler stays in
+`apps.intake.registry.PRODUCTION_REGISTRY`. (3) *No maintenance hook:* the failure reconciler stays the worker's `after_iteration` hook and runs after every iteration whether or not the module is enabled (what a `while_disabled` hook would do); moving it to a named hook is a later decision. (4) No configuration schema, dependency, provided
+capability or update metadata. The route parameter is written `:run_id` because a declared path is lower case; the frontend calls it `:runId` (the parity test normalizes names).
+
+**Static registration.** `config/modules.py` imports `MANIFEST` by its fixed name and `BUILTIN_MODULES = (REQUEST_INTAKE_MANIFEST,)`. No directory scan, setting, entry point, dynamic import or path. The registry rejects duplicate task kinds, permissions, workflows, API routes, UI ids and route paths and namespaces (`registry.py`; the new tests also assert one of each); its fingerprint is deterministic
+(equal after a rebuild and in another process with another hash seed). Core packages and the module host still import nothing of `apps.intake` (a test scans them), and only `config/modules.py` imports the manifest.
+
+**Worker composition.** `config/task_registry.py` keeps one worker, `PRODUCTION_REGISTRY` (the same handler object), the same reconciler and no maintenance hook. `LEGACY_UNGATED_KINDS` is now `{test.add_numbers}`: `request_intake.extract` left the legacy set in the same change that registered the module (`make_kind_gate` would refuse both, `legacy_kind_claimed`).
+A new pure check, `rules.check_handler_composition` (error code `handler_composition`), runs when the file is imported: the handler allowlist must be exactly the legacy kinds plus the task kinds the registry declares, so a module kind without a handler or a handler nobody owns stops the process at start, and a new production kind forces a decision.
+Consequences: Request Intake's tasks are claimable only while the module is enabled, version-matched and has state. A disabled module's queued tasks stay queued (never claimed and discarded, never failed, no attempt row); re-enabling resumes them in their original order; a running attempt finishes; an expired lease is recovered and then held; retry and backoff are unchanged;
+`test.add_numbers` is unaffected. The reconciler is not gated.
+
+**Module state and start-up.** Nothing runs a migration or `module_sync` automatically. Required sequence on an existing installation (runbook section 5.4): stop the worker, deploy, `module_status`, `module_sync`, `module_status` again, start the worker. Until `module_sync` runs:
+* an installation that **never synced** (no initialization marker): an absent row means "enabled" (the S4 compatibility window), so Request Intake keeps working;
+* an installation whose marker **already exists** (for example from a `module_sync` that ran while the registry was empty): an absent row is **not** "enabled": the kind fails closed, and Request Intake's queued tasks wait until `module_sync` creates the row (enabled, version `1.0.0`, the namespaces `request_intake` and `intake` claimed). The API still accepts submissions meanwhile (there is no API-side write blocking); the runs stay `queued`.
+`module_sync` never re-enables a module an administrator disabled, never changes a stored version (a mismatch is reported and the kind stays held), and records one `module.enabled` event (cause `sync`) when it creates the row.
+
+**Permissions and audit parity.** `setup_roles`, `/api/auth/me/` and the review services still read `apps.accounts.roles` and `apps.intake.access` and import nothing of the module machinery (tests scan them). The derived matrix equals `ROLE_PERMISSIONS` exactly; no permission, scope or grant was added or broadened; self-approval and the other review rules are untouched; existing audit action names, detail keys and history are unchanged.
+`module_context("request_intake")` now opens (it was `unknown_module`); a PostgreSQL test compares its permission decision with `apps.intake.authorization` for every user, action and owner. **Request Intake's own code does not use a context**: submission, extraction and review are unchanged.
+
+**Frontend.** No module registry was added: the manifest is the declaration, and the React routes and navigation are unchanged (an additional frontend registry would have been new code for no behaviour). A DB-free test reads `App.tsx` and `Layout.tsx` as text and compares them with the manifest, so a route or link added on one side without the other fails; there is no dynamic JavaScript loading.
+
+**Tests.** DB-free: `tests/test_request_intake_module.py` (36: manifest contents and purity, role and permission equivalence, audit vocabulary equivalence, registry composition and determinism, handler identity, worker composition, URL and screen parity, Core independence), the gate tests in `test_module_host_gate.py` (Request Intake's gating and `check_handler_composition`), and the older pins that described an empty
+registry or a legacy kind, edited to the new state (`test_module_boundaries`, `test_module_registry`, `test_module_context`, `test_audit_vocabulary`, `test_intake_composition`, `test_tasks_recovery_support`). A deliberate mutation of the manifest (a scope, a grant, a route, an API prefix) was caught each time. PostgreSQL, **not run**: `tests/test_request_intake_module_postgres.py`.
+
+**Remaining limitations.**
+* PostgreSQL behaviour of the registered module (state creation, held and resumed tasks, a running attempt, recovery, the permission matrix) is **not run**.
+* Request Intake does not use `ModuleContext`; `revision.approval` still has no facade; the manifest's capability list is a declaration.
+* Nothing blocks the API for a disabled module: submissions are accepted and queue. The S2 gate race window for the worker's claim is unchanged. The registry fingerprint is carried, not compared between the API and the worker processes.
+* No real AI integration, no installer or Update Manager, no module endpoint, no signature or licence enforcement; modules admitted to a process are not sandboxed. **This is not a production-readiness claim.**
 
 ## 4. Versioning
 
@@ -1146,9 +1203,10 @@ every raised code is declared) and a message that never echoes a submitted value
 
 `config/modules.py` holds `BUILTIN_MODULES`, a static tuple of manifest objects approved to be part of a Core release, and
 `build_registry()`. A module is built in only if its manifest is written there in code, in a reviewed change: no directory scanning,
-no setting with dotted paths, no entry points, no import by name. In MOD-1a the tuple is empty. Because a future module's manifest
-will live in the module's own package, which imports Django models, the exact loading mechanism (a function that imports lazily,
-after Django's app registry is ready) is decided in MOD-2.
+no setting with dotted paths, no entry points, no import by name. In MOD-1a the tuple was empty; since MOD-2 it holds Request Intake. The loading question
+the MOD-1a text left open is settled simply: a module's manifest lives in a **pure** module of its own package (`apps/intake/module.py`: no models, no handler object,
+no Django), and `config/modules.py` imports it by its fixed name at module level, so no lazy import is needed and the file stays importable before Django is ready
+(a test imports the manifest in a fresh interpreter and checks that no Django module is loaded).
 
 Since S3 there is a second, separate composition root, `config/audit_vocabulary.py` (section 3.10). It reads a registry (the built-in one by
 default) and builds the audit vocabulary; it names no module itself, and nothing in the application calls it yet.
@@ -1263,10 +1321,10 @@ An update manager does not exist and is **not** part of MOD-1a. When it is desig
 
 ## 10. Limitations and deferred functionality
 
-- No module is registered; `BUILTIN_MODULES` is empty. Since S4 the registry is read by the worker's composition root (the kind gate) and by the four
+- (MOD-2: `BUILTIN_MODULES` holds Request Intake, section 3.14.) No module is registered; `BUILTIN_MODULES` is empty. Since S4 the registry is read by the worker's composition root (the kind gate) and by the four
   `apps/module_host` commands only (section 5.4); `apps/modules` itself still has no model and no migration.
 - Module state exists since S4 (section 3.11: `apps/module_host`, `ModuleState`, namespace claims, sync, enable and disable commands), but no module is activated
-  by it: there is nothing to activate until MOD-2.
+  by it: there is nothing to activate until MOD-2 (which registers Request Intake; its state is created by an explicit `module_sync`, section 3.14).
 - No handler registration with the worker, no permission seeding, no API or UI mounting, no endpoint listing modules.
 - Run states and permission constants in Core are still shaped by Request Intake (`apps/cases/run_state.py`, `apps/accounts/roles.py`); the
   contract does not change them. The audit vocabulary is extensible since S3 (section 3.10): Core's seven actions stay Request-Intake-shaped
@@ -1285,7 +1343,7 @@ An update manager does not exist and is **not** part of MOD-1a. When it is desig
 - The behaviour-preservation tests for S1b are DB-free in the VM. The PostgreSQL comparison (`tests/test_authz_core_postgres.py`) and the
   existing review and API suites passed in the owner's local run (242 tests, owner-supplied, section 3.8); the VM never ran them.
 - Still absent after S1b: `ModuleState`, runtime module permissions (no module permission is checked at run time; no manifest becomes
-  an `AccessRule`), enable/disable, and the capability facade (the first three were built in S4, the facade in S6, section 3.13). Request Intake is not a module.
+  an `AccessRule`), enable/disable, and the capability facade (the first three were built in S4, the facade in S6, section 3.13). Request Intake is a registered module since MOD-2 (section 3.14).
 - Maintenance hooks in a manifest are declarations: nothing reads them. Since S2 `apps/tasks/worker.py` can run further named hooks after
   the legacy `after_iteration` hook (section 3.9), but the production composition installs none, `while_disabled` is not consulted (S4 did not
   change that), and a manifest hook id is not resolved to code anywhere.

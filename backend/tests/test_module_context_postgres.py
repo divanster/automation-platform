@@ -901,11 +901,12 @@ class LegacyRequestIntakeTests(review_base.ReviewCase):
         self.registry = support.registry()
         host.sync_modules(self.registry)
 
-    def test_request_intake_cannot_get_a_context_until_mod_2(self):
+    def test_request_intake_gets_a_context_from_the_composition_root_since_mod_2_and_its_submission_still_does_not_use_it(self):
         from config.module_context import module_context
 
+        self.assertEqual(module_context("request_intake").module_id, "request_intake")
         with self.assertRaises(ModuleContextError) as caught:
-            module_context("request_intake")
+            module_context("intake")  # a legacy namespace, not a module id
         self.assertEqual(caught.exception.code, "unknown_module")
 
     def test_the_whole_workflow_runs_with_modules_synced_and_one_disabled(self):
@@ -919,8 +920,11 @@ class LegacyRequestIntakeTests(review_base.ReviewCase):
             submit(self.operator)
         self.assertFalse([q for q in queries.captured_queries if "module_host" in q["sql"] or "FOR SHARE" in q["sql"]])
 
-    def test_the_production_worker_gate_still_lets_the_legacy_kinds_through(self):
-        from config.task_registry import LEGACY_UNGATED_KINDS
+    def test_the_production_worker_gate_holds_request_intake_until_the_production_registry_is_synced(self):
+        from config.task_registry import LEGACY_UNGATED_KINDS, MODULE_REGISTRY
 
+        # setUp synced a synthetic registry: the initialization marker exists and Request Intake has no state row, so its kind fails closed (MOD-2)
         self.assertEqual(COMPOSITION.kind_gate(), LEGACY_UNGATED_KINDS)
-        self.assertIn("request_intake.extract", COMPOSITION.kind_gate())
+        self.assertNotIn("request_intake.extract", COMPOSITION.kind_gate())
+        host.sync_modules(MODULE_REGISTRY)
+        self.assertEqual(COMPOSITION.kind_gate(), LEGACY_UNGATED_KINDS | {"request_intake.extract"})

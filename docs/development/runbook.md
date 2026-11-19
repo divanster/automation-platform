@@ -544,6 +544,62 @@ statement issued before the task insert, and Request Intake's submission issues 
 **Trying it by hand is not possible yet:** no module is registered (`BUILTIN_MODULES` is empty), so `config.module_context.module_context("<id>")` refuses every id (`unknown_module`), Request Intake's included. The first real use
 is MOD-2.
 
+### 5.4 Request Intake as a registered module (MOD-2): activation sequence and PostgreSQL tests
+
+**Status: NOT RUN.** Written and checked in the VM with DB-free tests only (`manage.py test`: 2172 tests, 43 of them new or rewritten; `python -m unittest` on the pure modules; `check`; `makemigrations --check --dry-run`; `compileall`). **None of the PostgreSQL tests in `tests/test_request_intake_module_postgres.py` (30) or of the edited
+`test_module_host_postgres.py` and `test_module_context_postgres.py` has been run by anyone.** Background and rules: [module-contract.md](../architecture/module-contract.md) section 3.14.
+
+**What changes in a running installation.** The code registers Request Intake in the static module registry and gates its task kind (`request_intake.extract`) by the stored module state. There is **no migration, no model, no API route, no screen, no permission and no audit action change**, and nothing runs `module_sync` for you. **After this release the worker will not claim a Request Intake task until `module_sync` has
+created the module's state row, if the installation has ever completed a sync** (for example an earlier `module_sync` that ran while no module was registered left the initialization marker behind; the development database may be in that state). An installation that has never synced keeps working until the first sync (the S4 compatibility window), but run the sync anyway. The API keeps accepting
+submissions meanwhile: the runs stay `queued` and their tasks stay queued, nothing is failed.
+
+**Activation sequence (an existing development database, PowerShell, from `backend\`, in the window where the project's `.env` and virtual environment are active).**
+
+```powershell
+$Py = "$LocalProject\.venv\Scripts\python.exe"
+Set-Location "$LocalProject\backend"
+# 0. Stop the worker (runworker) and take a PostgreSQL backup first (section 6). Nothing below deletes anything, but state rows are new data.
+& $Py manage.py check
+& $Py manage.py makemigrations --check --dry-run                    # expect: No changes detected (this release adds no migration)
+& $Py manage.py migrate --plan                                      # expect: nothing to apply (S6 added none either); do NOT run migrate if it lists something you did not expect
+
+# 1. Before: what the host believes (read only). Expect either "no modules" state or, if an earlier sync ran, an initialized host with no request_intake row.
+& $Py manage.py module_status --json
+
+# 2. Create the state and claim the namespaces (repeatable; never re-enables a disabled module; never changes a stored version)
+& $Py manage.py module_sync
+# expect: created request_intake (enabled); namespace intake and request_intake claimed by request_intake; exit code 0
+
+# 3. After: request_intake is enabled, version 1.0.0, claimable, task kind request_intake.extract
+& $Py manage.py module_status request_intake
+& $Py manage.py module_status --json                                 # keep the registry fingerprint: the worker and the API processes must run the same code
+
+# 4. Start the worker again (python manage.py runworker) and submit one request in the UI; it must reach "needs review" as before.
+```
+
+If `module_sync` exits non-zero it reports a version mismatch or an unregistered state row and changes nothing for it: stop and report the output. To hold Request Intake's tasks on purpose, `python manage.py module_disable request_intake` (the queued tasks wait, running attempts finish, `module_enable` releases them in order). Rolling the code back to the commit before this release is harmless: the state row is
+reported as unregistered by a later sync and nothing reads it, and the old code treats the kind as legacy again.
+
+**DB-free checks and the PostgreSQL tests (from `backend\`; `AP_RUN_DB_TESTS` must be unset in the first part).**
+
+```powershell
+if ($env:AP_RUN_DB_TESTS) { throw "AP_RUN_DB_TESTS is already set in this window. Run: Remove-Item Env:AP_RUN_DB_TESTS   then repeat." }
+& $Py manage.py test                                                 # expect OK (2172 tests at the MOD-2 checkpoint; re-check the number)
+& $Py manage.py test tests.test_request_intake_module                # the new DB-free tests: expect OK (36 tests)
+
+# PostgreSQL tests: Django creates and destroys test_<AP_DB_NAME>; no --keepdb, no --noinput. The new module plus every suite the registration can affect.
+try {
+    $env:AP_RUN_DB_TESTS = "1"
+    & $Py manage.py test tests.test_request_intake_module_postgres tests.test_module_host_postgres tests.test_module_context_postgres tests.test_tasks_postgres tests.test_tasks_gating_postgres tests.test_tasks_recovery_postgres tests.test_cases_persistence_postgres tests.test_workflow_attribution_postgres tests.test_intake_postgres tests.test_review_postgres tests.test_api_postgres tests.test_audit_vocabulary_postgres tests.test_authz_core_postgres --tag requires_postgres -v 2
+    "exit code: $LASTEXITCODE"                                       # expect 0
+} finally {
+    Remove-Item Env:AP_RUN_DB_TESTS -ErrorAction SilentlyContinue
+}
+```
+
+Report the exact `Ran N tests` line and any failure. A failure is expected to be a defect in a test or in the code, not a reason to skip a test: report it rather than deleting or loosening it. The groups to look at first if something fails: the worker tests of `test_request_intake_module_postgres` (held, resumed, a running attempt, recovery and retry; they rely on the gate reading
+committed state on every iteration), `test_tasks_recovery_postgres` (its child processes now run a production gate that reads module state: the test database has no initialization marker, so the compatibility window keeps Request Intake claimable) and the edited classes in `test_module_host_postgres` and `test_module_context_postgres`.
+
 ## 6. Local Windows computer: setup and validation (reference procedure; owner-operated)
 
 > **Nothing in this section has been run.** No local repository, Python
@@ -1000,6 +1056,7 @@ be updated when that is done and confirmed.
 | REST API (`apps/api`; session login and logout, CSRF, login throttling, request, review and audit endpoints; [details](rest-api-slice.md)) | **Implemented**; DB-free tests pass on the VM; the 100 PostgreSQL tests: 96 of the first 98 passed locally, 2 test defects corrected, **rerun pending**; no React UI, password reset, or export; throttling is per process; TLS and HSTS undecided |
 | Workflow attribution (MOD-1b S5: `WorkflowRun.module_id`, `workflow_key`, `workflow_version`; migrations `cases.0006` to `0009`; [section 5.2](#52-workflow-attribution-mod-1b-s5-migration-preflight-postgresql-tests-and-the-migration), [module-contract.md](../architecture/module-contract.md) section 3.12) | **Implemented on `feat/module-workflow-attribution`** (`e2a4c55`; PR not yet merged); DB-free tests pass on the VM (1998 in all); **the owner ran the four migrations, the 37 PostgreSQL tests and a 604-test regression locally, all passed** (owner-supplied, tested scenarios only); an installation holding a run without a Request Intake source stops at `0008` by design |
 | ModuleContext capability facade (MOD-1b S6: `apps/module_host/context.py`, `context_rules.py`, `config/module_context.py`; [section 5.3](#53-modulecontext-mod-1b-s6-db-free-checks-and-the-postgresql-tests), [module-contract.md](../architecture/module-contract.md) section 3.13) | **Implemented on `feat/module-capability-facade`** (`ee4198d`, test fix `5b61298`; pushed, PR not yet opened); DB-free tests pass on the VM (2129 in all); the owner ran the 72 PostgreSQL tests and a 676-test selected regression locally, all passed (owner-supplied, tested scenarios only); no module is registered, Request Intake does not use it, no migration, nothing in the application calls it; a naming and authority boundary, not a sandbox |
+| Request Intake as the first built-in module (MOD-2: `apps/intake/module.py`, `config/modules.py`, `config/task_registry.py`; [section 5.4](#54-request-intake-as-a-registered-module-mod-2-activation-sequence-and-postgresql-tests), [module-contract.md](../architecture/module-contract.md) section 3.14) | **Implemented on `feat/request-intake-module`** (uncommitted); DB-free tests pass on the VM (2172 in all); the PostgreSQL tests are **NOT RUN**; no migration; `module_sync` must be run before the worker claims Request Intake tasks on an installation that has already synced; the module is declared and gated, not sandboxed, and does not use `ModuleContext` |
 | Business workflow beyond that: documents, a login mechanism, exports | Not implemented |
 | Task queue and background worker ([details](persistent-worker-slice.md)) | **Implemented** (first slice); the PostgreSQL tests passed in the owner's local run, tested scenarios only |
 | AI gateway and any AI adapter | Not implemented |

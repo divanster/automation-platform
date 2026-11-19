@@ -154,6 +154,23 @@ def check_legacy_kinds(registry, legacy_kinds) -> frozenset:
     return kinds
 
 
+def check_handler_composition(registry, handler_kinds, legacy_kinds) -> None:
+    """The worker's handler allowlist must be exactly the legacy kinds plus the task kinds of the registered modules (MOD-2).
+
+    Every task kind a registered module declares needs a handler in the allowlist (otherwise the gate would answer a kind the worker cannot run), and every
+    handler must be owned: legacy, or declared by a module. A new production kind therefore forces a decision (a module's, or legacy) instead of being silently
+    gated or silently allowed. ``legacy_kinds`` must already have passed ``check_legacy_kinds``.
+    """
+    handlers = frozenset(handler_kinds)
+    declared = frozenset(registry.task_kinds)
+    missing = sorted(declared - handlers)
+    if missing:
+        raise ModuleHostError("handler_composition", "these task kinds are declared by a registered module but have no handler: " + ", ".join(missing))
+    unowned = sorted(handlers - declared - frozenset(legacy_kinds))
+    if unowned:
+        raise ModuleHostError("handler_composition", "these handlers belong to no registered module and are not legacy kinds: " + ", ".join(unowned))
+
+
 def allowed_kinds(registry, availability: Mapping, legacy_kinds: frozenset) -> frozenset:
     """The task kinds a worker may claim: the legacy kinds plus the kinds of every available module. Every other kind, including one nobody
     knows, is absent (the S2 claim filter then leaves such a task queued)."""

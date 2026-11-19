@@ -20,6 +20,9 @@ from django.conf import settings
 from django.test import SimpleTestCase
 from django.utils import timezone
 
+from apps.module_host import gate
+from apps.module_host.rules import StateFacts
+from apps.module_host.services import HostState
 from apps.tasks import handlers, worker
 from apps.tasks.policy import InvalidPayloadError, TaskPermanentError
 from tests import recovery_support as support
@@ -230,6 +233,11 @@ class ChildKindGateTests(SimpleTestCase):
         self.task_registry = task_registry
         self.addCleanup(setattr, worker, "_composition", worker._composition)
         self.registry = support.registry()
+        # MOD-2: the production gate reads the stored module state of Request Intake (a SimpleTestCase refuses a query): an enabled, version-matched module.
+        state = HostState({"request_intake": StateFacts("request_intake", "1.0.0", True, "f" * 64)}, True)
+        patcher = mock.patch.object(gate, "read_host_state", return_value=state)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def install_in_child(self, composition):
         """Install ``composition`` through the child's wrapper, exactly as ``runworker`` does inside the child process."""
@@ -294,7 +302,7 @@ class ChildKindGateTests(SimpleTestCase):
         with self.assertRaises(OperationalError):
             worker._claimable_kinds(self.registry)
 
-    def test_the_legacy_request_intake_kind_is_untouched_by_the_wrapper(self):
+    def test_the_request_intake_module_kind_is_untouched_by_the_wrapper(self):
         from apps.intake.registry import PRODUCTION_REGISTRY
 
         self.install_in_child(self.task_registry.COMPOSITION)

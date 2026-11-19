@@ -17,6 +17,7 @@ CODES = frozenset(
         "namespace_released",  # a stored namespace claim is no longer claimed by anybody
         "legacy_kind_claimed",  # a legacy ungated task kind is also declared by a registered module
         "invalid_legacy_kinds",  # the legacy kind set is malformed
+        "handler_composition",  # the worker's handler allowlist and the registry's task kinds do not fit (a kind without a handler, or a handler nobody owns)
         "invalid_clock",  # a naive datetime was passed as the time of a change
     }
 )

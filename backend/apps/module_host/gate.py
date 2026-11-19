@@ -9,12 +9,11 @@ THE ANSWER is ``rules.allowed_kinds``: the LEGACY kinds plus the kinds of every 
 state present once the first sync has completed (the durable marker), dependencies available). A kind that is neither legacy nor declared by an available module is absent, so
 a disabled module's kinds, a version-mismatched module's kinds and unknown kinds are all held or left alone.
 
-LEGACY KINDS are the task kinds that existed before modules (``test.add_numbers`` and Request Intake's ``request_intake.extract``). They are
-claimable with no module state at all, so activating the gate changes nothing for them. Request Intake is not a module yet; MOD-2 registers it and
-must then remove ``request_intake.extract`` from the legacy set (``rules.check_legacy_kinds`` refuses a kind that is in both, loudly, when this gate is
-built).
+LEGACY KINDS are the task kinds that existed before modules and belong to none: ``test.add_numbers``. They are claimable with no module state at
+all. Request Intake's ``request_intake.extract`` was legacy until MOD-2 registered the module and removed it from the set (``rules.check_legacy_kinds``
+refuses a kind that is in both, loudly, when this gate is built); it is gated by the module state like any module's kind.
 
-COST. With an EMPTY registry (today) the gate answers the legacy set without reading the database. With modules it reads the state rows in one query
+COST. With an EMPTY registry the gate answers the legacy set without reading the database. With modules (Request Intake, since MOD-2) it reads the state rows in one query
 per worker iteration, the same read as ``services.read_host_state`` (the rows, then the durable initialization marker).
 """
 

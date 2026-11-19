@@ -18,7 +18,7 @@ the audit vocabulary does for its detail keys. The definition version is a posit
 ``WorkflowAttributionError`` with a stable ``code``; the message names the field and never repeats the value.
 
 WHAT THIS DOES NOT DO. It does not look anything up: whether a module is registered or enabled, and whether a module really
-declares a workflow key, is the registry's knowledge and Core does not have it (Request Intake is not yet a module). The only code
+declares a workflow key, is the registry's knowledge and Core does not have it (Request Intake became a module in MOD-2, but Core still does not import it). The only code
 that creates runs, ``apps.intake.submission``, passes a constant. There is no dynamic import, no discovery and no way to supply
 these values from a request, a command line or a file.
 """

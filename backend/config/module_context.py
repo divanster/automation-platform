@@ -1,8 +1,8 @@
 """The composition root of ModuleContext: the one place that hands a module its context (MOD-1b S6). It names no module.
 
-``module_context(module_id)`` opens the context of a module in the approved static registry (``config.modules``, whose tuple is EMPTY today), with the
+``module_context(module_id)`` opens the context of a module in the approved static registry (``config.modules``: Request Intake since MOD-2), with the
 production task handler allowlist (``apps.intake.registry.PRODUCTION_REGISTRY``, the same one the worker uses). Nothing in the application calls it yet: Request
-Intake is not a module (MOD-2), so ``module_context("request_intake")`` is refused (``unknown_module``) and its submission path does not use a context. Core
+Intake is a registered module (MOD-2), so ``module_context("request_intake")`` opens, but its submission path does not use a context. Core
 packages never import this file (a test pins that). Importing it reads no database and no file.
 """
 
