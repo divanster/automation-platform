@@ -5,6 +5,7 @@ export function StateBadge({ state }: { state: string }) {
   const known = isRunState(state) ? state : "unknown";
   return (
     <span className={`badge badge-${known}`} data-state={state}>
+      <span className="badge-dot" aria-hidden="true" />
       {stateLabel(state)}
     </span>
   );

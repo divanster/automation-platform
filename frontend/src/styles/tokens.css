@@ -1,0 +1,202 @@
+/*
+ * Design tokens. Every colour, size and radius used elsewhere comes from here.
+ *
+ * Breakpoints (CSS cannot read custom properties inside media queries, so these are the literal values used):
+ *   sm  640px   phones: single-column forms, hidden optional table columns
+ *   md  900px   the sidebar becomes an off-canvas drawer below this width
+ *   lg 1100px   the request detail page puts the review column beside the content
+ *
+ * Contrast: text pairs are chosen for at least 4.5:1 (WCAG AA) in both themes. The dark palette is applied when the
+ * user picks "Dark", or when they pick "System" and the operating system prefers dark.
+ */
+
+:root {
+  color-scheme: light;
+
+  /* typography scale */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.75rem;
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+
+  /* spacing scale */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+
+  /* shape and elevation */
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+  --shadow-sm: 0 1px 2px rgb(16 24 40 / 6%);
+  --shadow-md: 0 6px 18px rgb(16 24 40 / 10%);
+  --shadow-lg: 0 16px 40px rgb(16 24 40 / 18%);
+
+  /* layout */
+  --sidebar-w: 17rem;
+  --sidebar-w-collapsed: 4.5rem;
+  --topbar-h: 3.75rem;
+  --content-max: 92rem;
+  --focus-width: 3px;
+
+  /* motion */
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --dur: 160ms;
+
+  /* colours: light */
+  --bg: #f5f6f9;
+  --surface: #ffffff;
+  --surface-2: #f0f2f7;
+  --surface-hover: #e9edf5;
+  --text: #172033;
+  --muted: #536078;
+  --border: #d6dce8;
+  --border-strong: #76829a;
+  --focus: #1d4ed8;
+  --overlay: rgb(15 23 42 / 50%);
+
+  --accent: #1d4ed8;
+  --accent-hover: #1e40af;
+  --accent-text: #ffffff;
+  --accent-link: #1d4ed8;
+  --accent-soft: #e4ecfd;
+  --accent-soft-text: #17399b;
+
+  --danger: #b42318;
+  --danger-hover: #912018;
+  --danger-text: #ffffff;
+  --danger-bg: #fdecea;
+  --danger-fg: #8f1d14;
+
+  --warning-bg: #fff3d1;
+  --warning-fg: #7a4300;
+  --warning-border: #d9a516;
+
+  --ok-bg: #e0f3e8;
+  --ok-fg: #17603a;
+
+  --info-bg: #e4ecfd;
+  --info-fg: #17399b;
+
+  --neutral-bg: #e6e9f0;
+  --neutral-fg: #2b3548;
+
+  --sidebar-bg: #111a2e;
+  --sidebar-text: #c9d3e8;
+  --sidebar-muted: #93a1bf;
+  --sidebar-hover: #1b2742;
+  --sidebar-active-bg: #243556;
+  --sidebar-active-text: #ffffff;
+  --sidebar-border: #25324f;
+}
+
+/* Explicit dark theme. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 40%);
+  --shadow-md: 0 6px 18px rgb(0 0 0 / 45%);
+  --shadow-lg: 0 16px 40px rgb(0 0 0 / 55%);
+
+  --bg: #0e131c;
+  --surface: #161d2a;
+  --surface-2: #1d2636;
+  --surface-hover: #253047;
+  --text: #e7ebf3;
+  --muted: #a4aec2;
+  --border: #2d384c;
+  --border-strong: #7584a1;
+  --focus: #8fb3ff;
+  --overlay: rgb(0 0 0 / 62%);
+
+  --accent: #3b6fe0;
+  --accent-hover: #2f5fc9;
+  --accent-text: #ffffff;
+  --accent-link: #8fb3ff;
+  --accent-soft: #1d2c52;
+  --accent-soft-text: #b9d0ff;
+
+  --danger: #d9362a;
+  --danger-hover: #bd2a1f;
+  --danger-bg: #3a1a1a;
+  --danger-fg: #ffb4ab;
+
+  --warning-bg: #3a2c0c;
+  --warning-fg: #f6cf74;
+  --warning-border: #b8860b;
+
+  --ok-bg: #12301f;
+  --ok-fg: #8fdcae;
+
+  --info-bg: #1d2c52;
+  --info-fg: #b9d0ff;
+
+  --neutral-bg: #263044;
+  --neutral-fg: #d4dbe9;
+
+  --sidebar-bg: #0a0f19;
+  --sidebar-hover: #151e30;
+  --sidebar-active-bg: #1f2e4d;
+  --sidebar-border: #1a2335;
+}
+
+/* The same dark palette when the user has not chosen ("System") and the operating system prefers dark. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    color-scheme: dark;
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 40%);
+    --shadow-md: 0 6px 18px rgb(0 0 0 / 45%);
+    --shadow-lg: 0 16px 40px rgb(0 0 0 / 55%);
+
+    --bg: #0e131c;
+    --surface: #161d2a;
+    --surface-2: #1d2636;
+    --surface-hover: #253047;
+    --text: #e7ebf3;
+    --muted: #a4aec2;
+    --border: #2d384c;
+    --border-strong: #7584a1;
+    --focus: #8fb3ff;
+    --overlay: rgb(0 0 0 / 62%);
+
+    --accent: #3b6fe0;
+    --accent-hover: #2f5fc9;
+    --accent-text: #ffffff;
+    --accent-link: #8fb3ff;
+    --accent-soft: #1d2c52;
+    --accent-soft-text: #b9d0ff;
+
+    --danger: #d9362a;
+    --danger-hover: #bd2a1f;
+    --danger-bg: #3a1a1a;
+    --danger-fg: #ffb4ab;
+
+    --warning-bg: #3a2c0c;
+    --warning-fg: #f6cf74;
+    --warning-border: #b8860b;
+
+    --ok-bg: #12301f;
+    --ok-fg: #8fdcae;
+
+    --info-bg: #1d2c52;
+    --info-fg: #b9d0ff;
+
+    --neutral-bg: #263044;
+    --neutral-fg: #d4dbe9;
+
+    --sidebar-bg: #0a0f19;
+    --sidebar-hover: #151e30;
+    --sidebar-active-bg: #1f2e4d;
+    --sidebar-border: #1a2335;
+  }
+}

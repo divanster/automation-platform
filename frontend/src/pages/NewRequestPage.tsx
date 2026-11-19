@@ -4,6 +4,8 @@ import { Link, useNavigate } from "react-router";
 import { submitRequest } from "../api/requests";
 import { useAuth } from "../auth/AuthContext";
 import { Notice } from "../components/Status";
+import { PageHeader } from "../components/PageHeader";
+import { useToast } from "../components/ui/Toast";
 import { describeError } from "../lib/errors";
 import { newClientRequestId } from "../lib/format";
 
@@ -14,6 +16,7 @@ Notes: <request-level notes>                (optional)`;
 
 export function NewRequestPage() {
   const { can } = useAuth();
+  const { notify } = useToast();
   const navigate = useNavigate();
   const [text, setText] = useState("");
   const [pending, setPending] = useState(false);
@@ -26,7 +29,7 @@ export function NewRequestPage() {
   if (!can("intake.submit_request")) {
     return (
       <section>
-        <h1>New request</h1>
+        <PageHeader title="New request" breadcrumbs={[{ label: "Requests", to: "/requests" }, { label: "New request" }]} />
         <Notice kind="warning">Your account does not have permission to submit requests.</Notice>
         <p>
           <Link to="/requests">Back to requests</Link>
@@ -46,6 +49,7 @@ export function NewRequestPage() {
     setError(null);
     try {
       const created = await submitRequest(text, clientRequestId.current);
+      notify("success", "Request submitted and queued for extraction.");
       navigate(`/requests/${created.run_id}`);
     } catch (caught) {
       setError(describeError(caught));
@@ -55,11 +59,11 @@ export function NewRequestPage() {
 
   return (
     <section>
-      <h1>New request</h1>
-      <p>
-        Paste the request text. It is stored exactly as typed and queued for extraction by the background worker; the next page
-        shows its progress.
-      </p>
+      <PageHeader
+        title="New request"
+        breadcrumbs={[{ label: "Requests", to: "/requests" }, { label: "New request" }]}
+        description="Paste the request text. It is stored exactly as typed and queued for extraction by the background worker; the next page shows its progress."
+      />
       <Notice kind="info">
         Extraction currently uses a deterministic <strong>test parser</strong>, not an AI model. It understands only this labelled-line
         format and ignores everything else:

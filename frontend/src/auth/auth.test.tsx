@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { apiError, installFakeApi, json, type Handler } from "../test/fakeApi";
 import { RUN_ID, detail, listItem, operator, page } from "../test/fixtures";
 import { renderApp } from "../test/renderApp";
+import { signOut } from "../test/shell";
 import { signedIn, signedOut } from "../test/server";
 
 const listOk: Handler = (call) => {
@@ -120,7 +121,7 @@ describe("login", () => {
     const user = userEvent.setup();
     renderApp("/requests");
     await signIn(user);
-    await user.click(await screen.findByRole("button", { name: "Sign out" }));
+    await signOut(user);
     expect(api.callsTo("POST", "/api/auth/logout/")[0]?.headers["x-csrftoken"]).toBe("after");
   });
 
@@ -197,7 +198,7 @@ describe("logout", () => {
     const api = installFakeApi(signedIn((call) => (call.path === "/api/auth/logout/" ? { status: 204 } : listOk(call))));
     const user = userEvent.setup();
     renderApp("/requests");
-    await user.click(await screen.findByRole("button", { name: "Sign out" }));
+    await signOut(user);
 
     expect(await screen.findByRole("heading", { name: "Sign in" })).toBeInTheDocument();
     expect(api.callsTo("POST", "/api/auth/logout/")).toHaveLength(1);
@@ -208,7 +209,7 @@ describe("logout", () => {
     installFakeApi(signedIn((call) => (call.path === "/api/auth/logout/" ? "network-error" : listOk(call))));
     const user = userEvent.setup();
     renderApp("/requests");
-    await user.click(await screen.findByRole("button", { name: "Sign out" }));
+    await signOut(user);
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/could not sign out/i);
     expect(screen.getByText("synthetic.operator")).toBeInTheDocument();
@@ -218,7 +219,7 @@ describe("logout", () => {
     installFakeApi(signedIn((call) => (call.path === "/api/auth/logout/" ? apiError(403, "not_authenticated") : listOk(call))));
     const user = userEvent.setup();
     renderApp("/requests");
-    await user.click(await screen.findByRole("button", { name: "Sign out" }));
+    await signOut(user);
     expect(await screen.findByRole("heading", { name: "Sign in" })).toBeInTheDocument();
   });
 });

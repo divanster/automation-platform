@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useParams } from "react-router";
+import { useParams } from "react-router";
 
 import type { RequestDetail } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
@@ -8,6 +8,7 @@ import { AUDIT_PERMISSION, AuditHistory } from "../components/AuditHistory";
 import { DraftEditor } from "../components/DraftEditor";
 import { DraftView } from "../components/DraftView";
 import { FindingsList } from "../components/FindingsList";
+import { PageHeader } from "../components/PageHeader";
 import { RejectPanel } from "../components/RejectPanel";
 import { StateBadge } from "../components/StateBadge";
 import { ErrorState, LoadingState, Notice } from "../components/Status";
@@ -74,21 +75,38 @@ function ProcessingPanel({ detail }: { detail: RequestDetail }) {
   );
 }
 
-/** What the server says this user may do, and why other actions are blocked. Informational: the controls are below. */
+const OPERATOR_ACTIONS = ["edit"];
+const APPROVER_ACTIONS = ["approve", "reject"];
+
+/** What the server says this user may do, and why other actions are blocked. Informational: the controls are beside it. */
 function ActionsPanel({ detail }: { detail: RequestDetail }) {
   const blockers = Object.entries(detail.action_blockers);
+  const allowed = detail.allowed_actions;
+  const operator = allowed.filter((a) => OPERATOR_ACTIONS.includes(a));
+  const approver = allowed.filter((a) => APPROVER_ACTIONS.includes(a));
+  const other = allowed.filter((a) => !OPERATOR_ACTIONS.includes(a) && !APPROVER_ACTIONS.includes(a));
+  const groups = [
+    { title: "Operator", className: "role-group role-operator", actions: operator },
+    { title: "Approver", className: "role-group role-approver", actions: approver },
+    { title: "Other", className: "role-group", actions: other },
+  ].filter((group) => group.actions.length > 0);
   return (
     <section className="card" aria-labelledby="actions-title">
       <h2 id="actions-title">Your available actions</h2>
       <p className="muted">Reported by the server for your account and the request as it is now.</p>
-      {detail.allowed_actions.length === 0 ? (
+      {allowed.length === 0 ? (
         <p>None right now.</p>
       ) : (
-        <ul>
-          {detail.allowed_actions.map((action) => (
-            <li key={action}>{ACTION_LABELS[action] ?? action}</li>
-          ))}
-        </ul>
+        groups.map((group) => (
+          <div key={group.title} className={group.className}>
+            <h3>{group.title}</h3>
+            <ul>
+              {group.actions.map((action) => (
+                <li key={action}>{ACTION_LABELS[action] ?? action}</li>
+              ))}
+            </ul>
+          </div>
+        ))
       )}
       {blockers.length > 0 ? (
         <ul className="blockers">
@@ -127,20 +145,21 @@ function DetailBody(props: BodyProps) {
 
   return (
     <>
-      <div className="page-head">
-        <div>
-          <p className="crumbs">
-            <Link to="/requests">Requests</Link> / {detail.reference}
-          </p>
-          <h1>
+      <PageHeader
+        title={
+          <>
             {detail.reference} <StateBadge state={detail.state} />
-          </h1>
-        </div>
-      </div>
+          </>
+        }
+        documentTitle={detail.reference}
+        breadcrumbs={[{ label: "Requests", to: "/requests" }, { label: "Request details" }]}
+      />
 
       {flash ? <Notice kind={flash.kind === "success" ? "info" : flash.kind}>{flash.text}</Notice> : null}
 
-      <dl className="facts card">
+      <div className="detail-layout">
+        <div className="detail-main">
+      <dl className="facts card detail-summary">
         <div>
           <dt>Created</dt>
           <dd>{formatDateTime(detail.created_at)}</dd>
@@ -164,7 +183,14 @@ function DetailBody(props: BodyProps) {
       <ProcessingPanel detail={detail} />
 
       <section className="card" aria-labelledby="revision-title">
-        <h2 id="revision-title">Current revision</h2>
+        <h2 id="revision-title">
+          Current revision
+          {revision ? (
+            <span className="revision-chip" aria-hidden="true">
+              Revision {revision.number}
+            </span>
+          ) : null}
+        </h2>
         {revision ? (
           <dl className="facts">
             <div>
@@ -221,16 +247,25 @@ function DetailBody(props: BodyProps) {
         <h2 id="findings-title">Findings</h2>
         <FindingsList findings={detail.findings} />
       </section>
+        </div>
 
-      <ActionsPanel detail={detail} />
+        <aside className="detail-side" aria-label="Review actions">
+          <ActionsPanel detail={detail} />
 
-      {/* Keyed by the revision (id and hash): an acknowledgement or a reason chosen for one revision is never applied to another. */}
-      {allowed.has("approve") ? (
-        <ApprovePanel key={`approve:${revision?.id}:${revision?.content_hash}`} detail={detail} blocked={editing} onApproved={props.onApproved} onError={props.onActionError} />
-      ) : null}
-      {allowed.has("reject") ? (
-        <RejectPanel key={`reject:${revision?.id}:${revision?.content_hash}`} detail={detail} blocked={editing} onRejected={props.onRejected} onError={props.onActionError} />
-      ) : null}
+          {/* Keyed by the revision (id and hash): an acknowledgement or a reason chosen for one revision is never applied to another. */}
+          {allowed.has("approve") || allowed.has("reject") ? (
+            <div className="decision-group">
+              <h2 className="review-column-title">Approver decision</h2>
+              {allowed.has("approve") ? (
+                <ApprovePanel key={`approve:${revision?.id}:${revision?.content_hash}`} detail={detail} blocked={editing} onApproved={props.onApproved} onError={props.onActionError} />
+              ) : null}
+              {allowed.has("reject") ? (
+                <RejectPanel key={`reject:${revision?.id}:${revision?.content_hash}`} detail={detail} blocked={editing} onRejected={props.onRejected} onError={props.onActionError} />
+              ) : null}
+            </div>
+          ) : null}
+        </aside>
+      </div>
 
       {canSeeAudit ? <AuditHistory runId={detail.run_id} version={auditVersion} /> : null}
     </>
@@ -257,7 +292,7 @@ function LoadedDetail({ runId }: { runId: string }) {
     setAuditVersion((v) => v + 1);
   };
 
-  if (state.status === "loading") return <LoadingState label="Loading request…" />;
+  if (state.status === "loading") return <LoadingState label="Loading request…" skeleton={4} />;
   if (state.status === "error") {
     if (isNotFound(state.error)) return <NotFoundPage />;
     return <ErrorState title="Could not load the request" message={describeError(state.error)} onRetry={reload} />;

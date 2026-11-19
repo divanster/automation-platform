@@ -3,6 +3,7 @@ import { Navigate, useLocation, useNavigate } from "react-router";
 
 import { useAuth } from "../auth/AuthContext";
 import { ErrorState, LoadingState, Notice } from "../components/Status";
+import { Icon } from "../components/ui/Icon";
 import { describeError } from "../lib/errors";
 
 /** Only in-app paths are honoured as a post-login destination. */
@@ -46,8 +47,14 @@ export function LoginPage() {
   return (
     <main className="login-page">
       <form className="card login-card" onSubmit={onSubmit} aria-labelledby="login-title">
+        <div className="login-brand">
+          <span className="brand-mark" aria-hidden="true">
+            <Icon name="bolt" />
+          </span>
+          <span>Automation Platform</span>
+        </div>
         <h1 id="login-title">Sign in</h1>
-        <p className="muted">Automation Platform</p>
+        <p className="muted">Enter your username and password.</p>
         {state.notice ? <Notice kind="warning">{state.notice}</Notice> : null}
         {error ? <Notice kind="error">{error}</Notice> : null}
         <label>

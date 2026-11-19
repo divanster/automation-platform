@@ -48,7 +48,7 @@ describe("approval is offered only when the server allows it", () => {
     renderApp(`/requests/${RUN_ID}`);
     await screen.findByRole("heading", { name: /REQ-20260101-AAAA0001/ });
     expect(api.calls.filter((c) => c.method === "POST")).toHaveLength(0);
-    expect(screen.queryByRole("button", { name: /approve|reject|edit draft/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^(approve|reject|edit draft)/i })).not.toBeInTheDocument();
   });
 });
 
