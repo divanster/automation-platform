@@ -1,27 +1,21 @@
 import { Link } from "react-router";
 
-import { RUN_STATES, type RunState } from "../api/types";
+import { getDashboardSummary } from "../api/dashboard";
+import { RUN_STATES, type DashboardSummary, type RunState } from "../api/types";
 import { useAuth } from "../auth/AuthContext";
 import { LiveStatus } from "../components/LiveStatus";
 import { PageHeader } from "../components/PageHeader";
 import { StateBadge } from "../components/StateBadge";
-import { EmptyState, ErrorState, LoadingState, Notice } from "../components/Status";
+import { EmptyState, ErrorState, LoadingState } from "../components/Status";
 import { Icon } from "../components/ui/Icon";
 import { Skeleton } from "../components/ui/Skeleton";
-import {
-  RECENT_LIMIT,
-  countsDisagree,
-  loadDashboard,
-  metricCount,
-  type Count,
-  type DashboardSnapshot,
-  type MetricId,
-} from "../lib/dashboardData";
 import { describeError, isPermissionError } from "../lib/errors";
 import { formatDateTime, stateLabel } from "../lib/format";
 import { DASHBOARD_POLL_MS } from "../lib/liveIntervals";
 import { canViewRequests, seesAllRequests } from "../lib/permissions";
 import { useLiveResource } from "../lib/useLiveResource";
+
+type MetricId = "total" | "processing" | "needs_review" | "approved" | "failed";
 
 interface Metric {
   id: MetricId;
@@ -39,18 +33,13 @@ const METRICS: readonly Metric[] = [
   { id: "failed", label: "Failed", caption: "Processing did not finish", to: "/requests?state=failed" },
 ];
 
-const UNAVAILABLE_TEXT = "Unavailable";
-const UNAVAILABLE_HINT = "The server did not return this figure. It is not zero.";
+const formatCount = (count: number) => new Intl.NumberFormat().format(count);
 
-const formatCount = (count: Count) => (count.available ? new Intl.NumberFormat().format(count.value) : UNAVAILABLE_TEXT);
-
-function MetricCard({ metric, count }: { metric: Metric; count: Count }) {
+function MetricCard({ metric, count }: { metric: Metric; count: number }) {
   const body = (
     <>
       <span className="metric-label">{metric.label}</span>
-      <span className="metric-value" data-available={count.available} title={count.available ? undefined : UNAVAILABLE_HINT}>
-        {formatCount(count)}
-      </span>
+      <span className="metric-value">{formatCount(count)}</span>
       <span className="metric-caption">{metric.caption}</span>
     </>
   );
@@ -84,13 +73,13 @@ function MetricSkeletons() {
 }
 
 /** A plain-text summary for assistive technology. It sits in a live region, so it is announced only when a figure changes. */
-function summarize(snapshot: DashboardSnapshot): string {
-  const parts = METRICS.map((metric) => `${metric.label}: ${formatCount(metricCount(snapshot, metric.id))}`);
+function summarize(summary: DashboardSummary): string {
+  const parts = METRICS.map((metric) => `${metric.label}: ${formatCount(summary[metric.id])}`);
   return `Dashboard figures. ${parts.join(". ")}.`;
 }
 
-function Distribution({ snapshot }: { snapshot: DashboardSnapshot }) {
-  const total = snapshot.total;
+function Distribution({ summary }: { summary: DashboardSummary }) {
+  const { total } = summary;
   return (
     <section className="card" aria-labelledby="dash-distribution">
       <div className="section-head">
@@ -98,9 +87,9 @@ function Distribution({ snapshot }: { snapshot: DashboardSnapshot }) {
       </div>
       <ul className="distribution">
         {RUN_STATES.map((state: RunState) => {
-          const count = snapshot.byState[state];
-          // A share is only meaningful against a known total; without one only the exact count is shown.
-          const share = count.available && total.available && total.value > 0 ? Math.min(100, (count.value / total.value) * 100) : null;
+          const count = summary.by_state[state];
+          // A share is only meaningful against a total above zero.
+          const share = total > 0 ? Math.min(100, (count / total) * 100) : null;
           return (
             <li key={state}>
               <Link className="distribution-row" to={`/requests?state=${state}`}>
@@ -113,7 +102,7 @@ function Distribution({ snapshot }: { snapshot: DashboardSnapshot }) {
                 <span className="distribution-bar" aria-hidden="true">
                   {share !== null ? <span className="distribution-fill" style={{ width: `${share}%` }} /> : null}
                 </span>
-                <span className="distribution-count" data-available={count.available} title={count.available ? undefined : UNAVAILABLE_HINT}>
+                <span className="distribution-count">
                   {formatCount(count)}
                   {share !== null ? <span className="muted"> ({Math.round(share)}%)</span> : null}
                 </span>
@@ -122,26 +111,18 @@ function Distribution({ snapshot }: { snapshot: DashboardSnapshot }) {
           );
         })}
       </ul>
-      {countsDisagree(snapshot) ? (
-        <p className="muted small" data-testid="counts-disagree">
-          The figures were read a moment apart and a request changed state in between, so they may differ by a little. They correct themselves on the next
-          refresh.
-        </p>
-      ) : null}
     </section>
   );
 }
 
-function RecentRequests({ recent, canSubmit }: { recent: DashboardSnapshot["recent"]; canSubmit: boolean }) {
+function RecentRequests({ recent, canSubmit }: { recent: DashboardSummary["recent_requests"]; canSubmit: boolean }) {
   return (
     <section className="card" aria-labelledby="dash-recent">
       <div className="section-head">
         <h2 id="dash-recent">Recent requests</h2>
         <Link to="/requests">View all</Link>
       </div>
-      {recent === null ? (
-        <Notice kind="warning">Recent requests could not be loaded. They are retried automatically.</Notice>
-      ) : recent.length === 0 ? (
+      {recent.length === 0 ? (
         <EmptyState
           icon="inbox"
           title="Nothing here yet"
@@ -159,7 +140,7 @@ function RecentRequests({ recent, canSubmit }: { recent: DashboardSnapshot["rece
       ) : (
         <div className="table-wrap">
           <table className="requests-table">
-            <caption className="sr-only">The {RECENT_LIMIT} newest requests</caption>
+            <caption className="sr-only">The {recent.length} newest requests</caption>
             <thead>
               <tr>
                 <th scope="col">Reference</th>
@@ -232,7 +213,7 @@ function QuickActions({ canSubmit }: { canSubmit: boolean }) {
 
 function DashboardContent() {
   const { can } = useAuth();
-  const { state: result, reload, refreshing, refreshError, lastUpdated } = useLiveResource(loadDashboard, [], {
+  const { state: result, reload, refreshing, refreshError, lastUpdated } = useLiveResource(getDashboardSummary, [], {
     interval: () => DASHBOARD_POLL_MS,
   });
   const canSubmit = can("intake.submit_request");
@@ -278,17 +259,17 @@ function DashboardContent() {
             </h2>
             <ul className="metric-grid">
               {METRICS.map((metric) => (
-                <MetricCard key={metric.id} metric={metric} count={metricCount(result.data, metric.id)} />
+                <MetricCard key={metric.id} metric={metric} count={result.data[metric.id]} />
               ))}
             </ul>
           </section>
           <div className="dashboard-columns">
             <div className="dashboard-main">
-              <RecentRequests recent={result.data.recent} canSubmit={canSubmit} />
+              <RecentRequests recent={result.data.recent_requests} canSubmit={canSubmit} />
             </div>
             <div className="dashboard-side">
               <QuickActions canSubmit={canSubmit} />
-              <Distribution snapshot={result.data} />
+              <Distribution summary={result.data} />
             </div>
           </div>
         </>

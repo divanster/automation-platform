@@ -730,7 +730,7 @@ the concurrency test (two threads, each with its own connection), the module-dis
 ## 5.7 Dashboard summary API (BE-DASH-1): checks and PostgreSQL validation
 
 Backend only: `GET /api/dashboard/summary/` (contract, permissions and query strategy in `rest-api-slice.md` section 18). No model, migration or
-dependency change; the frontend is not integrated, so the dashboard still makes nine list requests. **Status: the DB-free tests pass in the
+dependency change; the frontend now uses it (FE-DASH-2, `frontend-slice.md` section 18), so the dashboard makes one request per refresh. **Status: the DB-free tests pass in the
 development VM; the PostgreSQL tests are written and have NOT been run by anyone.** Nothing below is evidence until you report a run.
 
 ```powershell

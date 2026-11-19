@@ -124,7 +124,7 @@ The session is Django's HttpOnly cookie. JavaScript never sees it, and nothing i
 | --- | --- | --- |
 | `/login` | `LoginPage` | `GET /api/auth/csrf/`, `POST /api/auth/login/` |
 | `/` | redirect: `/dashboard` for a user with `intake.view_own_request` or `intake.view_any_request`, else `/requests` (FE-6) | |
-| `/dashboard` | `DashboardPage` (FE-6, section 16) | `GET /api/requests/` ×9 per refresh, polled |
+| `/dashboard` | `DashboardPage` (FE-6, section 16; FE-DASH-2, section 18) | `GET /api/dashboard/summary/` ×1 per refresh, polled |
 | `/requests` | `RequestsPage` (table, state badges, filter, pagination; `?page=` and `?state=` in the URL) | `GET /api/requests/?page&page_size=20&state` |
 | `/requests/new` | `NewRequestPage` | `POST /api/requests/` with `{text, client_request_id}` |
 | `/requests/:runId` | `RequestDetailPage` | `GET /api/requests/{run_id}/` (polled) |
@@ -674,8 +674,12 @@ updated for the new intervals. The full run was 17 files, 328 tests passed, with
 
 ## 16. FE-6: dashboard
 
+> **Superseded in part by FE-DASH-2 (section 18).** Sections 16.1 and 16.2 describe the FE-6 data layer (nine `GET /api/requests/`
+> requests per refresh, `lib/dashboardData.ts`), which no longer exists: the dashboard now sends one `GET /api/dashboard/summary/`
+> request. They are kept as the record of what FE-6 was; the UI (16.3), polling model (16.4) and permissions (16.5) still hold.
+
 Frontend only. No backend, API, payload, migration or dependency change, and no Workbench request. The dashboard is a new
-screen inside the existing app shell (`pages/DashboardPage.tsx`, `lib/dashboardData.ts`, `lib/permissions.ts`); it reuses
+screen inside the existing app shell (`pages/DashboardPage.tsx`, `lib/dashboardData.ts` (removed in FE-DASH-2), `lib/permissions.ts`); it reuses
 `useLiveResource`, `LiveStatus`, `PageHeader`, `StateBadge`, the status components and the FE-4 styles.
 
 ### 16.1 Data sources (only `GET /api/requests/`)
@@ -767,20 +771,19 @@ page, the Refresh button, navigation from cards, quick actions and the sidebar, 
 
 - **Not seen in a real browser.** No owner validation is recorded for FE-6; visual layout, dark theme and the 10 s refresh against a real
   Django, PostgreSQL and worker are untested.
-- No history or trend, and no counts by period. A server-side summary endpoint now exists (BE-DASH-1, section 17) but the dashboard
-  does not use it yet: it still sends the nine requests described above until the frontend integration slice.
+- No history or trend, and no counts by period. The server-side summary endpoint (BE-DASH-1, section 17) is now used (FE-DASH-2, section 18).
 - No AI usage, cost, worker or provider-health figures: the API has no endpoint for any of them, so none are shown.
 - "Approved" excludes `exporting` and `exported`; no export exists yet, so both are expected to be 0.
 - No stale-while-error indication per figure: a figure whose refresh failed shows "Unavailable" until the next success.
 - A superuser whose profile lists no view permission lands on `/requests` as before.
 - FE-7, AI Settings and document upload are not part of this slice.
 
-## 17. BE-DASH-1: dashboard summary endpoint (backend only; the frontend is NOT integrated)
+## 17. BE-DASH-1: dashboard summary endpoint (backend only; the frontend was integrated later, in FE-DASH-2, section 18)
 
 `GET /api/dashboard/summary/` was added so that a later frontend slice can replace the nine requests of section 16.1 with one. **This
-slice changes no frontend file**: the dashboard still sends nine `GET /api/requests/` requests per refresh, and the cost in 16.2 is
-unchanged until that integration. The endpoint's contract, permission rules, query strategy and tests are in
-`rest-api-slice.md` section 18; this section records what the frontend will have to do with it.
+slice changes no frontend file**: at that point the dashboard still sent nine `GET /api/requests/` requests per refresh, and the cost in
+16.2 was unchanged until FE-DASH-2. The endpoint's contract, permission rules, query strategy and tests are in
+`rest-api-slice.md` section 18; this section records what the frontend had to do with it.
 
 - **Mapping.** `total`, `needs_review`, `approved` and `failed` are the figures of the same names; `processing` is queued + extracting
   + exporting, computed by the server from the same grouped result (the frontend's `PROCESSING_STATES` and the server's
@@ -791,4 +794,78 @@ unchanged until that integration. The endpoint's contract, permission rules, que
   becomes unnecessary for them. The recent list is a second statement and can be a moment newer than the counts.
 - **Failure.** One request means one error state: there is no longer a per-figure "Unavailable". A 403 means the user has no view
   permission, exactly as for the list.
-- **Not done here:** the frontend change, a polling-interval review, and removal of `dashboardData.ts`'s nine-request path.
+- **Not done here:** the frontend change (done in section 18), a polling-interval review, and removal of `dashboardData.ts`'s nine-request path (done in section 18).
+
+## 18. FE-DASH-2: the dashboard uses the summary endpoint
+
+Frontend only. No backend, API, payload, migration or dependency change, no Workbench request. **Status: development-validated in jsdom
+with `fetch` stubbed; NOT seen in a real browser and NOT run against the real Django, PostgreSQL and worker.**
+
+### 18.1 What changed
+
+- **New client** `api/dashboard.ts` (`getDashboardSummary(signal)`): one `GET /api/dashboard/summary/` through the existing `request()`
+  in `api/http.ts` (same-origin, session cookie, `cache: no-store`, the 403 `not_authenticated` handling and the abort signal; GET sends
+  no CSRF header, as for every safe request). It takes no query parameters. Type `DashboardSummary` in `api/types.ts`.
+- **Contract, checked and not invented** against `backend/apps/api/serializers.py` (`DashboardSummaryOutput`) and
+  `apps/intake/queries.py`: `total`, `processing`, `needs_review`, `approved`, `failed` (non-negative integers), `by_state` (exactly the
+  eight run states, each a non-negative integer) and `recent_requests` (the `RequestListItem` shape, newest first). A body that does not
+  match (missing or negative count, a missing or extra state key, a row the dashboard cannot render, not JSON) is an
+  `unexpected_response` error, never zeros. The client does **not** check that `total` equals the sum of `by_state`: that is the server's
+  invariant (one grouped query) and checking it would be a second calculation.
+- **Removed** `lib/dashboardData.ts` and the nine-request aggregation, `Promise.allSettled`, the per-figure "Unavailable" state, the
+  derived Processing sum and the "counts disagree" note. The page shows the server's numbers as sent (`total`, `processing`, ... and
+  `by_state` for the distribution). The only arithmetic left is display: a distribution row's share is `by_state[state] / total`.
+- `DashboardPage.tsx` otherwise unchanged: KPI cards and links, Recent requests, Status distribution, Quick actions, loading skeleton,
+  error state, scope sentence, themes and layout. The recent table's hidden caption now says "The N newest requests" with N the number of
+  rows sent (the page no longer holds a copy of the server's limit of five). The `data-available` CSS rules in `styles/pages.css` were
+  dead after this and are removed.
+
+### 18.2 Request count
+
+| | Before (FE-6) | After (FE-DASH-2) |
+|---|---|---|
+| HTTP requests per refresh | 9 (`GET /api/requests/` once unfiltered, plus once per run state) | 1 (`GET /api/dashboard/summary/`) |
+| Requests per minute per open tab at 10 s | 54 | 6 |
+| Database work per refresh (server) | nine requests, each with its own count query (plus a page query) | one request: one grouped aggregate and one limited list query |
+
+The server-side figures are from `apps/intake/queries.py` (BE-DASH-1); load has still not been measured.
+
+### 18.3 Polling (unchanged hook, one request per cycle)
+
+`useLiveResource(getDashboardSummary, [], { interval: () => DASHBOARD_POLL_MS })` with `DASHBOARD_POLL_MS = 10000`, the FE-5 hook
+(section 15.1): the next refresh is scheduled only after the previous one finishes (no overlap, no duplicate); no timer while the tab is
+hidden and none starts when the page is opened in a hidden tab; one immediate refresh when the tab becomes visible; the request in flight
+is aborted on a manual refresh, route change, logout and unmount, and its late answer is ignored; nothing is requested while signed out;
+a failed refresh keeps the last good data and shows the quiet "Could not refresh" note with back-off (429, 5xx, no connection, garbled
+answer are retried; a 403 is not). The Refresh button refreshes at once. The 10 s interval was not changed.
+
+### 18.4 Behaviour that changed on purpose
+
+- A failure is now all-or-nothing: there is one request, so one error state (first load) or one "Could not refresh" note with the last
+  good figures kept (later). A single figure can no longer be "Unavailable" while the others show.
+- The "counts disagree" note is gone for the counts: `total` is the sum of `by_state` by construction. The recent list is a second
+  server statement and can be a moment newer than the counts; the next refresh corrects it.
+- A 403 `permission_denied` on first load shows "Not available for your account" with no retry, as before.
+
+### 18.5 Tests (development VM, jsdom, `fetch` stubbed, fake timers)
+
+`pages/DashboardPage.test.tsx` was rewritten (61 tests): the exact summary request (method, path, no query, same-origin credentials, no
+CSRF header, no list request), the response contract (accepted body returned unchanged; refusal of 14 malformed shapes and a non-JSON
+body), the server's figures shown as sent (including numbers the browser could not derive), zeros and the empty system, distribution
+shares, card links and accessible names, recent requests (order, links, Review shortcut, five rows, empty states with and without
+`intake.submit_request`), loading, 500, 403, network failure, malformed answer, an ended session, one request on open, one per 10 s cycle,
+refresh in place, no overlap, quiet failure with last good data for 500, network failure and 403, hidden-tab pause and visible resume,
+a hidden first load, abort on logout and on leaving the page, the Refresh button, and the existing navigation and routes.
+`auth/auth.test.tsx`'s shared stub gained a summary response so the landing dashboard still renders there. Result: 18 files, 389 tests
+passed; `npm run typecheck`, `npm run build` and `git diff --check` clean. No backend file was touched or run in this slice.
+
+### 18.6 Remaining limitations
+
+- **Not seen in a real browser**, and not run against the real endpoint: the contract was checked by reading the backend serializer and
+  query code, not by a live call. Owner browser review is the next step.
+- The strict body check means a backend that adds a run state or a `by_state` key makes the dashboard show an error until the frontend
+  (`RUN_STATES` in `api/types.ts`) is updated; `backend/tests/test_frontend_contract.py` already pins the state list.
+- Polling is still per open tab (each open dashboard counts against the per-user API ceiling of 600 requests a minute, now 6 instead of
+  54); the 10 s interval is provisional and unmeasured.
+- Everything in 16.7 other than the endpoint use still applies (no history, no AI or worker figures, "Approved" excludes `exporting` and
+  `exported`).

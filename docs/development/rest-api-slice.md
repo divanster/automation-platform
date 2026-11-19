@@ -455,7 +455,7 @@ React UI and any browser client; real AI; export execution; file upload and docu
 ## 18. BE-DASH-1: dashboard summary endpoint
 
 `GET /api/dashboard/summary/`: one authenticated read that returns what the FE-6 dashboard currently assembles from nine `GET /api/requests/`
-calls. Backend only; the frontend is not integrated (see `frontend-slice.md` section 17). No model, migration, index or dependency change.
+calls. Backend only; the frontend uses it since FE-DASH-2 (see `frontend-slice.md` sections 17 and 18). No model, migration, index or dependency change.
 
 ### 18.1 Contract
 
