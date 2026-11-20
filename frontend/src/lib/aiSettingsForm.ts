@@ -5,11 +5,12 @@
 // documents; the backend validates again and decides. A server answer for a field is shown the same way as a local one,
 // because both use the server's field paths (`connections[0].profiles[1].model_id`) and its stable error codes.
 //
-// SECRETS. A connection holds `credential_ref`, the NAME of a backend environment variable. This module never builds a
-// field for a key, token, password or header, and refuses a reference that is not shaped like a variable name, so a pasted
-// key is not sent. A refused value is never echoed into a message.
+// SECRETS. A connection holds `credential_ref`, the NAME of a credential (a backend environment variable, or a managed credential,
+// as `credential_source` says). This module never builds a field for a key, token, password or header, and refuses a reference
+// that is not shaped like a name, so a pasted key is not sent. A secret VALUE is never part of the draft or of the PUT body: it is
+// entered in the separate credentials panel and sent only to /api/ai-credentials/. A refused value is never echoed into a message.
 
-import type { AiCatalog, AiConnectionFields, AiProfileRef, AiProviderStatus, AiProviderType, AiSettings, AiSettingsUpdate } from "../api/types";
+import type { AiCatalog, AiConnectionFields, AiProfileRef, AiProviderStatus, AiProviderType, AiSettings, AiSettingsUpdate, CredentialSource } from "../api/types";
 import { describeFieldCode } from "./errors";
 
 /** Mirrors the backend's MAX_CONNECTIONS and MAX_PROFILES_PER_CONNECTION (apps/ai_settings/rules.py). */
@@ -42,6 +43,7 @@ export interface ConnectionDraft {
   locality: string;
   endpoint: string;
   credential_ref: string;
+  credential_source: CredentialSource;
   enabled: boolean;
   profiles: AiProfileRef[];
 }
@@ -73,6 +75,7 @@ export function draftConnection(connection: AiConnectionFields): ConnectionDraft
     locality: connection.locality,
     endpoint: connection.endpoint ?? "",
     credential_ref: connection.credential_ref ?? "",
+    credential_source: connection.credential_source,
     enabled: connection.enabled,
     profiles: connection.profiles.map((p) => ({ profile_id: p.profile_id, model_id: p.model_id })),
   };
@@ -89,6 +92,7 @@ export function emptyConnection(catalog: AiCatalog): ConnectionDraft {
     locality: type?.localities[0] ?? "",
     endpoint: "",
     credential_ref: "",
+    credential_source: "environment",
     enabled: true,
     profiles: [],
   };
@@ -96,7 +100,7 @@ export function emptyConnection(catalog: AiCatalog): ConnectionDraft {
 
 /** Changing the provider type invalidates everything that depends on it, so those fields start again. */
 export function withProviderType(draft: ConnectionDraft, type: AiProviderType): ConnectionDraft {
-  return { ...draft, provider_type: type.provider_type, locality: type.localities[0] ?? "", endpoint: "", credential_ref: "", profiles: [] };
+  return { ...draft, provider_type: type.provider_type, locality: type.localities[0] ?? "", endpoint: "", credential_ref: "", credential_source: "environment", profiles: [] };
 }
 
 export function draftFromSettings(data: AiSettings): SettingsDraft {
@@ -166,6 +170,7 @@ export function connectionFields(draft: ConnectionDraft, catalog: AiCatalog): Ai
     locality: draft.locality,
     endpoint: type?.needs_endpoint && endpoint !== "" ? endpoint : null,
     credential_ref: type && type.credential !== "none" && ref !== "" ? ref : null,
+    credential_source: type && type.credential !== "none" ? draft.credential_source : "environment",
     enabled: draft.enabled,
     profiles: draft.profiles.map((p) => ({ profile_id: p.profile_id.trim(), model_id: p.model_id.trim() })),
   };
@@ -179,6 +184,7 @@ function fieldsOfStored(connection: AiConnectionFields): AiConnectionFields {
     locality: connection.locality,
     endpoint: connection.endpoint,
     credential_ref: connection.credential_ref,
+    credential_source: connection.credential_source,
     enabled: connection.enabled,
     profiles: connection.profiles.map((p) => ({ profile_id: p.profile_id, model_id: p.model_id })),
   };
@@ -261,7 +267,7 @@ function validateConnection(problems: Problems, draft: ConnectionDraft, index: n
   const ref = draft.credential_ref.trim();
   if (type.credential !== "none") {
     if (ref !== "" && !isCredentialRef(ref, catalog.credential_ref_prefix)) add(problems, at("credential_ref"), "invalid_credential_reference");
-    else if (ref === "" && type.credential === "required_unless_local" && draft.locality !== "local") add(problems, at("credential_ref"), "required");
+    else if (ref === "" && (draft.credential_source === "managed" || (type.credential === "required_unless_local" && draft.locality !== "local"))) add(problems, at("credential_ref"), "required");
   }
 
   if (fields.profiles.length === 0) add(problems, at("profiles"), "required");
@@ -326,7 +332,7 @@ const CODE_TEXT: Record<string, string> = {
   invalid_value: "This value is not valid.",
   invalid_type: "This value is not valid.",
   invalid_choice: "Choose one of the listed options.",
-  invalid_credential_reference: "Enter only the NAME of a backend environment variable, starting with the prefix shown. Never enter a key or password here.",
+  invalid_credential_reference: "Enter only the NAME of a credential, starting with the prefix shown. Never enter a key or password here.",
   duplicate_connection_id: "Another connection already uses this identifier.",
   duplicate_profile_id: "Another profile of this connection already uses this identifier.",
   too_many: "There are too many.",
@@ -381,9 +387,15 @@ const ISSUE_TEXT: Record<string, string> = {
   endpoint_not_approved: "The endpoint is not in the operator's approved list.",
 };
 
-export function describeStatus(status: AiProviderStatus): { ok: boolean; label: string; detail: string | null } {
+const MANAGED_ISSUE_TEXT: Record<string, string> = {
+  missing_api_key: "The managed credential is not stored, or the secret store cannot supply it. Store it under Managed credentials below.",
+};
+
+/** `source` matters only for `missing_api_key`: the sentence differs for an environment variable and a managed credential. */
+export function describeStatus(status: AiProviderStatus, source: CredentialSource = "environment"): { ok: boolean; label: string; detail: string | null } {
   if (status.configured) return { ok: true, label: "Configured", detail: null };
-  return { ok: false, label: "Not configured", detail: status.issue ? (ISSUE_TEXT[status.issue] ?? `The configuration is not usable (${status.issue}).`) : "The configuration is not usable." };
+  const table = source === "managed" ? { ...ISSUE_TEXT, ...MANAGED_ISSUE_TEXT } : ISSUE_TEXT;
+  return { ok: false, label: "Not configured", detail: status.issue ? (table[status.issue] ?? `The configuration is not usable (${status.issue}).`) : "The configuration is not usable." };
 }
 
 export function providerTypeLabel(catalog: AiCatalog, providerType: string): string {

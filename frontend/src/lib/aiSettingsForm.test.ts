@@ -1,18 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import { SECRET_SENTINEL, catalog, connection, ollama, settings, withSelection } from "../test/aiSettings";
+import { SECRET_SENTINEL, catalog, connection, managedConnection, ollama, settings, withSelection } from "../test/aiSettings";
 import {
   buildUpdate,
   connectionSource,
   connectionsChanged,
   describeSettingsCode,
+  describeStatus,
   draftConnection,
   draftFromSettings,
+  emptyConnection,
   isCredentialRef,
   isDirty,
   parseConnectionPath,
   rebaseDraft,
   validateDraft,
+  withProviderType,
 } from "./aiSettingsForm";
 
 describe("isCredentialRef", () => {
@@ -69,6 +72,47 @@ describe("the draft and the update body", () => {
     const mine = draftFromSettings(previous);
     const edited = { ...mine, connections: mine.connections.slice(0, 1) };
     expect(rebaseDraft(edited, previous, latest).connections.map((c) => c.connection_id)).toEqual(["corp-llm"]);
+  });
+});
+
+describe("the credential source", () => {
+  it("is carried from the stored connection into the draft and the body, and a change of it is a change of the list", () => {
+    const data = withSelection({ connections: [managedConnection(), ollama()] });
+    const draft = draftFromSettings(data);
+    expect(draft.connections[0]!.credential_source).toBe("managed");
+    expect(connectionsChanged(draft, data)).toBe(false);
+    const switched = { ...draft, connections: draft.connections.map((c, i) => (i === 0 ? { ...c, credential_source: "environment" as const } : c)) };
+    expect(connectionsChanged(switched, data)).toBe(true);
+    expect(buildUpdate(switched, data).connections?.[0]?.credential_source).toBe("environment");
+  });
+
+  it("is always environment for a provider type that takes no credential", () => {
+    const data = settings();
+    const added = { ...draftConnection(ollama()), credential_source: "managed" as const };
+    expect(buildUpdate({ ...draftFromSettings(data), connections: [added] }, data).connections?.[0]?.credential_source).toBe("environment");
+  });
+
+  it("starts as environment for a new connection and again when the provider type changes", () => {
+    const fresh = emptyConnection(catalog());
+    expect(fresh.credential_source).toBe("environment");
+    const type = catalog().provider_types[1]!;
+    expect(withProviderType({ ...fresh, credential_source: "managed" }, type).credential_source).toBe("environment");
+  });
+
+  it("requires a reference when managed, even for a local endpoint, and never puts a value into the body", () => {
+    const data = settings();
+    const local = { ...draftConnection(connection({ locality: "local", credential_ref: null })), credential_source: "managed" as const };
+    expect(validateDraft({ ...draftFromSettings(data), connections: [local] }, data.catalog)["connections[0].credential_ref"]).toEqual(["required"]);
+    const named = { ...local, credential_ref: "AP_AI_CRED_X" };
+    expect(validateDraft({ ...draftFromSettings(data), connections: [named] }, data.catalog)["connections[0].credential_ref"]).toBeUndefined();
+    expect(JSON.stringify(buildUpdate({ ...draftFromSettings(data), connections: [named] }, data))).not.toMatch(/"(value|secret|password|token)"/);
+  });
+
+  it("words a missing key for a managed connection differently from an environment variable", () => {
+    const status = { configured: false, issue: "missing_api_key" };
+    expect(describeStatus(status).detail).toMatch(/variable is not set/);
+    expect(describeStatus(status, "managed").detail).toMatch(/managed credential is not stored/);
+    expect(describeStatus({ configured: false, issue: "invalid_configuration" }, "managed").detail).toMatch(/not valid/);
   });
 });
 

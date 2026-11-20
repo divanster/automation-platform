@@ -1,5 +1,10 @@
 /* AI settings page (AI-SET-3). Tokens only; no colour or size is defined here that the design system does not already have. */
 
+.ai-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
 .ai-settings {
   display: flex;
   flex-direction: column;
@@ -152,6 +157,25 @@
 }
 .save-meta {
   margin: var(--space-2) 0 0;
+}
+.credentials-panel .credential-form {
+  margin-top: var(--space-3);
+  padding: var(--space-4);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+.credentials-panel .credential-form h3 {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-lg);
+}
+.credentials-panel .credential-add {
+  margin-top: var(--space-4);
+}
+.credential-row h3 {
+  margin: 0;
+  font-size: var(--text-lg);
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 640px) {

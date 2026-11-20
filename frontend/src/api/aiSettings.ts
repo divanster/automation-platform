@@ -1,7 +1,7 @@
 // The AI settings endpoint (backend/apps/api/views_ai_settings.py): GET and PUT /api/ai-settings/extraction/.
 // Administrator only; the server decides, and answers 403 `permission_denied` to anyone else.
 //
-// SECRETS. The API has no credential field and this client never adds one. The answer is also copied field by field
+// SECRETS. The API has no credential VALUE field and this client never adds one (secrets go only through aiCredentials.ts). The answer is also copied field by field
 // into new objects (`parse*` below): a field the contract does not list is dropped here and can never reach the screen,
 // whatever a server (or a proxy in between) sent.
 
@@ -17,6 +17,7 @@ import type {
   AiSettings,
   AiSettingsUpdate,
   AiSettingsValues,
+  CredentialSource,
 } from "./types";
 
 const PATH = "/api/ai-settings/extraction/";
@@ -59,6 +60,11 @@ function list<T>(value: unknown, item: (entry: unknown) => T): T[] {
 }
 function strings(value: unknown): string[] {
   return list(value, str);
+}
+
+function credentialSource(value: unknown): CredentialSource {
+  if (value !== "environment" && value !== "managed") throw unexpected();
+  return value;
 }
 
 function parseStatus(value: unknown): AiProviderStatus {
@@ -109,6 +115,7 @@ function parseConnection(value: unknown): AiConnection {
     locality: str(v.locality),
     endpoint: strOrNull(v.endpoint),
     credential_ref: strOrNull(v.credential_ref),
+    credential_source: credentialSource(v.credential_source),
     enabled: bool(v.enabled),
     profiles: list(v.profiles, parseProfileRef),
     status: parseStatus(v.status),

@@ -1,6 +1,6 @@
 // TEST ONLY: synthetic AI settings. Every value is made up; no endpoint resolves and no secret exists anywhere in it.
 
-import type { AiCatalog, AiConnection, AiSettings, Profile } from "../api/types";
+import type { AiCatalog, AiConnection, AiCredentialStatus, AiSettings, Profile } from "../api/types";
 import { apiError, json, type Handler, type RecordedCall } from "./fakeApi";
 import { operator } from "./fixtures";
 
@@ -54,6 +54,7 @@ export function connection(overrides: Partial<AiConnection> = {}): AiConnection 
     locality: "company_endpoint",
     endpoint: "https://llm.corp.example.invalid/v1",
     credential_ref: "AP_AI_CRED_CORP_LLM",
+    credential_source: "environment",
     enabled: true,
     profiles: [{ profile_id: "corp-small", model_id: "corp-model-8b" }],
     status: { configured: true, issue: null },
@@ -99,6 +100,66 @@ export function withSelection(overrides: Partial<AiSettings> = {}): AiSettings {
 }
 
 export const SETTINGS_PATH = "/api/ai-settings/extraction/";
+
+// --- managed credentials (TEST ONLY: no secret value is ever stored by the stand-in; only whether one "exists") ---
+
+export const CREDENTIALS_PATH = "/api/ai-credentials/";
+
+export function credentialStatus(reference: string, status: AiCredentialStatus["status"], connections: string[] = []): AiCredentialStatus {
+  return { reference, source: "managed", status, store: "dpapi_windows", connections, apply: "worker_restart_required" };
+}
+
+/** A connection that reads the managed credential `reference`. */
+export function managedConnection(overrides: Partial<AiConnection> = {}): AiConnection {
+  return connection({ credential_source: "managed", credential_ref: "AP_AI_CRED_CORP_LLM", ...overrides });
+}
+
+/**
+ * A stateful stand-in for /api/ai-credentials/ that follows the backend's rules: create refuses an existing reference (409), replace and
+ * delete refuse a missing one (404), delete is refused while a stored connection reads it (409 `credential_in_use`).
+ * `readers(reference)` names the stored connections that read it; `onChange` lets a test react to a stored change.
+ */
+export function credentialServer(
+  initial: Record<string, "set" | "unreadable">,
+  options: { readers?: (reference: string) => string[]; onChange?: (reference: string, action: "create" | "replace" | "delete") => void; fail?: (call: RecordedCall) => ReturnType<Handler> | undefined } = {},
+) {
+  const stored = new Map<string, "set" | "unreadable">(Object.entries(initial));
+  const readers = (reference: string) => options.readers?.(reference) ?? [];
+  const handler: Handler = (call) => {
+    if (!call.path.startsWith(CREDENTIALS_PATH)) return apiError(404, "not_found");
+    const injected = options.fail?.(call);
+    if (injected !== undefined) return injected;
+    if (call.path === CREDENTIALS_PATH) {
+      if (call.method !== "POST") return apiError(405, "method_not_allowed");
+      const { reference } = call.body as { reference: string };
+      if (stored.has(reference)) return apiError(409, "credential_already_exists");
+      stored.set(reference, "set");
+      options.onChange?.(reference, "create");
+      return json(201, credentialStatus(reference, "set", readers(reference)));
+    }
+    const reference = decodeURIComponent(call.path.slice(CREDENTIALS_PATH.length).replace(/\/$/, ""));
+    if (call.method === "GET") return json(200, credentialStatus(reference, stored.get(reference) ?? "not_set", readers(reference)));
+    if (!stored.has(reference)) return apiError(404, "credential_not_found");
+    if (call.method === "PUT") {
+      stored.set(reference, "set");
+      options.onChange?.(reference, "replace");
+      return json(200, credentialStatus(reference, "set", readers(reference)));
+    }
+    if (call.method === "DELETE") {
+      if (readers(reference).length > 0) return apiError(409, "credential_in_use", { connections: readers(reference) });
+      stored.delete(reference);
+      options.onChange?.(reference, "delete");
+      return json(200, credentialStatus(reference, "not_set"));
+    }
+    return apiError(405, "method_not_allowed");
+  };
+  return { stored, handler };
+}
+
+/** One handler for both endpoints. */
+export function combined(...handlers: Handler[]): Handler {
+  return (call) => (call.path.startsWith(CREDENTIALS_PATH) ? handlers[handlers.length - 1]!(call) : handlers[0]!(call));
+}
 
 /** A stateful stand-in for the endpoint: GET returns `current`; PUT calls `onPut` (default: accept, bump the revision, store what was sent). */
 export function settingsServer(initial: AiSettings, options: { onPut?: (call: RecordedCall, current: AiSettings) => ReturnType<Handler> } = {}) {

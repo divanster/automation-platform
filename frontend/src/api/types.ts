@@ -187,7 +187,11 @@ export interface AuditEvent {
 }
 
 // --- AI settings (backend/apps/api/serializers.py, AIExtractionSettingsOutput and AIExtractionSettingsInput) ---
-// There is deliberately NO field that holds a credential: `credential_ref` is the NAME of a backend environment variable.
+// There is deliberately NO field that holds a credential: `credential_ref` is the NAME of a credential (a backend environment
+// variable, or a managed credential in the secret store, as `credential_source` says), never its value.
+
+/** Where the credential named by `credential_ref` is read from. There is no fallback from one to the other. */
+export type CredentialSource = "environment" | "managed";
 
 export interface AiProviderStatus {
   configured: boolean;
@@ -236,6 +240,7 @@ export interface AiConnectionFields {
   locality: string;
   endpoint: string | null;
   credential_ref: string | null;
+  credential_source: CredentialSource;
   enabled: boolean;
   profiles: AiProfileRef[];
 }
@@ -279,6 +284,24 @@ export interface AiSettings {
 export interface AiSettingsUpdate extends AiSettingsValues {
   connections?: AiConnectionFields[];
   expected_revision: number;
+}
+
+// --- Managed AI credentials (backend/apps/api/views_ai_credentials.py, AICredentialStatusOutput) ---
+// The secret value is accepted by POST and PUT only and is never returned: no type here has a field that could hold one.
+
+/** `set`: stored and readable by the web process; `not_set`: nothing stored; `unreadable`: a file exists that this process cannot decrypt. */
+export type CredentialStatusValue = "set" | "not_set" | "unreadable";
+
+export interface AiCredentialStatus {
+  reference: string;
+  source: "managed";
+  status: CredentialStatusValue;
+  /** The secret store backend's identifier. */
+  store: string;
+  /** Identifiers of the stored connections that read this credential. */
+  connections: string[];
+  /** `worker_restart_required`: a change reaches a worker only when it starts. */
+  apply: string;
 }
 
 export interface ListQuery {

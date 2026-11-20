@@ -6,6 +6,7 @@ import {
   describeStatus,
   localityLabel,
   providerTypeLabel,
+  typeOf,
   type ConnectionDraft,
 } from "../../lib/aiSettingsForm";
 import { ConfirmStep } from "../ConfirmStep";
@@ -54,7 +55,7 @@ export function ConnectionCard({
   const fields = connectionFields(draft, catalog);
   const name = draft.display_name.trim() || "New connection";
   const edited = saved !== undefined && JSON.stringify(fields) !== JSON.stringify(connectionFields({ ...draft, ...savedAsDraft(saved) }, catalog));
-  const status = saved ? describeStatus(saved.status) : null;
+  const status = saved ? describeStatus(saved.status, saved.credential_source) : null;
   const problemCount = Object.keys(problems).length;
 
   return (
@@ -92,6 +93,12 @@ export function ConnectionCard({
             <dt>Credential reference</dt>
             <dd>{fields.credential_ref ?? "None"}</dd>
           </div>
+          {typeOf(catalog, draft.provider_type)?.credential !== "none" ? (
+            <div>
+              <dt>Credential source</dt>
+              <dd>{fields.credential_source === "managed" ? "Managed (secret store)" : "Environment variable"}</dd>
+            </div>
+          ) : null}
           <div>
             <dt>Models</dt>
             <dd>
@@ -165,6 +172,7 @@ function savedAsDraft(saved: AiConnection): Partial<ConnectionDraft> {
     locality: saved.locality,
     endpoint: saved.endpoint ?? "",
     credential_ref: saved.credential_ref ?? "",
+    credential_source: saved.credential_source,
     enabled: saved.enabled,
     profiles: saved.profiles,
   };
