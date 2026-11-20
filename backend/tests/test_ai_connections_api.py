@@ -170,7 +170,7 @@ class ConnectionAuditTests(SimpleTestCase):
         self.assertEqual(
             created[1].details,
             {"revision": 1, "change": "created", "connection_id": "corp-llm", "provider_type": "openai_compatible", "locality": "company_endpoint", "enabled": True,
-             "has_credential_ref": True, "profile_count": 2},
+             "has_credential_ref": True, "credential_source": "environment", "profile_count": 2},
         )  # fmt: skip
         self.assertEqual([e.subject_id for e in created], [connection_subject_id(c) for c in ("workbench", "corp-llm", "vendor")])
         self.assertTrue(all(e.actor_public_id == ADMIN_ID and e.subject_type == "ai_settings" for e in store.events))

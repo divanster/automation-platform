@@ -954,6 +954,61 @@ Report the exact `Ran N tests` line and any failure; passing would cover the tes
 
 **What nobody has checked:** any call through a stored connection to a real Workbench, OpenAI-compatible server or Ollama; the migration and the new constraint on PostgreSQL; concurrent saves on PostgreSQL; the status probe against the real environment of a running web process; the owner's `.env` loading of `AP_AI_CRED_*` variables; quality of any model; and a browser (the AI settings page of `frontend-slice.md` section 19 exists but has not been seen in one).
 
+### 5.11 Managed AI credentials (AI-SEC-2): the secret store, the credential API, the worker and checks
+
+**Status: DB-free validated in the development VM only; the PostgreSQL tests are written and NOT run; nothing was sent to a provider; no frontend.** Design and contract: [ai-gateway.md](../architecture/ai-gateway.md) section 20 and [secret-store.md](../architecture/secret-store.md) sections 5 and 8.
+
+**Set up once (owner; Windows; the account both processes run as).**
+
+1. Choose ONE Windows account for the web process and the worker, and a directory on a local fixed disk, outside the repository and outside OneDrive, whose parent exists (for example `C:\ProgramData\AutomationPlatform\secrets` after creating `C:\ProgramData\AutomationPlatform`). Do not use the account's `.git` folders, a junction or a network path.
+2. From `backend\`, AS THAT ACCOUNT, prepare the directory (creates only that directory, readable by that account alone; it refuses an existing directory that is not already trusted):
+
+   ```powershell
+   $Py = "..\.venv\Scripts\python.exe"
+   & $Py -c "from config.secret_store_dpapi import prepare_windows_secret_directory as p; p(r'C:\ProgramData\AutomationPlatform\secrets')"
+   ```
+
+3. Put the SAME lines in the environment of the web process and of the worker (the git-ignored `.env`, or the service's environment; never commit them). The SID is the account's (for example from `whoami /user`):
+
+   ```text
+   AP_SECRET_STORE_BACKEND=windows_dpapi
+   AP_SECRET_STORE_DIRECTORY=C:\ProgramData\AutomationPlatform\secrets
+   AP_SECRET_STORE_EXPECTED_IDENTITY_SID=S-1-5-21-...-1001
+   ```
+
+   Add `AP_SECRET_STORE_APPROVED_IDENTITY_SIDS` only to run as LocalSystem, LocalService or NetworkService (untested here). Without these lines the store is disabled: the credential API answers `503 secret_store_disabled` and a managed connection stops the worker.
+4. Restart the web process and the worker so they read the lines.
+
+**Use.** As an administrator (session and CSRF as for any API call): `POST /api/ai-credentials/` with `{"reference": "AP_AI_CRED_CORP_LLM", "value": "<the key>"}`; in the AI settings give a connection `"credential_ref": "AP_AI_CRED_CORP_LLM"` and `"credential_source": "managed"`; check with `GET /api/ai-credentials/AP_AI_CRED_CORP_LLM/` (`set`, `not_set` or `unreadable`) and the connection's `status` (`missing_api_key` when it is not stored). **Restart the worker after any credential change** (create, replace, delete): it reads the credential once at start-up. Rotation is `PUT`; a credential a connection still names cannot be deleted (`409 credential_in_use`).
+
+**Failure reading.** `secret_store_disabled`: no backend configured. `secret_store_unavailable`: a variable is wrong or missing, the directory is not prepared or not trusted (owner, ACL, junction, location), or this process runs as an identity the store refuses (check `AP_SECRET_STORE_EXPECTED_IDENTITY_SID`). `secret_store_busy`: a lock wait expired; retry. `unreadable` or a worker that refuses to start with `credential_store_unavailable`: the credential was written by another Windows account, profile or machine, or the file is damaged: re-enter it (`PUT`) under the right account. There is no fallback to environment variables in any of these cases, by design. Never copy or restore the secret directory (secret-store.md, section 5).
+
+**Failure recovery and reconciliation (credential writes; contract: [secret-store.md](../architecture/secret-store.md) section 9).** The secret store and PostgreSQL cannot commit together. A write answers an error when the audit INSERT, the lock, the store call or the COMMIT fails. If the log has the ERROR line `AI credential <created|replaced|deleted>: the secret store may have changed but the audit commit was not confirmed; reconcile (actor=... subject=... store=...)`, or the API answered `5xx` after the store call, or the web process or the machine died during a write, the credential MAY have changed without an audit event. **Nothing is rolled back or compensated automatically, by design** (a failed COMMIT may still have committed, so deleting would be a guess). Reconcile:
+
+1. `GET /api/ai-credentials/<reference>/`: `set`, `not_set` or `unreadable`, and the connections that read it (never the value).
+2. Look for the event in the audit table (read-only): `action` `ai_credential.created|replaced|deleted`, `subject_id` = the opaque id in the log line.
+3. Record the truth with a NEW audited call: `set` with no event: `PUT` the value the provider currently accepts (the API never returns it, so you need it from its source); `not_set` while a connection still names it: `POST` it again, or remove the reference from the connection; an event that the store disagrees with: `PUT` or `DELETE` as intended.
+4. Restart the worker, and if the new value is not one an administrator intended, rotate the credential at the provider.
+
+**Accepted windows.** (a) A crash or power loss between the store change and the commit leaves the credential changed, unaudited and with NO log line. (b) A replace cannot be undone. (c) A waiting operation on the same reference blocks in PostgreSQL while another finishes its store call (bounded by the store's 5 s lock wait); no `lock_timeout` is set. Operations on different references do not wait for each other.
+
+**Checks (DB-free; from `backend\`; no network, no key, no PostgreSQL):**
+
+```powershell
+$Py = "..\.venv\Scripts\python.exe"
+& $Py manage.py check
+& $Py -m compileall -q apps config tests manage.py
+& $Py manage.py test tests.test_ai_credentials_services tests.test_ai_credentials_api tests.test_ai_credentials_worker tests.test_ai_credentials_boundaries   # expect OK (124)
+& $Py manage.py test tests.test_secret_store tests.test_secret_store_dpapi tests.test_secret_store_dpapi_concurrency tests.test_secret_store_dpapi_hardening
+& $Py manage.py test                                                                  # expect OK (3570 at this checkpoint, 1 skipped; re-check the number)
+& $Py manage.py test tests.test_user_model.MigrationStateTests                          # DB-free migration consistency; no migration was added
+git diff --check
+```
+
+**PostgreSQL validation (LOCAL COMPUTER ONLY; owner-run; NOT YET RUN).** As in section 5.10, on a dedicated development server, no `--keepdb`, no `--noinput`: `& $Py manage.py test tests.test_ai_credentials_postgres --tag requires_postgres -v 2` with `AP_RUN_DB_TESTS=1` set only around the command (20 tests; an in-memory store and a JSON-file store for the killed-process tests, no Windows API). Report the exact `Ran N tests` line; passing would cover the tested scenarios only.
+
+**What nobody has checked:** a credential created through the API by a running web process and read by a running worker under a real service account (and a gMSA, a virtual account or LocalSystem); a real provider call with a managed key; the worker refusing to start in each failure above against a real store; a browser; and the PostgreSQL tests.
+
 ## 6. Local Windows computer: setup and validation (reference procedure; owner-operated)
 
 > **Nothing in this section has been run.** No local repository, Python

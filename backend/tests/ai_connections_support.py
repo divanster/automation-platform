@@ -39,6 +39,7 @@ def workbench_connection(**changes):
         "locality": "company_endpoint",
         "endpoint": None,
         "credential_ref": None,
+        "credential_source": "environment",
         "enabled": True,
         "profiles": [{"profile_id": ai_workbench.PROFILE_GPT5, "model_id": workbench.DEPLOYMENT_GPT5}],
     }
@@ -54,6 +55,7 @@ def corp_connection(**changes):
         "locality": "company_endpoint",
         "endpoint": CORP_ENDPOINT,
         "credential_ref": REF_CORP,
+        "credential_source": "environment",
         "enabled": True,
         "profiles": [{"profile_id": "corp-small", "model_id": "corp-model-8b"}, {"profile_id": "corp-large", "model_id": "corp-model-70b"}],
     }
@@ -97,6 +99,7 @@ def ollama_connection(**changes):
         "locality": "local",
         "endpoint": OLLAMA_ENDPOINT,
         "credential_ref": None,
+        "credential_source": "environment",
         "enabled": True,
         "profiles": [{"profile_id": "llama", "model_id": "llama3.1:8b"}],
     }

@@ -369,6 +369,7 @@ class AIConnectionInput(StrictSerializer):
     locality = StrictCharField(max_length=64)
     endpoint = StrictCharField(required=False, allow_null=True, default=None, max_length=2048)
     credential_ref = StrictCharField(required=False, allow_null=True, default=None, max_length=128)
+    credential_source = StrictCharField(required=False, max_length=32)  # no default on purpose: omitted, the stored source of this connection is kept (``apps.ai_settings.services``)
     enabled = StrictBooleanField()
     profiles = AIConnectionProfileInput(many=True, max_length=50)
 
@@ -429,6 +430,7 @@ class AIConnectionOutput(serializers.Serializer):
     locality = serializers.CharField(source="values.locality")
     endpoint = serializers.CharField(source="values.endpoint", allow_null=True)
     credential_ref = serializers.CharField(source="values.credential_ref", allow_null=True)
+    credential_source = serializers.CharField(source="values.credential_source")  # environment or managed: where the credential named by ``credential_ref`` is read from
     enabled = serializers.BooleanField(source="values.enabled")
     profiles = serializers.SerializerMethodField()
     status = AIProviderStatusOutput()
@@ -478,6 +480,37 @@ class AIExtractionSettingsOutput(serializers.Serializer):
     updated_by = serializers.UUIDField(source="record.updated_by_public_id", allow_null=True)
     apply = serializers.CharField(source="apply_mode")
     catalog = AICatalogOutput(source="*")
+
+
+class AICredentialCreateInput(StrictSerializer):
+    """``POST /api/ai-credentials/``: a reference and the secret. The value is accepted as it is (no trimming: a value with leading or trailing space is refused by the secret rules, never
+    silently changed), is never echoed (the error handler returns codes only), and is never returned by any endpoint."""
+
+    reference = StrictCharField(max_length=128)
+    value = StrictCharField(max_length=4096, trim_whitespace=False)
+
+
+class AICredentialValueInput(StrictSerializer):
+    """``PUT /api/ai-credentials/<reference>/``: the new secret."""
+
+    value = StrictCharField(max_length=4096, trim_whitespace=False)
+
+
+class AICredentialStatusOutput(serializers.Serializer):
+    """Whether a managed credential can be read and who uses it. Fixed fields: nothing that holds, or could hold, the secret has a field here."""
+
+    reference = serializers.CharField()  # the NAME the administrator chose (``AP_AI_CRED_...``), not a secret
+    source = serializers.SerializerMethodField()
+    status = serializers.CharField()  # set, not_set or unreadable
+    store = serializers.CharField()  # the secret store backend's identifier
+    connections = serializers.ListField(child=serializers.CharField())  # identifiers of the connections that read it
+    apply = serializers.SerializerMethodField()
+
+    def get_source(self, obj):
+        return "managed"
+
+    def get_apply(self, obj):
+        return "worker_restart_required"
 
 
 def page_output(item_serializer, page) -> dict:

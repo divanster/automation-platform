@@ -132,7 +132,7 @@ class NothingElseChangedTests(unittest.TestCase):
 
     def test_the_audit_vocabulary_gained_nothing_for_extraction(self):
         text = (BACKEND / "apps" / "audit" / "events.py").read_text(encoding="utf-8").lower()
-        text = re.sub(r"ai_settings\w*", "", text)  # the AI settings API's own action and subject type (not an extraction event) are tested in test_ai_settings_audit
+        text = re.sub(r"ai_(settings|credential)\w*", "", text)  # the AI settings and credential APIs' own actions and subject type (not an extraction event) are tested in their own audit tests
         self.assertNotRegex(text, r"\bai[._]|extraction_failed|ai_extract")
 
     def test_no_django_setting_names_the_extraction_mode_a_provider_or_a_key(self):

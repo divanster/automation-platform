@@ -26,6 +26,13 @@ from rest_framework import exceptions as drf
 from rest_framework.response import Response
 
 from apps.accounts.errors import AuthorizationError
+from apps.ai_credentials.errors import (
+    CredentialAlreadyExistsError,
+    CredentialInUseError,
+    CredentialNotFoundError,
+    CredentialStoreError,
+    CredentialValidationError,
+)
 from apps.ai_settings.errors import AISettingsConflictError, AISettingsValidationError
 from apps.cases.errors import RecordNotFoundError
 from apps.intake.errors import (
@@ -75,6 +82,13 @@ MESSAGES = {
     "stale_base_revision": "The revision is not the current revision.",
     "stale_revision": "The revision is not the current revision.",
     "stale_settings_revision": "The settings were changed since they were read.",
+    "credential_not_found": "No credential is stored under that reference.",
+    "credential_already_exists": "A credential is already stored under that reference.",
+    "credential_in_use": "A connection uses this credential.",
+    "secret_store_disabled": "The secret store is disabled.",
+    "secret_store_unavailable": "The secret store is unavailable.",
+    "secret_store_busy": "The secret store is busy; try again later.",
+    "secret_unreadable": "The stored secret cannot be read.",
     "content_hash_mismatch": "The content hash is not the current revision's hash.",
     "run_not_in_review": "The request is not waiting for review.",
     "run_state_not_editable": "The request cannot be edited in its current state.",
@@ -106,6 +120,8 @@ _REVIEW_STATUS = {
 }
 
 SAFE_KEY = re.compile(r"[A-Za-z0-9_]{1,64}")
+SAFE_CONNECTION_ID = re.compile(r"[a-z][a-z0-9_-]{0,47}")
+_STORE_CODES = ("secret_store_disabled", "secret_store_unavailable", "secret_store_busy", "secret_unreadable")  # the secret store's stable codes: the only ones a 503 may carry
 SAFE_SETTINGS_PATH = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}(?:\[[0-9]{1,3}\])?(?:\.[A-Za-z_][A-Za-z0-9_]{0,63}(?:\[[0-9]{1,3}\])?){0,2}")  # connections[0].profiles[1].model_id
 
 
@@ -191,6 +207,16 @@ def problem_for(exc) -> Problem:
         return Problem(400, "validation_error", {"fields": {_safe_settings_field(name): list(codes) for name, codes in exc.fields.items()}})
     if isinstance(exc, AISettingsConflictError):
         return Problem(409, "stale_settings_revision")
+    if isinstance(exc, CredentialValidationError):
+        return Problem(400, "validation_error", {"fields": {_safe_field(name): list(codes) for name, codes in exc.fields.items()}})
+    if isinstance(exc, CredentialNotFoundError):
+        return Problem(404, "credential_not_found")
+    if isinstance(exc, CredentialAlreadyExistsError):
+        return Problem(409, "credential_already_exists")
+    if isinstance(exc, CredentialInUseError):
+        return Problem(409, "credential_in_use", {"connections": [name for name in exc.connections if isinstance(name, str) and SAFE_CONNECTION_ID.fullmatch(name)]})
+    if isinstance(exc, CredentialStoreError):
+        return Problem(503, exc.reason if exc.reason in _STORE_CODES else "secret_store_unavailable")
 
     # --- framework errors ---
     if isinstance(exc, InvalidCredentials):

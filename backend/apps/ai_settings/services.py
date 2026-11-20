@@ -46,6 +46,8 @@ from apps.audit.recorder import record_event
 from .errors import AISettingsConflictError
 from .models import SETTINGS_SUBJECT_ID, SINGLETON_ID, AIExtractionSettings, connection_subject_id
 from .rules import (
+    CREDENTIAL_SOURCE_ENVIRONMENT,
+    CREDENTIAL_SOURCE_MANAGED,
     DEFAULT_VALUES,
     ISSUE_INVALID_CONFIGURATION,
     PROVIDER_ISSUES,
@@ -217,6 +219,30 @@ def _connection_changes(old: tuple, new: tuple) -> list:
     return changes
 
 
+def _with_stored_sources(supplied, stored: tuple):
+    """``supplied`` (the submitted list) with ``credential_source`` filled in from the stored connection of the same identifier for each item that omits it. Pure."""
+    if not isinstance(supplied, (list, tuple)):
+        return supplied
+    by_id = {c.connection_id: c for c in stored}
+    merged = []
+    for item in supplied:
+        if isinstance(item, Mapping) and "credential_source" not in item and isinstance(item.get("connection_id"), str):
+            previous = by_id.get(item["connection_id"])
+            if previous is not None and previous.credential_source != CREDENTIAL_SOURCE_ENVIRONMENT:
+                item = {**item, "credential_source": previous.credential_source}
+        merged.append(item)
+    return merged
+
+
+def connections_using_managed_reference(reference: str, *, lock: bool = False) -> tuple:
+    """The identifiers of the stored connections that read the managed credential ``reference`` (``credential_source`` managed). With ``lock`` the settings row is locked until the
+    caller's transaction ends, so a settings save cannot add a user of the reference while the caller decides (the caller must be inside ``transaction.atomic``). Identifiers only."""
+    manager = AIExtractionSettings.objects
+    row = (manager.select_for_update() if lock else manager).filter(pk=SINGLETON_ID).first()
+    connections, _ = _stored_connections(row)
+    return tuple(c.connection_id for c in connections if c.credential_source == CREDENTIAL_SOURCE_MANAGED and c.credential_ref == reference)
+
+
 def update_extraction_settings(*, user, data, expected_revision: int, catalog: ExtractionCatalog, lease_seconds: int | None = None) -> SettingsView:
     """Validate ``data`` against ``catalog`` and store it as the next revision. Raises ``AuthorizationError``, ``AISettingsValidationError`` or ``AISettingsConflictError``.
 
@@ -229,7 +255,10 @@ def update_extraction_settings(*, user, data, expected_revision: int, catalog: E
         supplied = data.pop("connections")
     effective: tuple = ()
     if supplied is not _UNSET:
-        effective = validate_connections(supplied, catalog)
+        # An item that omits ``credential_source`` keeps the stored one of the same connection: a client that does not know the field can never switch a managed credential back to the
+        # environment by leaving it out. Switching is explicit (``"credential_source": "environment"``). The read is unlocked; a concurrent change fails the revision check below.
+        stored_now, _ = _stored_connections(AIExtractionSettings.objects.filter(pk=SINGLETON_ID).first())
+        effective = validate_connections(_with_stored_sources(supplied, stored_now), catalog)
     elif isinstance(data, Mapping) and data.get("connection_id") is not None:
         # A selection by connection needs the stored list. This read is unlocked: if the row changes before the lock below, its revision no longer equals
         # ``expected_revision`` and the save is refused as a conflict, so a selection is never accepted against a list that was not the one the client saw.
@@ -272,7 +301,7 @@ def update_extraction_settings(*, user, data, expected_revision: int, catalog: E
                     actor.public_id, ACTION_AI_SETTINGS_CONNECTION_CHANGED, SUBJECT_AI_SETTINGS, connection_subject_id(connection.connection_id),
                     revision=row.revision, change=change, connection_id=connection.connection_id, provider_type=connection.provider_type,
                     locality=connection.locality, enabled=connection.enabled, has_credential_ref=connection.credential_ref is not None,
-                    profile_count=len(connection.profiles),
+                    credential_source=connection.credential_source, profile_count=len(connection.profiles),
                 )
             )  # fmt: skip
     logger.info(

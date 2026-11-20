@@ -281,7 +281,11 @@ def normalized(path: str) -> str:
 # manifest. Adding to these sets is a deliberate decision; an undeclared module route still fails the equality checks below.
 CORE_API_PREFIXES = {"auth", "dashboard"}
 CORE_SCREENS = {"/dashboard"}
-CORE_NAVIGATION = {"/dashboard": ("intake.view_own_request", "intake.view_any_request")}  # any-of display hint, not a module permission
+CORE_NAVIGATION = {
+    "/dashboard": ("intake.view_own_request", "intake.view_any_request"),  # any-of display hint, not a module permission
+    "/settings/ai": None,  # AI-SET-3: a Core administrator screen; no permission hint, it is flagged administratorOnly in navigation.ts
+}
+CORE_ADMINISTRATOR_NAVIGATION = {"/settings/ai"}
 
 
 def navigation_entries():
@@ -295,6 +299,13 @@ def navigation_entries():
         anyof = re.search(r"\banyPermission:\s*\[([^\]]*)\]", block)
         entries[to] = (single.group(1) if single else None, tuple(re.findall(r'"([^"]+)"', anyof.group(1))) if anyof else None)
     return entries
+
+
+def administrator_only_entries():
+    """The ``to`` of every sidebar entry of navigation.ts flagged ``administratorOnly: true``."""
+    source = (FRONTEND / "components" / "shell" / "navigation.ts").read_text(encoding="utf-8")
+    body = source.split("export const NAV_ITEMS", 1)[1]
+    return {re.search(r'\bto:\s*"([^"]+)"', block).group(1) for block in re.findall(r"\{\s*id:.*?isActive", body, flags=re.S) if re.search(r"\badministratorOnly:\s*true", block)}
 
 
 class RoutesTests(SimpleTestCase):
@@ -328,9 +339,10 @@ class RoutesTests(SimpleTestCase):
         self.assertEqual(hints, {"/requests": None, "/requests/new": accounts_roles.PERM_SUBMIT})
         for path, hint in hints.items():  # the sidebar's hint is the manifest's, with no any-of list
             self.assertEqual(entries[path], (hint, None), path)
-        for path, anyof in CORE_NAVIGATION.items():  # the Core entry's hint is the two view permissions, and only those
+        for path, anyof in CORE_NAVIGATION.items():  # a Core entry's hint is exactly its any-of list (none for the administrator screen), and nothing else
             self.assertEqual(entries[path], (None, anyof), path)
         self.assertEqual(set(CORE_NAVIGATION["/dashboard"]), {accounts_roles.PERM_VIEW_OWN, accounts_roles.PERM_VIEW_ANY})
+        self.assertEqual(administrator_only_entries(), CORE_ADMINISTRATOR_NAVIGATION)  # only the Core AI settings entry is administrator-only; no module entry is
 
     def test_the_frontend_was_not_given_dynamic_loading(self):
         for path in FRONTEND.rglob("*.ts*"):

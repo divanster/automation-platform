@@ -52,6 +52,8 @@ ACTOR, SUBJECT, CASE, RUN = (uuid.uuid4() for _ in range(4))
 # A frozen copy of Core's vocabulary: the seven actions that existed before S3, plus "module.enabled" and "module.disabled", which MOD-1b S4 added as Core's
 # own actions (the "module" namespace is reserved for Core, so no module can declare them), plus "ai_settings.updated" (the AI settings API; the
 # "ai_settings" namespace is Core's too) and "ai_settings.connection_changed" (AI-SET-2: one event per connection a save created, changed or removed).
+# "ai_settings" namespace is Core's too) and "ai_settings.connection_changed" (AI-SET-2: one event per connection a save created, changed or removed), plus the three
+# "ai_credential.*" actions of AI-SEC-2 (the managed AI credential API; the "ai_credential" namespace is Core's too).
 # The "module" and "ai_settings" subject types are asserted separately. If an action or a detail key of Core ever
 # changes, this table is what makes the change visible.
 CORE_ACTIONS = (
@@ -66,6 +68,9 @@ CORE_ACTIONS = (
     "module.disabled",
     "ai_settings.updated",
     "ai_settings.connection_changed",
+    "ai_credential.created",
+    "ai_credential.replaced",
+    "ai_credential.deleted",
 )
 CORE_KEYS = {
     "request.submitted": {"byte_length", "client_request_id_used"},
@@ -78,7 +83,10 @@ CORE_KEYS = {
     "module.enabled": {"module_id", "installed_version", "registry_fingerprint", "cause"},
     "module.disabled": {"module_id", "installed_version", "registry_fingerprint", "cause"},
     "ai_settings.updated": {"revision", "extraction_mode", "provider_id", "profile_id", "policy_mode", "timeout_seconds", "connection_id", "connection_count", "connections_changed"},
-    "ai_settings.connection_changed": {"revision", "change", "connection_id", "provider_type", "locality", "enabled", "has_credential_ref", "profile_count"},
+    "ai_settings.connection_changed": {"revision", "change", "connection_id", "provider_type", "locality", "enabled", "has_credential_ref", "credential_source", "profile_count"},
+    "ai_credential.created": {"store"},
+    "ai_credential.replaced": {"store"},
+    "ai_credential.deleted": {"store"},
 }
 CORE_SUBJECTS = ("run", "revision", "approval", "rejection", "module", "ai_settings")
 
@@ -1025,7 +1033,15 @@ class OldSchemaHelperTests(SimpleTestCase):
         refused_by_the_old_schema = set(events.ACTIONS) - set(self.old_fixed_list_of_migration_0001())
         self.assertEqual(
             refused_by_the_old_schema,
-            {events.ACTION_MODULE_ENABLED, events.ACTION_MODULE_DISABLED, events.ACTION_AI_SETTINGS_UPDATED, events.ACTION_AI_SETTINGS_CONNECTION_CHANGED},
+            {
+                events.ACTION_MODULE_ENABLED,
+                events.ACTION_MODULE_DISABLED,
+                events.ACTION_AI_SETTINGS_UPDATED,
+                events.ACTION_AI_SETTINGS_CONNECTION_CHANGED,
+                events.ACTION_AI_CREDENTIAL_CREATED,
+                events.ACTION_AI_CREDENTIAL_REPLACED,
+                events.ACTION_AI_CREDENTIAL_DELETED,
+            },
         )
 
     def test_the_old_schema_helper_does_not_read_the_live_vocabulary(self):
