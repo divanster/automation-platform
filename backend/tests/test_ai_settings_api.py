@@ -272,12 +272,15 @@ class ApiContractTests(ApiCase):
     def test_get_returns_the_documented_shape_for_a_fresh_installation(self):
         response, _ = self.call("get", FakeStore(), actor(is_superuser=True))
         data = response.json()
-        self.assertEqual(set(data), {"settings", "stored", "revision", "updated_at", "updated_by", "apply", "catalog"})
-        self.assertEqual(data["settings"], {"extraction_mode": "deterministic", "provider_id": None, "profile_id": None, "policy_mode": None, "timeout_seconds": None})
+        self.assertEqual(set(data), {"settings", "connections", "unreadable_connections", "stored", "revision", "updated_at", "updated_by", "apply", "catalog"})
+        self.assertEqual(
+            data["settings"], {"extraction_mode": "deterministic", "provider_id": None, "connection_id": None, "profile_id": None, "policy_mode": None, "timeout_seconds": None}
+        )
+        self.assertEqual((data["connections"], data["unreadable_connections"]), ([], 0))
         self.assertEqual((data["stored"], data["revision"], data["updated_at"], data["updated_by"]), (False, 0, None, None))
         self.assertEqual(data["apply"], "worker_restart_required")
         catalog = data["catalog"]
-        self.assertEqual(set(catalog), {"providers", "policy_modes", "timeout"})
+        self.assertEqual(set(catalog), {"providers", "provider_types", "locality_policies", "credential_ref_prefix", "policy_modes", "timeout"})
         self.assertEqual(catalog["timeout"], {"min": 5, "max": 300, "default": 45})
         self.assertEqual(catalog["policy_modes"], ["local_only", "company_endpoint", "approved_cloud"])
         (provider,) = catalog["providers"]
@@ -298,7 +301,10 @@ class ApiContractTests(ApiCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual((data["revision"], data["stored"], data["apply"], data["updated_by"]), (1, True, "worker_restart_required", str(ADMIN_ID)))
-        self.assertEqual(data["settings"], {"extraction_mode": "ai", "provider_id": PROVIDER, "profile_id": PROFILE, "policy_mode": "company_endpoint", "timeout_seconds": 45})
+        self.assertEqual(
+            data["settings"],
+            {"extraction_mode": "ai", "provider_id": PROVIDER, "connection_id": None, "profile_id": PROFILE, "policy_mode": "company_endpoint", "timeout_seconds": 45},
+        )
 
     def test_put_deterministic_needs_no_ai_field(self):
         store = FakeStore(stored_row(revision=1, mode="ai", provider=PROVIDER, profile=PROFILE, policy="company_endpoint", timeout=45))
@@ -391,9 +397,11 @@ class SecretRedactionTests(ApiCase):
                 for item in node:
                     yield from names(item)
 
+        allowed = {"endpoint", "needs_endpoint", "credential_ref", "credential_ref_prefix", "credential"}  # a URL, a flag, a variable NAME and its prefix, a policy word: none holds a value
         for name in names(response.json()):
-            for word in ("key", "secret", "token", "password", "header", "endpoint", "proxy", "charge", "credential"):
-                self.assertNotIn(word, name)
+            for word in ("key", "secret", "token", "password", "header", "proxy", "charge", "credential", "endpoint"):
+                if word in name and name not in allowed:
+                    self.fail(f"a response field is named like a secret: {name}")
 
     def test_a_key_sent_to_the_api_is_refused_not_stored_and_not_echoed(self):
         store = FakeStore()
@@ -422,4 +430,7 @@ class SecretRedactionTests(ApiCase):
         from apps.ai_settings.models import AIExtractionSettings
 
         names = {f.name for f in AIExtractionSettings._meta.get_fields()}
-        self.assertEqual(names, {"id", "revision", "extraction_mode", "provider_id", "profile_id", "policy_mode", "timeout_seconds", "updated_at", "updated_by_public_id"})
+        self.assertEqual(
+            names,
+            {"id", "revision", "extraction_mode", "provider_id", "connection_id", "connections", "profile_id", "policy_mode", "timeout_seconds", "updated_at", "updated_by_public_id"},
+        )

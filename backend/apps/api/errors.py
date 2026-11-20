@@ -106,10 +106,15 @@ _REVIEW_STATUS = {
 }
 
 SAFE_KEY = re.compile(r"[A-Za-z0-9_]{1,64}")
+SAFE_SETTINGS_PATH = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}(?:\[[0-9]{1,3}\])?(?:\.[A-Za-z_][A-Za-z0-9_]{0,63}(?:\[[0-9]{1,3}\])?){0,2}")  # connections[0].profiles[1].model_id
 
 
 def _safe_field(name) -> str:
     return name if isinstance(name, str) and (name == "_" or SAFE_KEY.fullmatch(name)) else "_unknown"
+
+
+def _safe_settings_field(name) -> str:
+    return name if isinstance(name, str) and SAFE_SETTINGS_PATH.fullmatch(name) else "_unknown"
 
 
 def _pairs(pairs):
@@ -183,7 +188,7 @@ def problem_for(exc) -> Problem:
     if isinstance(exc, ClientRequestConflictError):
         return Problem(409, "idempotency_conflict")
     if isinstance(exc, AISettingsValidationError):
-        return Problem(400, "validation_error", {"fields": {_safe_field(name): list(codes) for name, codes in exc.fields.items()}})
+        return Problem(400, "validation_error", {"fields": {_safe_settings_field(name): list(codes) for name, codes in exc.fields.items()}})
     if isinstance(exc, AISettingsConflictError):
         return Problem(409, "stale_settings_revision")
 

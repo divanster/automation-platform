@@ -93,7 +93,7 @@ class GenericGatewayStaysGenericTests(unittest.TestCase):
         self.assertEqual((ai_gateway.BUILTIN_PROVIDERS, ai_gateway.BUILTIN_PROFILES), ((), ()))
         for path in sorted((BACKEND / "config").glob("*.py")):
             names = absolute_imports(path)
-            if path.name not in ("ai_workbench.py", "intake_extraction.py"):
+            if path.name not in ("ai_workbench.py", "intake_extraction.py", "ai_connections.py"):
                 self.assertFalse({n for n in names if n.startswith("config.ai_workbench")}, path.name)
 
 

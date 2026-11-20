@@ -733,7 +733,7 @@ the concurrency test (two threads, each with its own connection), the module-dis
 [ai-gateway.md](../architecture/ai-gateway.md) section 16.
 
 **What changes in a running installation:** one new table (`ai_settings.0001_initial`), one new endpoint (`GET`/`PUT /api/ai-settings/extraction/`, administrators only) and a start-up read in `runworker`. With no stored row nothing changes: the worker keeps using the
-variables of section 5.6, and the default is deterministic.
+variables of section 5.6, and the default is deterministic. (AI-SET-2, section 5.10, later added named connections, one more migration and the credential references.)
 
 **Order matters.** Run `python manage.py migrate` **before** starting the worker; a worker started against a database without the `ai_settings` table refuses to start (it never falls back to the environment).
 
@@ -901,6 +901,58 @@ print(dict(response.output)); print(response.provenance)
 ```
 
 **What nobody has checked:** any request to a real Ollama (whether it accepts this exact body, what a given release reports in `model`, `done_reason` and the counts, whether `native_schema` works with your model), real DNS answers for `localhost`, the loopback rules on a real network stack, behaviour under load or with a cold model, the quality of any local model's answer, and whether a model's context window truncated a prompt. Do not describe the provider as validated until the owner reports the probe.
+
+### 5.10 Multi-provider AI settings (AI-SET-2): named connections, credential references, migration and checks
+
+**Status: written and DB-free tested in the development VM only (168 new tests, 3250 DB-free tests in all, OK). Its PostgreSQL tests (`tests/test_ai_connections_postgres.py`, plus the changed expectation in `tests/test_ai_settings_postgres.py`) are written and have NEVER been run; PostgreSQL validation is pending. Nothing was sent to any provider; there is no frontend.** Design and contract: [ai-gateway.md](../architecture/ai-gateway.md) section 19; policy: [ai-policy.md](../architecture/ai-policy.md).
+
+**What changes in a running installation.** One additive migration (`ai_settings.0002_connections`: two columns on the existing settings row and a replaced CHECK constraint; no data is touched, an existing row keeps meaning "the environment-configured Workbench"), extended `GET`/`PUT /api/ai-settings/extraction/` (administrators only) and a start-up read in `runworker` that now also loads the stored connections. With no stored connection and no `connection_id` nothing changes: the stored row (or the variables of section 5.6) selects the Workbench exactly as before, and the default is deterministic.
+
+**Order matters.** Back up PostgreSQL (section 6), stop the worker, run `python manage.py migrate` **before** starting the worker (an unmigrated table stops it), then start the worker.
+
+**Reverse risk.** Reversing `ai_settings.0002` removes `connection_id` and `connections` (the stored connection list is lost and nothing restores it). An AI row that previously selected an Ollama or OpenAI-compatible connection may then fail worker start-up (`unknown_provider`): it fails closed and never falls back. Before any reversal: (1) take a verified PostgreSQL backup (section 6); (2) save the settings as `deterministic` mode, or as the legacy Workbench selection (`provider_id` `kpmg_workbench`, profile `workbench-gpt5`, no `connection_id`), through the API; (3) do not silently discard active connections: record them first, since the reverse deletes the list. The reverse has not been run against PostgreSQL.
+
+**Declaring a connection (administrator, through the API).** A connection is `connection_id`, `display_name`, `provider_type` (`kpmg_workbench`, `openai_compatible` or `ollama`; nothing else is accepted), `locality`, `endpoint`, `credential_ref`, `enabled` and `profiles` (`profile_id` and `model_id` per model). `PUT` with `connections` replaces the whole list; without it the stored list is kept; `connection_id` plus `profile_id`, `policy_mode` and `timeout_seconds` select one connection and one of its models. Rules, in short: Workbench is `company_endpoint` only, has no endpoint and offers only `workbench-gpt5`; Ollama is `local` only, needs a loopback endpoint and takes no credential; OpenAI-compatible takes any locality, needs a credential reference unless `local`, `https` unless loopback, and a `company_endpoint` that the operator's CIDR ranges allow; `local_only` reaches only a `local` connection, `company_endpoint` a local or company one, and a `cloud` connection needs `approved_cloud` (choosing it is the approval). A selected connection cannot be removed or disabled in the same save, and nothing falls back to another connection, model or provider.
+
+**Credential references (operator).** A connection never holds a key: `credential_ref` is the NAME of an environment variable that must start with `AP_AI_CRED_` (for example `AP_AI_CRED_COMPANY_LLM`). Put the value in the git-ignored `.env` (Notepad; never in a command or a committed file) of EVERY process that needs it: the **worker** (to call the provider) and, if you want the status to read `configured`, the **web** process (which only tests that it is set). A reference to an unset variable stops the worker. The Workbench keeps reading `AP_AI_WORKBENCH_API_KEY` when its connection has no reference. `.env.example` shows the placeholder.
+
+**The operator still approves endpoints.** A stored endpoint must be in `AP_AI_OPENAI_ALLOWED_ORIGINS` (or `AP_AI_OLLAMA_ALLOWED_ORIGINS`), a company endpoint needs `AP_AI_OPENAI_COMPANY_CIDRS`, and a proxy, CA bundle, limits, retries and structured-output mode stay in the variables of sections 5.8 and 5.9 (shared by every connection of a type; a proxy is refused for host-name endpoints and for Ollama). The status `endpoint_not_approved` means the process that answered does not list that origin.
+
+**Reading the status.** Each connection reports `configured` and an `issue`: `missing_api_key` (its credential variable is not set in that process), `endpoint_not_approved`, or `invalid_configuration`; never a value. Status is the web process's view only; check the worker's first log line after a restart: `Request Intake extraction mode: ai (connection <id>, profile <profile>, data policy <mode>, call deadline <n>s). Source: stored settings, revision N.`
+
+**A change needs a worker restart; there is no hot reload.** As in section 5.6a: every response says `worker_restart_required`; stop and start the worker after a save, and after any change to an `AP_AI_*` or `AP_AI_CRED_*` variable. If the worker refuses to start with `Extraction configuration error: stored AI extraction settings ... connection_id: unknown_connection / connection_disabled / invalid_connection`, or `The AI provider configuration is not usable (configuration_error, missing_credential_reference / openai_endpoint_not_approved / ...)`, fix the connection or the environment and restart; tasks stay queued meanwhile, and nothing is called.
+
+**Audit.** A save records one `ai_settings.updated` event and one `ai_settings.connection_changed` event per created, changed or removed connection, in the same transaction as the row (identifiers, flags and counts only; never an endpoint, a reference name, a display name or a secret). No audit migration is needed.
+
+**Checks (DB-free; from `backend\`; no network, no key, no PostgreSQL):**
+
+```powershell
+$Py = "..\.venv\Scripts\python.exe"
+& $Py manage.py check
+& $Py -m compileall -q apps config tests manage.py
+& $Py manage.py test tests.test_ai_connections_rules tests.test_ai_connections_composition tests.test_ai_connections_api tests.test_ai_connections_worker tests.test_ai_connections_boundaries   # expect OK (167)
+& $Py manage.py test tests.test_ai_settings_rules tests.test_ai_settings_api tests.test_ai_settings_audit tests.test_ai_settings_worker tests.test_ai_settings_boundaries                   # the existing suites, edited for pins only
+& $Py manage.py test                                                                  # expect OK (3250 at this checkpoint; re-check the number)
+& $Py manage.py test tests.test_user_model.MigrationStateTests                          # DB-free migration consistency: the models match the migrations
+git diff --check
+```
+
+`python manage.py makemigrations --check --dry-run` also tries to read the migration history from the database; without a reachable database it prints a `RuntimeWarning` and still reports missing migrations. The VM did not run it (it must not connect to PostgreSQL); `MigrationStateTests` is the DB-free equivalent.
+
+**PostgreSQL validation (LOCAL COMPUTER ONLY; owner-run; NOT YET RUN).** As in section 5.4, on a dedicated development server, with `AP_RUN_DB_TESTS` unset except around the command; Django creates and destroys `test_<AP_DB_NAME>`; no `--keepdb`, no `--noinput`:
+
+```powershell
+& $Py manage.py makemigrations --check --dry-run                                      # expect: No changes detected
+& $Py manage.py showmigrations ai_settings                                            # expect 0001 applied, 0002 not yet (or applied after the next line)
+& $Py manage.py migrate ai_settings                                                   # applies 0002 only to the development database; take the backup first
+$env:AP_RUN_DB_TESTS = "1"
+try { & $Py manage.py test tests.test_ai_connections_postgres tests.test_ai_settings_postgres tests.test_intake_ai_postgres tests.test_audit_vocabulary_postgres tests.test_api_postgres --tag requires_postgres -v 2 }
+finally { Remove-Item Env:AP_RUN_DB_TESTS -ErrorAction SilentlyContinue }
+```
+
+Report the exact `Ran N tests` line and any failure; passing would cover the tested scenarios only (with a scripted transport; no real provider).
+
+**What nobody has checked:** any call through a stored connection to a real Workbench, OpenAI-compatible server or Ollama; the migration and the new constraint on PostgreSQL; concurrent saves on PostgreSQL; the status probe against the real environment of a running web process; the owner's `.env` loading of `AP_AI_CRED_*` variables; quality of any model; and a browser (there is no frontend for connections).
 
 ## 6. Local Windows computer: setup and validation (reference procedure; owner-operated)
 

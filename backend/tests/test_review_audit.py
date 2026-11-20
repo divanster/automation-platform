@@ -24,8 +24,8 @@ class VocabularyTests(SimpleTestCase):
     def test_the_actions_are_the_fixed_vocabulary(self):
         self.assertEqual(
             set(events.ACTIONS),
-            {"request.submitted", "revision.created", "request.edited", "run.state_changed", "approval.recorded", "approval.invalidated", "rejection.recorded", "module.enabled", "module.disabled", "ai_settings.updated"},
-        )  # (module.*: MOD-1b S4, Core's own actions for the module host; ai_settings.updated: the AI settings API)
+            {"request.submitted", "revision.created", "request.edited", "run.state_changed", "approval.recorded", "approval.invalidated", "rejection.recorded", "module.enabled", "module.disabled", "ai_settings.updated", "ai_settings.connection_changed"},
+        )  # (module.*: MOD-1b S4, Core's own actions for the module host; ai_settings.updated and ai_settings.connection_changed: the AI settings API)
         self.assertEqual(len(set(events.ACTIONS)), len(events.ACTIONS))
 
     def test_every_action_has_a_detail_key_list_and_nothing_else_does(self):

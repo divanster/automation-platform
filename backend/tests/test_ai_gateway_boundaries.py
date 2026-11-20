@@ -139,7 +139,7 @@ class GatewayStaysOutOfCoreAndBusinessModulesTests(unittest.TestCase):
         # AI-2a: Request Intake's AI extractor (the ONE file of the app that names the gateway) and the composition that builds it.
         self.assertEqual(
             outside,
-            ["apps/intake/ai_extraction.py", "config/ai_gateway.py", "config/ai_guarded_transport.py", "config/ai_http_transport.py", "config/ai_ollama.py", "config/ai_openai_compatible.py", "config/ai_workbench.py", "config/intake_extraction.py"],
+            ["apps/intake/ai_extraction.py", "config/ai_connections.py", "config/ai_gateway.py", "config/ai_guarded_transport.py", "config/ai_http_transport.py", "config/ai_ollama.py", "config/ai_openai_compatible.py", "config/ai_workbench.py", "config/intake_extraction.py"],
         )
 
     def test_nothing_imports_the_composition_root_yet(self):
@@ -148,7 +148,7 @@ class GatewayStaysOutOfCoreAndBusinessModulesTests(unittest.TestCase):
             with self.subTest(file=path.relative_to(BACKEND).as_posix()):
                 self.assertFalse({n for n in names if n == "config.ai_gateway" or n.startswith("config.ai_gateway.")})
                 # AI-2a: config/intake_extraction.py is the one other composition that builds the Workbench gateway (for Request Intake only)
-                self.assertFalse({n for n in names if n.startswith(("config.ai_workbench", "config.ai_http_transport")) and path.name not in ("ai_workbench.py", "intake_extraction.py", "ai_guarded_transport.py")})
+                self.assertFalse({n for n in names if n.startswith(("config.ai_workbench", "config.ai_http_transport")) and path.name not in ("ai_workbench.py", "intake_extraction.py", "ai_guarded_transport.py", "ai_connections.py")})
 
     def test_request_intake_the_workflows_and_core_do_not_use_the_gateway(self):
         # AI-2a: Request Intake's two AI files may name the gateway (ai_extraction.py imports it; ai_output.py says in its docstring that it does not), and the
@@ -186,6 +186,8 @@ class GatewayStaysOutOfCoreAndBusinessModulesTests(unittest.TestCase):
                     imported -= {"apps.ai_gateway.adapters", "apps.ai_gateway.adapters.openai_compatible"}  # AI-CON-1: named in its own opt-in composition
                 if path.relative_to(BACKEND).as_posix() == "config/ai_ollama.py":
                     imported -= {"apps.ai_gateway.adapters", "apps.ai_gateway.adapters.ollama"}  # AI-CON-2: named in its own opt-in composition
+                if path.relative_to(BACKEND).as_posix() == "config/ai_connections.py":
+                    imported -= {"apps.ai_gateway.adapters", "apps.ai_gateway.adapters.workbench", "apps.ai_gateway.adapters.openai_compatible", "apps.ai_gateway.adapters.ollama"}  # AI-SET-2: the three real adapters, named in the one connection composition
                 self.assertFalse(imported)
 
     def test_the_module_contract_still_marks_ai_invoke_as_a_future_capability(self):
