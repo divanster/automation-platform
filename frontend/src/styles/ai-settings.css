@@ -177,6 +177,32 @@
   font-size: var(--text-lg);
   overflow-wrap: anywhere;
 }
+.connection-test {
+  margin-top: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.connection-test-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-3);
+}
+.connection-test-controls .field {
+  flex: 1 1 16rem;
+  margin: 0;
+}
+.connection-test-hint {
+  margin: var(--space-2) 0 0;
+  font-size: var(--text-sm);
+}
+.connection-test-result p {
+  margin: var(--space-2) 0 0;
+}
+.connection-test-result .connection-facts {
+  margin: var(--space-2) 0;
+}
 
 @media (max-width: 640px) {
   .field-row,

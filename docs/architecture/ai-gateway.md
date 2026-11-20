@@ -1170,7 +1170,7 @@ It writes nothing: no settings (the selected connection, profile, policy and tim
 - A pass means the saved endpoint, credential and model answered a valid JSON object once, in this process, under this environment. It is not an evaluation, not proof that extraction will be accurate, and says nothing about the worker's own environment (it may differ: the worker has its own process, variables and, for a managed credential, its own Windows account).
 - No audit event: a test that sends a request to an external provider is logged (identifiers only) but not recorded in the audit table, because the audit vocabulary and its migration are unchanged.
 - The legacy environment-configured Workbench provider cannot be tested here (it is not a saved connection); a saved Workbench connection can.
-- No frontend; no connection-test button.
+- No frontend; no connection-test button. (Superseded by AI-CON-TEST-2: the AI settings page has a per-connection Test connection action, `docs/development/frontend-slice.md` section 21.)
 
 ### 21.7 Tests
 

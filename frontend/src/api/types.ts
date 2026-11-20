@@ -304,6 +304,22 @@ export interface AiCredentialStatus {
   apply: string;
 }
 
+// --- AI connection test (backend/apps/api/serializers.py, AIConnectionTestOutput) ---
+// The outcome of one fixed probe of ONE saved connection and ONE of its saved profiles. It has no field that could hold provider output, a header, an endpoint or request content.
+
+export interface AiConnectionTestResult {
+  connection_id: string;
+  profile_id: string;
+  provider_type: string;
+  locality: string;
+  ok: boolean;
+  /** Null on success; else one of the AI Gateway's stable error codes. */
+  code: string | null;
+  /** Whether a later, manual retry could help. */
+  retryable: boolean;
+  duration_ms: number;
+}
+
 export interface ListQuery {
   page?: number;
   page_size?: number;
