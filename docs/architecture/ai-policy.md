@@ -26,6 +26,11 @@
 > replaces the three mode, policy and timeout variables when the worker starts, and a change needs a worker restart (no hot reload). Each successful save records an `ai_settings.updated` audit event (actor, time, revision, mode, provider, profile, policy and timeout identifiers; no secret) in the same transaction (audit migration `0003`; its PostgreSQL tests are not run). This is still **not** the approved company policy of section 4: there is no approval record,
 > the event keeps the new values only, audit immutability is ORM-level, and the key is still environment-only. See [ai-gateway.md](ai-gateway.md), section 16.
 >
+> **AI-CON-1: an OpenAI-compatible provider foundation (written, DB-free tested with a mocked transport; not run against any real server; opt-in; used by nothing).** It supports an explicit endpoint, model, optional key and one declared locality (`local`, `company_endpoint` or
+> `cloud`) with no default and no fallback; the data policy is enforced by the gateway before the adapter runs, and destination rules (an explicit approved-origin list, a strict URL grammar, https for remote endpoints, plain http for loopback only, resolved-address checks against SSRF
+> and DNS rebinding, no redirects, no implicit proxy) are enforced by the adapter and a guarded transport. A company endpoint reaches only operator-approved CIDR ranges (`AP_AI_OPENAI_COMPANY_CIDRS`, required, no default), an explicit denylist of special-purpose and metadata ranges
+> applies to company and cloud endpoints, and a proxy is refused for host-name endpoints (a proxy would resolve names where no address rule can be applied). Request Intake, the AI settings catalog and the deterministic default are unchanged. See [ai-gateway.md](ai-gateway.md), section 17.
+>
 > **Naming used by the code.** The third mode is `approved_cloud` with the locality `cloud` (this document first proposed
 > `approved_external` and `external`; ADR 0004 still uses the old names). The error codes are `provider_unavailable`,
 > `policy_violation`, `timeout`, `invalid_structured_output`, `rate_limit`, `authentication_failure`, `unsupported_model`,
@@ -72,9 +77,14 @@ The gateway does not depend on business workflows
    calls, needs no credentials, and has locality `local`. It exists so the whole
    workflow, including failure paths, can be tested without a real model.
 2. **Local adapter (later, Phase 6).** A model running on the same machine.
+   *AI-CON-1: an OpenAI-compatible adapter can serve this role for a server on loopback (`local`: plain http allowed, loopback only, key optional). It has never run against a real server, nothing selects it
+   yet, and bundling or managing a local runtime is still undecided.*
 3. **Company-endpoint adapter.** A model server operated by the
    company. *AI-1b: the KPMG Workbench adapter is this kind, classified `company_endpoint` by the owner; it refuses to run under `local_only`, may run under
-   `company_endpoint`, and by the cumulative rule under `approved_cloud`. Written, not verified against the service.*
+   `company_endpoint`, and by the cumulative rule under `approved_cloud`. Written, not verified against the service. AI-CON-1: the OpenAI-compatible adapter can also be declared `company_endpoint`
+   (https only, key required, and only addresses inside the CIDR ranges the operator approved in `AP_AI_OPENAI_COMPANY_CIDRS`, which has no default) or, for a public host, `cloud` (https only, key required, global addresses only, and the provider id must be named as approved).
+   Special-purpose and metadata ranges are refused for both, whatever is approved, and a proxy is refused for host-name endpoints. A public cloud host therefore cannot become a company endpoint by declaration alone.
+   The locality is always the operator's explicit declaration, cross-checked against the host and never inferred from a name.*
 4. **External adapter (later, Phase 6).** A third-party hosted service, only
    under the approved-cloud mode.
 
@@ -167,6 +177,9 @@ specific capabilities, and human approval for consequential actions.
   header (`Ocp-Apim-Subscription-Key`, raw value); it is not a `ModelProfile` field, not in Django settings, logs, errors, provenance or any API response. A missing key fails
   closed, and the endpoint host is allowlisted so the key cannot be sent to another destination. This is an interim mechanism, not the decided credential store; the proxy and
   TLS rules are in [ai-gateway.md](ai-gateway.md), section 14.5.
+- *As implemented in AI-CON-1 (OpenAI-compatible provider):* the same interim approach with its own variable (`AP_AI_OPENAI_API_KEY`), sent only as `Authorization: Bearer <key>`. It is optional for a `local` endpoint and required for
+  `company_endpoint` and `cloud` (fail closed). The endpoint is not a secret but is still never stored in a `ModelProfile`; it must be approved separately in an explicit origin list, a company endpoint must also have its approved CIDR ranges, and a transport refuses to send to a resolved
+  address its locality may not reach (loopback-only, approved-ranges-only, global-only, and never a special-purpose or metadata range), to a redirect target, through a proxy for a host name, or in plain text unless the endpoint is on loopback. See [ai-gateway.md](ai-gateway.md), section 17.4.
 
 ## 10. Capability checks
 

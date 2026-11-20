@@ -1,6 +1,6 @@
 """The HTTP seam of the AI Gateway adapters. Pure Python, standard library only; it opens no socket.
 
-An HTTP-based adapter (``adapters/workbench.py``) never talks to the network itself. It builds an ``HttpRequest``, hands it to an
+An HTTP-based adapter (``adapters/workbench.py``, ``adapters/openai_compatible.py``) never talks to the network itself. It builds an ``HttpRequest``, hands it to an
 ``HttpTransport`` and reads an ``HttpResponse``. The package stays free of ``socket``, ``ssl`` and ``http``: the one real transport lives
 outside it (``config/ai_http_transport.py``) and tests use a recording fake, so the adapter's wire behaviour is testable with no network.
 
@@ -12,12 +12,15 @@ holds a URL, a header, a body or a credential.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
+from .network import NetworkClass
+
 TRANSPORT_ERROR_KINDS = frozenset(
     {
         "timeout",  # the connection was made, or may have been, and no answer arrived in time
         "connect",  # the connection could not be made (nothing reached the server)
         "tls",  # certificate or handshake failure: not transient
         "protocol",  # malformed or oversized HTTP answer
+        "destination",  # the destination (or an address it resolved to) is not one the request may reach; nothing was sent
     }
 )
 
@@ -43,6 +46,12 @@ class HttpRequest:
     body: bytes = field(repr=False)
     connect_timeout_seconds: float
     read_timeout_seconds: float
+    # ``None`` (the Workbench): no rule about resolved addresses, https only. A ``NetworkClass`` (the OpenAI-compatible adapter): the transport must resolve the
+    # host, refuse the call (``destination``) unless EVERY address it may use is permitted for the class, connect to a validated address, and allow plain http
+    # only for ``loopback``. A transport that cannot enforce it must refuse the request rather than ignore it.
+    network_class: NetworkClass | None = None
+    # CIDR ranges (canonical strings) the operator approved for the ``internal`` class; it reaches nothing without them. Ignored by the other classes.
+    approved_networks: tuple = ()
 
 
 @dataclass(frozen=True)

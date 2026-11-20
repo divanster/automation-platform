@@ -9,7 +9,7 @@ from tests.ai_gateway_support import SECRET_SENTINEL
 
 class TransportContractTests(unittest.TestCase):
     def test_the_kinds_are_fixed_and_the_messages_are_fixed(self):
-        self.assertEqual(TRANSPORT_ERROR_KINDS, {"timeout", "connect", "tls", "protocol"})
+        self.assertEqual(TRANSPORT_ERROR_KINDS, {"timeout", "connect", "tls", "protocol", "destination"})
         for kind in TRANSPORT_ERROR_KINDS:
             self.assertEqual(str(TransportError(kind)), f"HTTP transport failure: {kind}")
         with self.assertRaises(ValueError):

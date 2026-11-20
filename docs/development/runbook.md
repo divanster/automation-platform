@@ -804,6 +804,45 @@ dashboard route, API prefix and navigation entry explicitly (`CORE_*` constants)
 
 **What nobody has checked:** the summary against a real database and a real browser, its latency on a realistic number of requests, whether an index would help (none was added), and behaviour under load.
 
+### 5.8 OpenAI-compatible provider (AI-CON-1): configuration and DB-free validation
+
+**Status: written and DB-free tested in the development VM only (157 new tests, 2998 DB-free tests in all), with a MOCKED transport, a fake resolver and a fake connection factory. Nothing was sent to any server, no key was used, no database was touched, and no migration was added. It is opt-in and nothing in the application uses it:** with none of the variables below set there is no OpenAI-compatible provider, Request Intake extracts as configured in sections 5.6 and 5.6a (deterministic by default), and the Workbench behaves as before. A read-only endpoint security review was followed by three fixes (a proxy is refused for host-name endpoints, a company endpoint needs approved CIDR ranges, special-purpose addresses are denied explicitly); see [ai-gateway.md](../architecture/ai-gateway.md) section 17 (17.10 for the fixes).
+
+**Variables** (names in `.env.example`, all commented out; set them in the git-ignored `.env` or the process environment, **never commit a value, paste a key into a chat or put it in a command line**). They are read by `config/ai_openai_compatible.py` when a gateway is built, not by the Django settings. **There are no defaults for the first four.**
+
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `AP_AI_OPENAI_ENDPOINT` | yes | The base URL, for example `https://llm.example.invalid/v1`; `/chat/completions` is appended. No credentials, query, fragment, percent-encoding or `..`; a lower-case host; `https` unless the endpoint is `localhost` or a loopback literal with locality `local`. |
+| `AP_AI_OPENAI_ALLOWED_ORIGINS` | yes | Comma-separated origins (`https://llm.example.invalid`, `http://127.0.0.1:11434`; no path). The endpoint's origin must be listed: approving a destination is a separate, explicit step. Each origin must suit the declared locality. |
+| `AP_AI_OPENAI_LOCALITY` | yes | `local`, `company_endpoint` or `cloud`: where the endpoint processes data. **Your declaration, never guessed from the name**, and refused when it contradicts the host (a loopback host is only `local`; a non-loopback host is never `local`; a private address is not `cloud`). |
+| `AP_AI_OPENAI_MODEL` | yes | The one model identifier to call (sent as `model`; for example `llama3:8b`). |
+| `AP_AI_OPENAI_COMPANY_CIDRS` | when the locality is `company_endpoint`; refused otherwise | Comma-separated CIDR ranges the company endpoint may resolve to, for example `10.20.0.0/16,192.168.40.0/24`. **No default.** Every address the host name resolves to must lie inside one, or the call is refused before anything is sent. CIDR notation only (no host bits, no netmask form), no broader than /8 (IPv4) or /16 (IPv6), at most 20, and no range that overlaps a denied special-purpose range (loopback, link-local and metadata, `0.0.0.0/8`, `100.64.0.0/10`, `198.18.0.0/15`, `192.0.0.0/24`, `192.88.99.0/24`, documentation ranges, `168.63.129.16`, `fd00:ec2::/32` and the IPv6 transition ranges): such a range stops configuration. A public host the company does not approve a range for is not a company endpoint. |
+| `AP_AI_OPENAI_API_KEY` | unless `local` | Sent only as `Authorization: Bearer <key>`. The only secret. Missing for `company_endpoint` or `cloud` stops configuration. |
+| `AP_AI_OPENAI_TIMEOUT_SECONDS` | no | Default `90`, 1 to 300: the deadline of a whole call, retries included. |
+| `AP_AI_OPENAI_MAX_RETRIES` | no | Default `2`, 0 to 5: same endpoint and model only, for a refused connection, 429, 502, 503 and 504. |
+| `AP_AI_OPENAI_MAX_INPUT_TOKENS`, `AP_AI_OPENAI_MAX_OUTPUT_TOKENS` | no | Defaults `32000` and `4096`: the profile's limits for the deployment's model (provisional; set them to what your model supports). |
+| `AP_AI_OPENAI_PROXY_URL` | no | `http://[user:password@]host[:port]`, the only proxy used (`HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` are ignored). **Refused for a `local` endpoint and for every endpoint that is a host name** (`proxy_not_allowed_for_hostname_endpoint`): a proxy would resolve the name where no address rule can be applied, and no setting overrides this. It can only be used with an IP-literal endpoint (which needs an IP subject alternative name in its certificate), validated locally before the tunnel opens. On a network that allows only proxied access, a host-name endpoint therefore cannot be used yet. |
+| `AP_AI_OPENAI_CA_BUNDLE` | no | An extra PEM CA file. TLS verification cannot be switched off. |
+
+**Policy.** The profile `openai-compatible` is approved for the policy mode its locality needs, and the gateway applies the installation's mode on every call before any adapter code: `local_only` permits only `local`; `company_endpoint` permits `local` and `company_endpoint`; `approved_cloud` also permits `cloud`, and only for a provider named in the policy's approved cloud providers. There is no fallback to another provider, model or locality. Wiring this provider into Request Intake extraction or the AI settings API is a separate, later change.
+
+**Destination restrictions in one place.** `https` always, plain `http` only for `localhost` or a loopback literal declared `local`; every resolved address must be loopback (`local`), inside `AP_AI_OPENAI_COMPANY_CIDRS` (`company_endpoint`) or global (`cloud`), and never in the explicit special-purpose denylist (a metadata address such as `169.254.169.254` is refused for both remote localities whatever is approved); the connection goes to a validated address, not to the name; redirects are refused; a proxy is refused for host names. **Remaining limitations:** nothing has been run against a real server or DNS; name resolution is not bounded by the call deadline; the ranges you approve are your responsibility (the code cannot tell whether they are the right ones); the denylist is a fixed list and does not know every provider-specific address; and none of this replaces network egress rules ([ai-gateway.md](../architecture/ai-gateway.md) 17.8).
+
+**What the VM checks (DB-free; from `backend\`; no network, no key, nothing installed, no PostgreSQL):**
+
+```powershell
+$Py = "..\.venv\Scripts\python.exe"
+& $Py manage.py test tests.test_ai_network tests.test_ai_openai_adapter tests.test_ai_openai_transport tests.test_ai_openai_composition tests.test_ai_gateway_boundaries tests.test_ai_gateway_transport_contract   # expect OK
+& $Py manage.py test                                                  # expect OK (2998 tests at the AI-CON-1 checkpoint; re-check the number)
+& $Py -m unittest tests.test_ai_network tests.test_ai_openai_adapter tests.test_ai_workbench_adapter tests.test_ai_gateway_transport_contract   # pure: no Django settings
+& $Py manage.py check
+& $Py manage.py makemigrations --check --dry-run                      # expect: No changes detected (AI-CON-1 adds no model or migration)
+& $Py -m compileall -q apps config tests workflows manage.py
+git diff --check
+```
+
+**What nobody has checked:** any request to a real local, company or cloud server (whether it accepts `response_format` `json_object` and `max_tokens`, and what it reports in `model` and `usage`), real DNS answers, certificates, the resolved-address rules on a real network and whether a real company range and endpoint pass them, behaviour under load, and the quality of any model's answer. Use only synthetic, non-customer text for a first probe, and only against an endpoint the owner has approved.
+
 ## 6. Local Windows computer: setup and validation (reference procedure; owner-operated)
 
 > **Nothing in this section has been run.** No local repository, Python

@@ -1,4 +1,6 @@
-# AI Gateway Foundation (AI-1a), the KPMG Workbench provider (AI-1b) and Request Intake extraction (AI-2a)
+# AI Gateway Foundation (AI-1a), the KPMG Workbench provider (AI-1b), Request Intake extraction (AI-2a) and the OpenAI-compatible provider (AI-CON-1)
+
+> **AI-CON-1 status (on `feat/ai-openai-compatible`, not committed): an OpenAI-compatible provider (`openai_compatible`) exists for approved local and company endpoints (and, under the strictest policy, a cloud one), opt-in and used by nothing.** It has an explicit endpoint, approval list, locality and model, an optional key (required unless `local`), strict destination rules checked against the RESOLVED addresses by a guarded transport, and no fallback. Checked with DB-free tests and a MOCKED transport only; it has never talked to a real server. Section 17 describes it and its limits; the Workbench, the deterministic default and Request Intake are unchanged.
 
 > **AI-2a status (added after AI-1b was merged, PR #20): Request Intake can now extract with the gateway, but only when an operator explicitly enables it.** The default
 > is unchanged: with nothing set, the worker uses the deterministic fixture parser and no AI provider is called. Section 15 describes the extraction modes, the policy and
@@ -62,16 +64,20 @@ backend/apps/ai_gateway/          pure standard library; no Django; not an insta
     registry.py      ProviderRegistry (static, immutable)
     gateway.py       AIGateway (policy, call, validation)
     transport.py     (AI-1b) the HTTP seam: HttpRequest, HttpResponse, HttpTransport, TransportError; opens no socket
+    network.py       (AI-CON-1) pure destination rules: the strict URL grammar, Origin, NetworkClass, address_permitted
     adapters/deterministic.py   the deterministic TEST provider (not re-exported by the package)
     adapters/workbench.py       (AI-1b) the KPMG Workbench provider; pure, talks only to an HttpTransport
-backend/config/ai_gateway.py      composition root: BUILTIN_PROVIDERS = (), BUILTIN_PROFILES = ()   (unchanged by AI-1b)
+    adapters/openai_compatible.py   (AI-CON-1) the OpenAI-compatible provider; pure, talks only to an HttpTransport
+backend/config/ai_gateway.py      composition root: BUILTIN_PROVIDERS = (), BUILTIN_PROFILES = ()   (unchanged by AI-1b and AI-CON-1)
 backend/config/ai_workbench.py    (AI-1b) opt-in composition: environment -> settings -> Workbench provider, profiles and gateway
-backend/config/ai_http_transport.py   (AI-1b) the one real transport (standard-library http.client, TLS, proxy); the only code that opens sockets
+backend/config/ai_http_transport.py   (AI-1b) the Workbench's real transport (standard-library http.client, TLS, proxy); refuses a request that carries a network class
+backend/config/ai_openai_compatible.py   (AI-CON-1) opt-in composition for the OpenAI-compatible provider (AP_AI_OPENAI_*)
+backend/config/ai_guarded_transport.py   (AI-CON-1) the guarded transport: resolves, validates every address, connects to a validated one; the other code that opens sockets
 ```
 
 Adapters import only the contract above them and the standard library; the gateway core never imports an adapter; no business module,
 workflow package or Core app imports the package, and the only `config` modules that do are `config/ai_gateway.py` and, since AI-1b,
-`config/ai_workbench.py` and `config/ai_http_transport.py`; only `config/ai_workbench.py` imports an adapter (all pinned by
+`config/ai_workbench.py` and `config/ai_http_transport.py` (since AI-CON-1 also `config/ai_openai_compatible.py` and `config/ai_guarded_transport.py`); only `config/ai_workbench.py` and `config/ai_openai_compatible.py` import an adapter (all pinned by
 `tests/test_ai_gateway_boundaries.py`). The package itself stays free of `socket`, `ssl`, `http`, `urllib` and `os`: the real network code
 is outside it.
 
@@ -771,3 +777,99 @@ Detail values are checked by the existing event builder (booleans, integers, nul
 **Migration `audit.0003_ai_settings_subject_type`** (depends on `0002`): the subject-type CHECK `audit_event_subject_type_valid` gains `ai_settings`. The action CHECK is shape-only and needs no change. No row is read, changed or deleted; PostgreSQL scans the existing rows while it adds the constraint. **Reverse** restores the previous list only while no `ai_settings` event is stored; otherwise it raises `IrreversibleError` naming a count, and never deletes an event. The migration has not been executed against PostgreSQL by the development VM (the owner has not yet run it).
 
 **Runtime:** unchanged. The audit event is written by the web process at save time; a saved change still reaches the worker only after a worker restart (16.5).
+
+## 17. OpenAI-compatible provider (AI-CON-1)
+
+> **Status: written and DB-free tested in the development VM only (157 new tests, 2998 DB-free tests in all, OK), with a MOCKED transport, a fake resolver and a fake connection factory. No request has been sent to any real endpoint, no server (local, company or cloud) has ever answered this adapter, no key exists in the repository, and the Ollama-native API, a frontend, document upload and further cloud providers are not part of it. The provider is opt-in and not used by anything in the application. A read-only endpoint security review found three risks, all fixed in this slice (17.10): hostname endpoints are refused through a proxy, a company endpoint is confined to explicitly approved CIDR ranges, and an explicit denylist of special-purpose and metadata ranges applies to company and cloud endpoints.**
+
+### 17.1 What was added, and what was not
+
+Added: the provider `openai_compatible` (`apps/ai_gateway/adapters/openai_compatible.py`), the pure destination rules (`apps/ai_gateway/network.py`), a `network_class` field and an `approved_networks` field on `HttpRequest` and a transport error kind `destination` (`transport.py`), the guarded real transport (`config/ai_guarded_transport.py`) and the opt-in composition (`config/ai_openai_compatible.py`, variables `AP_AI_OPENAI_*`).
+
+Not added: any change to Request Intake extraction, the AI settings catalog (still the Workbench only) or the worker; any setting, table, migration, endpoint or frontend; Ollama's native API; `json_schema` (native structured output); streaming; tool or function calling; embeddings; a credential store; a stored company policy; a second provider instance per process. `config/ai_gateway.py` still has empty tuples, the deterministic default is unchanged, and the Workbench adapter, composition and transport behave as before (an `HttpRequest` without a `network_class` is exactly the old request; the Workbench transport now refuses a request that asks for address rules it cannot enforce).
+
+### 17.2 Supported endpoint types
+
+A server that implements `POST {base}/chat/completions` in the OpenAI chat-completions shape and honours `response_format: {"type": "json_object"}`: for example a local vLLM, llama.cpp server or Ollama's `/v1` surface, or a company gateway in front of such a model. Three explicit localities:
+
+| Declared locality | Endpoint | Scheme | Key | Reaches (resolved addresses) | Profile approved for |
+| --- | --- | --- | --- | --- | --- |
+| `local` | `localhost` or a loopback literal (`127.0.0.0/8`, `::1`) only | `http` or `https` | optional | loopback only | `local_only` |
+| `company_endpoint` | a company host name or a literal inside an approved CIDR range | `https` only | required | ONLY addresses inside `AP_AI_OPENAI_COMPANY_CIDRS` (required, no default); never a denied special-purpose range, whatever is approved | `company_endpoint` |
+| `cloud` | a public host name or a global literal | `https` only | required | global only | `approved_cloud` (the provider id must also be in the policy's approved cloud providers) |
+
+A server on a LAN is a `company_endpoint` with TLS, not a `local` one: `local` means this machine.
+
+### 17.3 Provider contract
+
+* **Identity.** `provider_id` `openai_compatible`, kind `openai_compatible_chat`, locality = the operator's declaration (never inferred from a name), `test_only` false. One endpoint and one model per process; the one profile is `openai-compatible`. There is no second profile, provider or model to fall back to.
+* **Capabilities.** `json_mode` only; `temperature`, `top_p` and `seed` are accepted and sent only when the profile sets them; input and output token limits come from the configuration (defaults 32 000 and 4 096; they are the operator's limits, not a claim about the model).
+* **Request.** `POST {endpoint}/chat/completions`, headers `Content-Type`, `Accept` and, when a key exists, `Authorization: Bearer <key>`. Body: `model` (the configured identifier), `messages` (system: the instructions plus the output JSON Schema in words; user: the input text), `response_format` `json_object`, `stream` false, `max_tokens` (the call's output limit), plus the optional sampling parameters.
+* **Response.** The answer is `choices[0].message.content`; `model` is recorded as the reported model (`unreported` when absent, never replaced by the requested one); `usage.prompt_tokens` and `usage.completion_tokens` become the token counts when they are non-negative integers. `finish_reason` `length` is `invalid_structured_output`; any other value than `stop` or none, a refusal or no content is `provider_error`. The gateway validates the structure against the schema in every case.
+* **Errors** (adapter code, reason token; no server text is ever copied): 401 and 403 `authentication_failure`; 404 `unsupported_model`; 408 and a transport timeout `timeout`; 429 `rate_limit` (retried); 502, 503, 504 and a refused connection `provider_unavailable` (retried); 3xx `provider_error` / `redirect_refused`; a TLS failure, a protocol failure or a refused destination `provider_error`; everything else `provider_error` with `http_<status>`. The gateway reports adapter reasons as `provider_failed`; the finer token is visible only to code that calls the provider directly (the tests do).
+* **Retries.** At most `max_retries` (default 2, maximum 5) further attempts to the same endpoint and model, only for a refused connection, 429, 502, 503 and 504, with back-off, all inside the call's deadline. A timeout is not retried (the model may have received the request).
+* **Provenance.** The gateway's `Provenance` records the provider id and kind, the locality, the policy mode, the requested and the reported model, the duration and the token counts; never a prompt, input, output, key or endpoint.
+
+### 17.4 Endpoint security
+
+| Control | Where | What it does |
+| --- | --- | --- |
+| Explicit allowlist | `OpenAICompatibleConfig` | The endpoint's origin (`scheme://host:port`) must be one of `AP_AI_OPENAI_ALLOWED_ORIGINS`; there is no default, so a changed endpoint alone sends nothing. The built URL is checked against the list again immediately before every request. Each listed origin must itself suit the declared locality. |
+| No arbitrary URLs | `network.parse_url` | A strict grammar: `http(s)`, a lower-case host, an optional port from 1 to 65535, a path of plain characters only; no credentials (`user@`), query, fragment, percent-encoding, `..`, `//`, backslash or whitespace. Numeric host spellings (`2130706433`, `0x7f000001`, `0177.0.0.1`, `127.1`) and IPv6 zone identifiers are not hosts. |
+| TLS | the grammar, the config, the transport | `https` is required for every `company_endpoint` and `cloud` endpoint. Certificates and host names are always verified (no switch to turn it off). |
+| Plain `http` | the config, the transport | Only for a `local` endpoint whose host is `localhost` or a loopback literal, and only with the `loopback` network class. |
+| Locality mismatch | `origin_problem` | A loopback host is never `company_endpoint` or `cloud`; a non-loopback host is never `local`; a literal address must be one its locality may reach (for example the cloud metadata address `169.254.169.254` is refused for both). |
+| Resolved addresses (SSRF, DNS rebinding) | `config/ai_guarded_transport.py` with `network.address_permitted` | The transport resolves the host itself and refuses the call unless EVERY address it may use is permitted for the request's network class (company: inside an approved range; cloud: global; both: not in the denylist); IPv4-mapped IPv6 addresses are judged as the IPv4 address. It then connects to a validated address, not to the name (the name is still what `Host` and certificate verification use), so a second lookup cannot return something else. |
+| Approved company ranges | `network.parse_networks`, `OpenAICompatibleConfig`, the transport | `AP_AI_OPENAI_COMPANY_CIDRS` is required for `company_endpoint` and refused for `local` and `cloud`. Plain CIDR notation only (no host bits, no netmask form), no broader than /8 (IPv4) or /16 (IPv6), and no range that overlaps a denied range, at most 20. The ranges travel with every request (`HttpRequest.approved_networks`); without them the `internal` class reaches nothing. A literal company endpoint must lie inside them. A public address is a company address only if the company approved the range that holds it: a public cloud host cannot become a company endpoint by declaration alone. |
+| Special-purpose addresses | `network.DENIED_NETWORKS` | Written out, not derived from `ipaddress.is_private` or `is_global`, and applied BEFORE any approved range, to company and cloud: `0.0.0.0/8`, `100.64.0.0/10` (includes `100.100.100.200`), `127.0.0.0/8`, `169.254.0.0/16` (the metadata address `169.254.169.254`, `169.254.170.2`), `168.63.129.16/32` (Azure), `192.0.0.0/24`, `192.0.2.0/24`, `192.88.99.0/24`, `198.18.0.0/15`, `198.51.100.0/24`, `203.0.113.0/24`, `224.0.0.0/4`, `240.0.0.0/4`; IPv6 `::/96` (unspecified, loopback, IPv4-compatible), `::ffff:0:0:0/96` (IPv4-translated), `64:ff9b::/96` and `64:ff9b:1::/48` (NAT64), `100::/64`, `2001::/23` (Teredo and the IETF ranges), `2001:db8::/32`, `2002::/16` (6to4), `3fff::/20`, `5f00::/16`, `fd00:ec2::/32` (AWS), `fe80::/10`, `fec0::/10`, `ff00::/8`. IPv4-mapped forms are judged as the IPv4 address they carry, so `::ffff:169.254.169.254` is refused too. |
+| Redirects | the transport and the adapter | `http.client` follows none; a 3xx answer is refused (`redirect_refused`) and never retried, so the key cannot follow a redirect elsewhere. |
+| Proxy | the config and the transport | Only an explicit `AP_AI_OPENAI_PROXY_URL`; `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` are never read. **A proxy is refused for every host-name endpoint** (`proxy_not_allowed_for_hostname_endpoint` at configuration, `destination` in the transport): the proxy would resolve the name where no address rule can be applied, and there is no acknowledgement, flag or other bypass. It stays possible only for an IP-literal endpoint, which is validated locally like any address before the tunnel is opened. A `local` endpoint with a proxy is refused at configuration (`proxy_not_allowed_for_local`) and, in the transport, a loopback request is refused while a proxy is set: it is never silently sent around the proxy or through it. |
+| Transport that cannot enforce | `HttpRequest.network_class` | A transport that gets a request carrying a network class and cannot enforce it refuses it (`destination`); the Workbench transport does exactly that. |
+
+### 17.5 Data locality
+
+The locality is the operator's explicit declaration (`AP_AI_OPENAI_LOCALITY`, no default) and the provider reports it in its descriptor. It is cross-checked against the host (17.4) but never derived from the name: a host called `local.corp.example` declared `local` is refused, and so is a loopback host declared `company_endpoint`. The gateway then applies the policy before any adapter code runs, on every call: `local_only` permits only `local`; `company_endpoint` permits `local` and `company_endpoint`; `approved_cloud` additionally permits `cloud`, and only when the provider id is in the context's approved cloud providers. There is no fallback to a provider of another locality. The profile's own policy mode is the one its locality needs (`local_only`, `company_endpoint` or `approved_cloud`), so the policy of the profile and the policy in force must both allow the locality.
+
+### 17.6 Configuration
+
+Backend environment only, read by `config/ai_openai_compatible.py` when a function runs (never at import, never through Django settings, never from a database; `ModelProfile` holds no endpoint or secret). Required, no defaults: `AP_AI_OPENAI_ENDPOINT`, `AP_AI_OPENAI_ALLOWED_ORIGINS`, `AP_AI_OPENAI_LOCALITY`, `AP_AI_OPENAI_MODEL`; required when the locality is `company_endpoint` (and refused for `local` and `cloud`): `AP_AI_OPENAI_COMPANY_CIDRS`, comma-separated CIDR ranges such as `10.20.0.0/16,192.168.40.0/24`; required unless the locality is `local`: `AP_AI_OPENAI_API_KEY`. Optional: `AP_AI_OPENAI_TIMEOUT_SECONDS` (90), `AP_AI_OPENAI_MAX_RETRIES` (2), `AP_AI_OPENAI_MAX_INPUT_TOKENS` (32000), `AP_AI_OPENAI_MAX_OUTPUT_TOKENS` (4096), `AP_AI_OPENAI_PROXY_URL` (IP-literal endpoints only), `AP_AI_OPENAI_CA_BUNDLE`. A missing or invalid value raises `configuration_error` naming the variable or a field token (`missing_ap_ai_openai_company_cidrs`, `invalid_openai_approved_networks`, `openai_approved_networks_not_applicable`, `proxy_not_allowed_for_hostname_endpoint`, ...), never the value. The test runner removes every `AP_AI_*` variable, so a developer's `.env` cannot reach a test.
+
+### 17.7 Credential handling
+
+The key is held in `OpenAICompatibleConfig.api_key` (excluded from `repr` and comparison), used only to build the `Authorization` header of an `HttpRequest` (whose `repr` excludes headers and body), and appears in no error, message, reason, log line, profile or settings `repr`. A foreign exception from a transport is classified and dropped, and a server's error body is never copied. The key is never stored in the database or returned by any endpoint. A key is optional for a `local` endpoint only; for the other localities its absence stops configuration (fail closed).
+
+### 17.8 Limitations (remaining)
+
+* **Never run against a real server.** Whether vLLM, llama.cpp, Ollama's `/v1` or a company gateway accepts this exact request (in particular `response_format` `json_object` and `max_tokens`) is unverified; servers differ, and some ignore `json_object`. The gateway still validates every answer, so a server that ignores it fails closed with `invalid_structured_output` rather than returning unchecked data.
+* **Not wired in.** Request Intake extraction, the AI settings API and its catalog, and modules do not use this provider; making it selectable is a later, reviewed change (catalog, settings validation, profile approval for the workflow, worker composition).
+* **One endpoint and one model per process,** and one profile; no per-company policy, no stored approval record, no credential store, no key rotation.
+* **Name resolution is outside the deadline.** `getaddrinfo` cannot be given a timeout. The address rules protect the connection this process makes; they are not a firewall and do not replace network egress rules or a vetted endpoint.
+* **Proxy use is narrow.** Because a proxy is refused for host-name endpoints (17.4), a company or cloud endpoint reached through a proxy-only network cannot use this provider until it is given as an IP literal (certificate verification then needs an IP subject alternative name) or the network allows a direct connection.
+* **Approved ranges are the operator's word.** The code confirms that every resolved address lies in the ranges the operator approved and in no denied range; it cannot tell whether the operator's ranges are the right ones, that a host inside them is the company's own, or that a company gateway forwards data nowhere else. A range that contains only a public address the company does not own would be accepted if it was approved on purpose. Company ranges inside `100.64.0.0/10` (carrier-grade NAT) are refused and cannot be approved.
+* **The denylist is a fixed list.** It names the metadata and special-purpose ranges known today; a provider-specific address outside every listed range (a new metadata address, an address a cloud provider reserves inside an otherwise public range) is not caught for a `cloud` endpoint, whose only other rule is "global". `ipaddress` classifications can also differ between Python versions, which is why the list is explicit.
+* **Locality is a declaration.** The code can check the host and the resolved addresses against what is declared; it cannot observe where a company gateway forwards data, or that a "local" server on loopback is not itself a tunnel.
+* **`json_schema` structured output, streaming, tool calling, a `Retry-After` header and token budgets beyond the profile's limits are not supported.** Provisional, unmeasured limits.
+* **Cooperative timeouts and no sandbox,** as in section 12.
+
+### 17.9 Tests
+
+DB-free, in the development VM, mocked HTTP only, no PostgreSQL, no network, no key: 157 new tests (2998 DB-free tests in all, OK).
+
+| File | Tests | Covers |
+| --- | --- | --- |
+| `test_ai_network.py` | 24 | the URL grammar (credentials, query, fragment, encoding, numeric spellings, ports, paths, no echo), the approved-range rules (reach, none approved, a broken list, the denylist beating an approved range, about 55 special-purpose and metadata addresses, ordinary neighbours not caught by mistake) and the strict CIDR parser (malformed, too broad, touching a denied range) |
+| `test_ai_openai_adapter.py` | 59 | local and corporate configuration, required, malformed and refused CIDR ranges, literal company endpoints against the ranges, special-purpose literals, locality mismatches, the approval list, invalid destinations, bearer authentication and its absence, the request body and the ranges that travel with it, structured JSON and invalid output, status and transport error classification, redirects, rate limits and retries, deadlines, no fallback, the policy matrix, no secret in errors, logs or reprs |
+| `test_ai_openai_transport.py` | 38 | SSRF and rebinding rules with a fake resolver (loopback, approved and unapproved ranges, public answers, mixed answers, special-purpose and metadata answers, literals), a hostile resolver that answers differently on later calls, plain http for loopback only, connection to the validated address, fail-over, proxy refusal for every host name and the IP-literal exception, redirects, timeouts, the response cap, fixed error kinds, the pinned connection classes, the Workbench transport's refusal |
+| `test_ai_openai_composition.py` | 36 | environment loading that fails closed and names only variables (including the CIDR variable and the proxy refusal with no bypass variable), profiles by locality, configuration -> adapter -> guarded transport end to end with a fake resolver, the deterministic default, the Workbench and the AI settings catalog unchanged |
+
+Existing tests edited (lists and one pin only): `test_ai_gateway_boundaries`, `test_ai_gateway_transport_contract`, `test_intake_ai_boundaries`.
+
+### 17.10 Endpoint security review and its three fixes
+
+A read-only review of 17.1 to 17.9 (before these fixes the suite had 2962 tests) found three confirmed risks. All three are fixed, with no change to Request Intake, the AI settings, the Workbench or the deterministic default:
+
+1. **A proxy resolved host names where no address rule could see them (Medium in principle).** A proxy is now refused for every host-name endpoint, in the configuration (`proxy_not_allowed_for_hostname_endpoint`) and again in the transport (`destination`), with no acknowledgement or other bypass. IP-literal endpoints may still use a proxy and are validated locally first. Direct, validated, pinned connections are unchanged.
+2. **A `company_endpoint` accepted any public address (Medium).** `private or global` is gone: a company endpoint now reaches only addresses inside the CIDR ranges in `AP_AI_OPENAI_COMPANY_CIDRS`, which is required, has no default and is refused for the other localities. Every resolved address is checked against them at connection time; a missing, malformed, too broad or denied-range-touching list stops configuration. A public cloud host can no longer be classified as a company endpoint by declaration alone; TLS verification is unchanged.
+3. **Special-purpose and metadata ranges were only partly covered (Low).** `network.DENIED_NETWORKS` is an explicit list (17.4) applied before any approved range and to `cloud` as well, instead of relying on `is_private` and `is_global`. It adds `0.0.0.0/8`, `198.18.0.0/15`, `192.0.0.0/24`, `192.88.99.0/24`, `168.63.129.16`, `fd00:ec2::/32`, the documentation ranges and the IPv6 transition forms to the loopback, link-local and metadata ranges already refused.
+
+Not changed: the Workbench transport and adapter (the Workbench request carries no network class), Request Intake, the AI settings catalog (still the Workbench only), the local-only behaviour (loopback only, plain http only there) and the deterministic default.
