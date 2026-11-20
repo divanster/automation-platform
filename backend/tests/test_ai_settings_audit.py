@@ -41,6 +41,7 @@ from tests.test_ai_settings_api import (
 BACKEND = Path(__file__).resolve().parent.parent
 SENTINELS = (KEY_SENTINEL, PROXY_SENTINEL, CHARGE_SENTINEL)
 DETERMINISTIC = {"extraction_mode": "deterministic"}
+LEGACY = {"connection_id": None, "connection_count": 0, "connections_changed": False}  # what a save without connections records about them
 
 
 def ai_data(**changes):
@@ -64,7 +65,7 @@ class SuccessfulUpdateTests(SimpleTestCase):
         self.assertEqual((event.case_id, event.run_id), (None, None))
         self.assertEqual(
             event.details,
-            {"revision": 1, "extraction_mode": "ai", "provider_id": PROVIDER, "profile_id": PROFILE, "policy_mode": "company_endpoint", "timeout_seconds": 45},
+            {**LEGACY, "revision": 1, "extraction_mode": "ai", "provider_id": PROVIDER, "profile_id": PROFILE, "policy_mode": "company_endpoint", "timeout_seconds": 45},
         )
 
     def test_the_event_carries_the_new_revision_not_the_expected_one(self):
@@ -78,7 +79,7 @@ class SuccessfulUpdateTests(SimpleTestCase):
         update(store, DETERMINISTIC, expected=2)
         (event,) = store.events
         self.assertEqual(
-            event.details, {"revision": 3, "extraction_mode": "deterministic", "provider_id": None, "profile_id": None, "policy_mode": None, "timeout_seconds": None}
+            event.details, {**LEGACY, "revision": 3, "extraction_mode": "deterministic", "provider_id": None, "profile_id": None, "policy_mode": None, "timeout_seconds": None}
         )
 
     def test_the_actor_is_the_authorized_administrator_whose_public_id_is_recorded(self):
@@ -302,7 +303,7 @@ class ContractPinTests(SimpleTestCase):
         self.assertEqual(audit_events.SUBJECT_AI_SETTINGS, "ai_settings")
         self.assertEqual(
             audit_events.DETAIL_KEYS[audit_events.ACTION_AI_SETTINGS_UPDATED],
-            frozenset({"revision", "extraction_mode", "provider_id", "profile_id", "policy_mode", "timeout_seconds"}),
+            frozenset({"revision", "extraction_mode", "provider_id", "profile_id", "policy_mode", "timeout_seconds", "connection_id", "connection_count", "connections_changed"}),
         )
         self.assertIn(audit_events.ACTION_AI_SETTINGS_UPDATED, audit_events.ACTIONS)
         self.assertIn(audit_events.SUBJECT_AI_SETTINGS, audit_events.SUBJECT_TYPES)
@@ -317,4 +318,6 @@ class ContractPinTests(SimpleTestCase):
 
     def test_the_event_is_recorded_exactly_once_in_the_services(self):
         text = (BACKEND / "apps" / "ai_settings" / "services.py").read_text(encoding="utf-8")
-        self.assertEqual(len(re.findall(r"record_event\(", text)), 1)
+        self.assertEqual(len(re.findall(r"record_event\(", text)), 2)  # the settings event, and the per-connection event in a loop
+        self.assertEqual(len(re.findall(r"SUBJECT_AI_SETTINGS, SETTINGS_SUBJECT_ID,", text)), 1)
+        self.assertEqual(len(re.findall(r"SUBJECT_AI_SETTINGS, connection_subject_id\(", text)), 1)

@@ -45,6 +45,7 @@ class FakeManager:
     def create(self, **fields):
         if self.store.row is not None or self.store.race:
             raise IntegrityError("duplicate")
+        fields.setdefault("connections", [])
         self.store.row = Row(updated_at=None, **fields)
         return self.store.row
 
@@ -93,8 +94,11 @@ class FakeStore:
         self.events.append(event)
 
 
-def stored_row(revision=1, mode="deterministic", provider=None, profile=None, policy=None, timeout=None):
-    return Row(revision=revision, extraction_mode=mode, provider_id=provider, profile_id=profile, policy_mode=policy, timeout_seconds=timeout, updated_at=None, updated_by_public_id=ADMIN_ID)
+def stored_row(revision=1, mode="deterministic", provider=None, profile=None, policy=None, timeout=None, connection=None, connections=None):
+    return Row(
+        revision=revision, extraction_mode=mode, provider_id=provider, profile_id=profile, policy_mode=policy, timeout_seconds=timeout, connection_id=connection,
+        connections=[] if connections is None else connections, updated_at=None, updated_by_public_id=ADMIN_ID,
+    )  # fmt: skip
 
 
 def actor(is_superuser=False, public_id=ADMIN_ID, permissions=frozenset()):

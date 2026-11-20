@@ -6,6 +6,9 @@ and no logging. The route is wired in ``config/urls.py``, which injects the ``ca
 the AI Gateway's declarations) and the worker lease the timeout must fit in: this app and this package import nothing from the gateway.
 
 A saved change does NOT reach a running worker: every response says so (``apply``). The view fails closed (a 500, no data) if it was not wired with a catalog.
+
+CONNECTIONS (AI-SET-2). The same two methods also read and replace the named connections (``connections`` in the body and in the answer) and select one (``connection_id``): one
+revision, one audit trail, saved atomically. There is no credential field in the request or the response, only a credential REFERENCE (a variable name).
 """
 
 from django.core.exceptions import ImproperlyConfigured

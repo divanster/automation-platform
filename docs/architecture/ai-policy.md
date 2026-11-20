@@ -33,6 +33,8 @@
 >
 > **AI-CON-2: a native Ollama provider (written, DB-free tested with a mocked transport; not run against any real Ollama; opt-in; used by nothing).** The provider `ollama` calls Ollama's own `/api/chat` on THIS machine only: its locality is always `local` (a constant, not a setting), its endpoint must be `localhost` or a loopback literal and listed in an explicit approved-origin list, the model is named explicitly (no default, never downloaded, no other model tried), and there is no key, no proxy (a configured proxy is refused), no redirect and no fallback. `local_only` permits it, `company_endpoint` and `approved_cloud` permit it by the cumulative rule, and no cloud provider approval is involved. The guarded transport checks that every resolved address is loopback. Request Intake, the AI settings catalog, the Workbench and the OpenAI-compatible provider are unchanged. See [ai-gateway.md](ai-gateway.md), section 18.
 >
+> **AI-SET-2: several named connections in the AI settings (written, DB-free tested with a mocked transport; PostgreSQL tests written, not run; no frontend).** An administrator can declare named connections (a static provider type: `kpmg_workbench`, `openai_compatible` or `ollama`; a locality; an endpoint; a credential REFERENCE; the model profiles it exposes; an enabled flag) and select one connection and one of its profiles for Request Intake. The data policy of section 4 is enforced as before, by the gateway's own rule: `local_only` reaches only a `local` connection, `company_endpoint` a local or company one, and a `cloud` connection only under `approved_cloud`. Because there is still no stored company policy, selecting a cloud connection together with `approved_cloud` is the explicit approval of that provider (recorded in the `ai_settings.updated` audit event; it is one administrator's decision, not a second-person approval). The operator's environment, not the stored settings, still decides which origins and address ranges an endpoint may use, so a stored endpoint can never widen an allowlist; no connection falls back to another connection, model, provider or to deterministic extraction. Credentials are still environment-only: a connection holds the NAME of an `AP_AI_CRED_*` variable and never a value. See [ai-gateway.md](ai-gateway.md), section 19.
+>
 > **Naming used by the code.** The third mode is `approved_cloud` with the locality `cloud` (this document first proposed
 > `approved_external` and `external`; ADR 0004 still uses the old names). The error codes are `provider_unavailable`,
 > `policy_violation`, `timeout`, `invalid_structured_output`, `rate_limit`, `authentication_failure`, `unsupported_model`,
@@ -128,6 +130,11 @@ Rules:
   instead of calling a now-disallowed provider.
 - A mode change affects future calls. Already-recorded results keep their
   provenance.
+- *As implemented in AI-SET-2:* the mode is still an argument of every call (taken from the stored settings, or the environment without a row), and the locality of the selected
+  connection is checked against it by the gateway before any provider code runs. The settings API refuses a pairing the gateway would refuse (`policy_forbids_provider`), the worker
+  refuses it again at start-up, and the gateway again on every call. There is no hot reload, so the mode a RUNNING worker enforces is the one it read when it started: a tightened mode
+  reaches it only with a restart (the API says `worker_restart_required`). There is still no stored company policy, no default `local_only` for a new installation and no
+  administrator approval record (section 14).
 
 ## 5. Embeddings
 
@@ -184,6 +191,7 @@ specific capabilities, and human approval for consequential actions.
   `company_endpoint` and `cloud` (fail closed). The endpoint is not a secret but is still never stored in a `ModelProfile`; it must be approved separately in an explicit origin list, a company endpoint must also have its approved CIDR ranges, and a transport refuses to send to a resolved
   address its locality may not reach (loopback-only, approved-ranges-only, global-only, and never a special-purpose or metadata range), to a redirect target, through a proxy for a host name, or in plain text unless the endpoint is on loopback. See [ai-gateway.md](ai-gateway.md), section 17.4.
 - *As implemented in AI-CON-2 (native Ollama provider):* there is no credential at all (Ollama's native API takes no key here and the adapter sends no `Authorization` header), so nothing secret is configured, stored or logged. The endpoint is still approved explicitly, must be loopback, and is never stored in a `ModelProfile`. See [ai-gateway.md](ai-gateway.md), section 18.4.
+- *As implemented in AI-SET-2 (named connections):* a stored connection holds a credential **reference**: the NAME of a backend environment variable, which must start with `AP_AI_CRED_` (so it can never name a Django secret key, a database password or another provider's key) and is never a value. The value is resolved only in the backend process that needs it (the worker at start-up; the web process only tests that it is set), is held only in the adapter's configuration object, and is never in the database, a `ModelProfile`, an API request or response, an audit event, an error or a log line. A request cannot carry a credential (unknown fields are refused and not echoed), a reference to an unset variable stops the worker (never an unauthenticated call), and the legacy Workbench connection without a reference keeps reading `AP_AI_WORKBENCH_API_KEY`. This matches this section's "reference, not secret" rule and is still an interim environment mechanism; the decided credential store remains open. See [ai-gateway.md](ai-gateway.md), section 19.5.
 
 ## 10. Capability checks
 

@@ -230,8 +230,11 @@ class SettingsAuditApiTests(base.ApiCase):
         self.assertIsNotNone(event.occurred_at)
         self.assertEqual(
             event.details,
-            {"revision": 1, "extraction_mode": "ai", "provider_id": "kpmg_workbench", "profile_id": "workbench-gpt5", "policy_mode": "company_endpoint", "timeout_seconds": 30},
-        )
+            {
+                "revision": 1, "extraction_mode": "ai", "provider_id": "kpmg_workbench", "profile_id": "workbench-gpt5", "policy_mode": "company_endpoint", "timeout_seconds": 30,
+                "connection_id": None, "connection_count": 0, "connections_changed": False,
+            },
+        )  # fmt: skip
 
     def test_each_save_adds_one_event_and_the_event_revision_matches_the_row(self):
         browser = self.as_(self.superuser)

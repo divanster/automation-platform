@@ -36,6 +36,9 @@ ACTION_MODULE_DISABLED = "module.disabled"
 # The AI settings API (apps.ai_settings): a successful change of how Request Intake extracts. Core's own action in the Core-reserved ``ai_settings`` namespace;
 # no module can declare it. The subject is the singleton settings row (see ``SUBJECT_AI_SETTINGS``).
 ACTION_AI_SETTINGS_UPDATED = "ai_settings.updated"
+# AI-SET-2: one event per connection a save created, changed or removed (``change``: ``created``, ``updated`` or ``removed``), in the same transaction as the save. Core's own
+# action in the same Core-reserved namespace. It carries identifiers, flags and counts only: never an endpoint, a credential reference or a display name.
+ACTION_AI_SETTINGS_CONNECTION_CHANGED = "ai_settings.connection_changed"
 
 ACTIONS = (
     ACTION_REQUEST_SUBMITTED,
@@ -48,6 +51,7 @@ ACTIONS = (
     ACTION_MODULE_ENABLED,
     ACTION_MODULE_DISABLED,
     ACTION_AI_SETTINGS_UPDATED,
+    ACTION_AI_SETTINGS_CONNECTION_CHANGED,
 )
 
 SUBJECT_RUN = "run"
@@ -75,8 +79,10 @@ DETAIL_KEYS = MappingProxyType(
         # identifiers, a version and a fingerprint only; ``cause`` is a short token such as ``admin_command`` or ``sync``
         ACTION_MODULE_ENABLED: frozenset({"module_id", "installed_version", "registry_fingerprint", "cause"}),
         ACTION_MODULE_DISABLED: frozenset({"module_id", "installed_version", "registry_fingerprint", "cause"}),
-        # the saved settings as identifiers and numbers only: never a key, header, endpoint, proxy or free text (every value was checked against the catalog)
-        ACTION_AI_SETTINGS_UPDATED: frozenset({"revision", "extraction_mode", "provider_id", "profile_id", "policy_mode", "timeout_seconds"}),
+        # the saved settings as identifiers and numbers only: never a key, header, endpoint, proxy or free text (every value was checked against the catalog).
+        # ``connection_id`` is the selected connection (null: the legacy provider); ``connection_count`` and ``connections_changed`` describe the stored list.
+        ACTION_AI_SETTINGS_UPDATED: frozenset({"revision", "extraction_mode", "provider_id", "profile_id", "policy_mode", "timeout_seconds", "connection_id", "connection_count", "connections_changed"}),
+        ACTION_AI_SETTINGS_CONNECTION_CHANGED: frozenset({"revision", "change", "connection_id", "provider_type", "locality", "enabled", "has_credential_ref", "profile_count"}),
     }
 )
 

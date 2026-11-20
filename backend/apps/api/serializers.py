@@ -18,6 +18,7 @@ from django.core.validators import ProhibitNullCharactersValidator
 from rest_framework import serializers
 from rest_framework.validators import ProhibitSurrogateCharactersValidator
 
+from apps.ai_settings.rules import CREDENTIAL_REF_PREFIX
 from apps.cases.run_state import STATES
 from apps.intake.policy import MAX_REQUEST_TEXT_BYTES, REJECTION_REASONS
 from workflows.request_intake import RequestedItem, Requester, SourceRef, StructuredRequest
@@ -341,24 +342,58 @@ class StrictIntegerField(serializers.IntegerField):
         return super().to_internal_value(data)
 
 
+class StrictBooleanField(serializers.BooleanField):
+    """A boolean field that accepts ONLY a JSON ``true`` or ``false``: no ``"true"``, no ``1``."""
+
+    def to_internal_value(self, data):
+        if not isinstance(data, bool):
+            self.fail("invalid")
+        return data
+
+
+class AIConnectionProfileInput(StrictSerializer):
+    profile_id = StrictCharField(max_length=128)
+    model_id = StrictCharField(max_length=256)
+
+
+class AIConnectionInput(StrictSerializer):
+    """One connection in ``PUT /api/ai-settings/extraction/``. Shape only (the settings rules decide what is acceptable).
+
+    There is deliberately NO field for a key, header, token, password, proxy or charge code: a credential cannot be sent here and an attempt is an ``unknown_field``
+    error. ``credential_ref`` names a backend environment variable; its value is never sent or returned.
+    """
+
+    connection_id = StrictCharField(max_length=128)
+    display_name = StrictCharField(max_length=256)
+    provider_type = StrictCharField(max_length=128)
+    locality = StrictCharField(max_length=64)
+    endpoint = StrictCharField(required=False, allow_null=True, default=None, max_length=2048)
+    credential_ref = StrictCharField(required=False, allow_null=True, default=None, max_length=128)
+    enabled = StrictBooleanField()
+    profiles = AIConnectionProfileInput(many=True, max_length=50)
+
+
 class AIExtractionSettingsInput(StrictSerializer):
     """The body of ``PUT /api/ai-settings/extraction/``. Shape only: which provider, profile, policy and timeout are acceptable is the settings rules' decision.
 
-    Every AI field is optional and defaults to ``None`` (deterministic mode has none), and there is deliberately NO field for a key, endpoint, header or
-    charge code: a credential cannot be sent here, and an attempt is an ``unknown_field`` error.
+    Every AI field is optional and defaults to ``None`` (deterministic mode has none), and there is deliberately NO field for a key, endpoint of the legacy provider, header or
+    charge code: a credential cannot be sent here, and an attempt is an ``unknown_field`` error. ``connection_id`` selects a stored connection (absent or null: the legacy,
+    environment-configured provider). ``connections``, when present, is the COMPLETE list of connections and replaces the stored one; when absent the stored list is kept.
     """
 
     extraction_mode = StrictCharField(max_length=32)
     provider_id = StrictCharField(required=False, allow_null=True, default=None, max_length=64)
+    connection_id = StrictCharField(required=False, allow_null=True, default=None, max_length=64)
     profile_id = StrictCharField(required=False, allow_null=True, default=None, max_length=64)
     policy_mode = StrictCharField(required=False, allow_null=True, default=None, max_length=32)
     timeout_seconds = StrictIntegerField(required=False, allow_null=True, default=None, min_value=0, max_value=100_000)
+    connections = AIConnectionInput(many=True, required=False, max_length=50)
     expected_revision = StrictIntegerField(min_value=0, max_value=2_147_483_647)  # 0: no settings have been saved yet
 
 
 class AIProviderStatusOutput(serializers.Serializer):
     configured = serializers.BooleanField()
-    issue = serializers.CharField(allow_null=True)  # a fixed code (missing_api_key, invalid_configuration) or null; never a value
+    issue = serializers.CharField(allow_null=True)  # a fixed code (missing_api_key, invalid_configuration, endpoint_not_approved) or null; never a value
 
 
 class AIProfileOutput(serializers.Serializer):
@@ -375,9 +410,37 @@ class AIProviderOutput(serializers.Serializer):
     profiles = AIProfileOutput(many=True)
 
 
+class AIProviderTypeOutput(serializers.Serializer):
+    provider_type = serializers.CharField()
+    label = serializers.CharField()
+    localities = serializers.ListField(child=serializers.CharField())
+    needs_endpoint = serializers.BooleanField()
+    credential = serializers.CharField()  # none, optional or required_unless_local
+    profile_source = serializers.CharField()  # fixed (pick among ``profiles``) or declared (name the model identifiers)
+    profiles = AIProfileOutput(many=True)
+
+
+class AIConnectionOutput(serializers.Serializer):
+    """A stored connection and whether this process can use it. ``credential_ref`` is a variable NAME, never a value; there is no field that could hold a key."""
+
+    connection_id = serializers.CharField(source="values.connection_id")
+    display_name = serializers.CharField(source="values.display_name")
+    provider_type = serializers.CharField(source="values.provider_type")
+    locality = serializers.CharField(source="values.locality")
+    endpoint = serializers.CharField(source="values.endpoint", allow_null=True)
+    credential_ref = serializers.CharField(source="values.credential_ref", allow_null=True)
+    enabled = serializers.BooleanField(source="values.enabled")
+    profiles = serializers.SerializerMethodField()
+    status = AIProviderStatusOutput()
+
+    def get_profiles(self, obj):
+        return [{"profile_id": p.profile_id, "model_id": p.model_id} for p in obj.values.profiles]
+
+
 class AIExtractionValuesOutput(serializers.Serializer):
     extraction_mode = serializers.CharField()
     provider_id = serializers.CharField(allow_null=True)
+    connection_id = serializers.CharField(allow_null=True)
     profile_id = serializers.CharField(allow_null=True)
     policy_mode = serializers.CharField(allow_null=True)
     timeout_seconds = serializers.IntegerField(allow_null=True)
@@ -391,14 +454,24 @@ class AITimeoutOutput(serializers.Serializer):
 
 class AICatalogOutput(serializers.Serializer):
     providers = AIProviderOutput(many=True)
+    provider_types = AIProviderTypeOutput(many=True)
+    locality_policies = serializers.SerializerMethodField()
+    credential_ref_prefix = serializers.SerializerMethodField()
     policy_modes = serializers.ListField(child=serializers.CharField())
     timeout = AITimeoutOutput(source="*")
+
+    def get_locality_policies(self, obj):  # [{"locality", "policy_modes"}]: the modes the gateway permits for each locality
+        return [{"locality": name, "policy_modes": list(modes)} for name, modes in obj.locality_policies]
+    def get_credential_ref_prefix(self, obj):
+        return CREDENTIAL_REF_PREFIX
 
 
 class AIExtractionSettingsOutput(serializers.Serializer):
     """Fixed fields only: nothing that holds, or could hold, a credential has a field here."""
 
     settings = AIExtractionValuesOutput(source="record.values")
+    connections = AIConnectionOutput(many=True)
+    unreadable_connections = serializers.IntegerField(source="record.unreadable_connections")
     stored = serializers.BooleanField(source="record.stored")
     revision = serializers.IntegerField(source="record.revision")
     updated_at = serializers.DateTimeField(source="record.updated_at", allow_null=True)

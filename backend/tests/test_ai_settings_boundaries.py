@@ -103,11 +103,23 @@ class ModelHasNoSecretTests(SimpleTestCase):
         names = [field.name for field in AIExtractionSettings._meta.get_fields()]
         self.assertEqual(
             sorted(names),
-            ["extraction_mode", "id", "policy_mode", "profile_id", "provider_id", "revision", "timeout_seconds", "updated_at", "updated_by_public_id"],
-        )
+            [
+                "connection_id", "connections", "extraction_mode", "id", "policy_mode", "profile_id", "provider_id", "revision", "timeout_seconds", "updated_at",
+                "updated_by_public_id",
+            ],
+        )  # fmt: skip
         for name in names:
             with self.subTest(name):
                 self.assertIsNone(SECRET_WORDS.search(name))
+
+    def test_the_connections_column_is_the_only_new_free_form_column_and_its_stored_shape_has_no_secret_field(self):
+        from apps.ai_settings.rules import CONNECTION_FIELDS, PROFILE_FIELDS
+
+        for name in (*CONNECTION_FIELDS, *PROFILE_FIELDS):
+            with self.subTest(name):
+                # a connection holds a URL and the NAME of a variable; no field of it is called, or can hold, a key, token, password or header
+                self.assertIsNone(re.search(r"secret|token|password|api_?key|header|prompt", name, re.IGNORECASE))
+        self.assertIn("credential_ref", CONNECTION_FIELDS)
 
     def test_no_model_permission_is_created(self):
         from apps.ai_settings.models import AIExtractionSettings
@@ -121,14 +133,20 @@ class ModelHasNoSecretTests(SimpleTestCase):
 
 
 class MigrationIsAdditiveTests(SimpleTestCase):
-    def test_only_the_initial_migration_exists_and_it_only_creates_one_model(self):
+    def test_the_initial_migration_only_creates_one_model_and_the_connections_one_is_additive_and_reversible(self):
         files = sorted(p.name for p in (APP / "migrations").glob("0*.py"))
-        self.assertEqual(files, ["0001_initial.py"])
+        self.assertEqual(files, ["0001_initial.py", "0002_connections.py"])
         text = source(APP / "migrations" / "0001_initial.py")
         self.assertEqual(re.findall(r"migrations\.(\w+)\(", text), ["CreateModel"])
         self.assertIn("dependencies = [\n    ]", text)
         self.assertNotIn("RunSQL", text)
         self.assertNotIn("RunPython", text)
+        later = source(APP / "migrations" / "0002_connections.py")
+        self.assertEqual(re.findall(r"migrations\.(\w+)\(", later), ["AddField", "AddField", "RemoveConstraint", "AddConstraint"])  # no data is read, written or deleted
+        self.assertIn("('ai_settings', '0001_initial')", later)
+        for forbidden in ("RunSQL", "RunPython", "DeleteModel", "RemoveField", "AlterField", "RenameField"):
+            self.assertNotIn(forbidden, later)
+        self.assertEqual(re.findall(r"default=(\w+)", later), ["list"])  # the new column has a default; an existing row stays valid and keeps its meaning
 
     def test_no_other_app_gained_a_migration_for_this_feature(self):
         for app in ("accounts", "cases", "tasks", "intake", "module_host"):
