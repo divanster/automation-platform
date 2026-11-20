@@ -759,3 +759,19 @@ No PostgreSQL was involved. The AI-2a PostgreSQL results are recorded in the nex
 - **No extraction accuracy or evaluation set.** How often the model answers inside the schema, quotes ambiguities correctly or reads quantities as digits is unknown, and no cost or latency was measured.
 - **No automatic fallback** (by design), no manual retry of a failed run, no frontend change, no document upload, no stored company policy or credential store.
 - It does not prove that no other race or edge case exists. One machine, one operating system, one PostgreSQL. **This is not a production-readiness claim.**
+
+## Pending: DOC-1 secure document upload backend (not yet validated)
+
+> **Scope.** DOC-1 (`feat/document-upload-backend`, not committed): `apps/documents`, `config/document_storage.py`, `/api/documents/`, migrations `documents.0001_initial` and `audit.0004_document_subject_type`, and the document permissions
+> in `setup_roles` (see [document-storage.md](../architecture/document-storage.md) and [runbook.md](runbook.md), section 5.13). **Nothing in this section is owner-supplied.**
+
+| Item | State |
+| --- | --- |
+| DB-free tests in the development VM (the Windows machine the work was done on) | passed; the count is in the slice's final report. They include the real Windows directory policy used for real on one developer account (prepare, upload, read, delete, and a loosened directory or file refused), which found and fixed one defect (a Python 3.13 `os.mkdir` ACL), and a deliberate-mutation run in which 25 of 27 mutations were caught (the two that survive are equivalent: a redundant bound check and a header Django adds by default) |
+| PostgreSQL tests (`tests/test_documents_postgres.py`) | **written, NOT run** (upload persistence, visibility, download authorization, atomic rollback, concurrent uploads and downloads, constraints, permissions, `setup_roles`, the audit migration forward and refused-reverse) |
+| Existing PostgreSQL tests edited for the new permissions (`tests/test_review_postgres.py`, `tests/test_authz_core_postgres.py`) | edited, **NOT run** |
+| The two migrations against a real PostgreSQL | **NOT run** |
+| A real browser, a real WSGI production server, a service account, a POSIX host, large files, backup and restore of the directory | **never exercised** |
+| Anything sent to an AI provider or any network service | **nothing** (there is no AI, OCR or extraction in this slice) |
+
+The owner's PostgreSQL run, when made, supports the tested scenarios only.

@@ -97,6 +97,22 @@ class ConnectionTestHourThrottle(ConnectionTestThrottle):
     scope = "ai_connection_test_hour"
 
 
+class DocumentUploadThrottle(ConfiguredRateThrottle):
+    """A bounded ceiling per signed-in user on document uploads (each one writes a file of up to the size limit to disk). Applied to POST only; every upload that reaches the view counts, whatever its
+    outcome. Per process, like every throttle here: it slows a flood, it is not a storage quota."""
+
+    scope = "document_upload"
+
+    def get_cache_key(self, request, view):
+        user = getattr(request, "user", None)
+        ident = f"user-{user.pk}" if user is not None and getattr(user, "is_authenticated", False) else self.get_ident(request)
+        return self.cache_format % {"scope": self.scope, "ident": ident}
+
+
+class DocumentUploadHourThrottle(DocumentUploadThrottle):
+    scope = "document_upload_hour"
+
+
 class ConnectionTestGlobalThrottle(ConfiguredRateThrottle):
     """One shared ceiling for all ADMINISTRATORS together, so several administrator sessions cannot add up to a flood (per process, like every throttle here). Requests of a user who
     is not an administrator are not counted here (they are refused by the service anyway), so they cannot use up the ceiling and lock the administrators out."""

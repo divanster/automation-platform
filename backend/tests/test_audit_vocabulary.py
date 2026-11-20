@@ -53,8 +53,9 @@ ACTOR, SUBJECT, CASE, RUN = (uuid.uuid4() for _ in range(4))
 # own actions (the "module" namespace is reserved for Core, so no module can declare them), plus "ai_settings.updated" (the AI settings API; the
 # "ai_settings" namespace is Core's too) and "ai_settings.connection_changed" (AI-SET-2: one event per connection a save created, changed or removed).
 # "ai_settings" namespace is Core's too) and "ai_settings.connection_changed" (AI-SET-2: one event per connection a save created, changed or removed), plus the three
-# "ai_credential.*" actions of AI-SEC-2 (the managed AI credential API; the "ai_credential" namespace is Core's too).
-# The "module" and "ai_settings" subject types are asserted separately. If an action or a detail key of Core ever
+# "ai_credential.*" actions of AI-SEC-2 (the managed AI credential API; the "ai_credential" namespace is Core's too), plus "document.uploaded" and "document.downloaded" of DOC-1
+# (the document storage; the "document" namespace is Core's too).
+# The "module", "ai_settings" and "document" subject types are asserted separately. If an action or a detail key of Core ever
 # changes, this table is what makes the change visible.
 CORE_ACTIONS = (
     "request.submitted",
@@ -71,6 +72,8 @@ CORE_ACTIONS = (
     "ai_credential.created",
     "ai_credential.replaced",
     "ai_credential.deleted",
+    "document.uploaded",
+    "document.downloaded",
 )
 CORE_KEYS = {
     "request.submitted": {"byte_length", "client_request_id_used"},
@@ -87,8 +90,10 @@ CORE_KEYS = {
     "ai_credential.created": {"store"},
     "ai_credential.replaced": {"store"},
     "ai_credential.deleted": {"store"},
+    "document.uploaded": {"byte_length", "content_hash"},
+    "document.downloaded": {"byte_length", "content_hash", "by_owner"},
 }
-CORE_SUBJECTS = ("run", "revision", "approval", "rejection", "module", "ai_settings")
+CORE_SUBJECTS = ("run", "revision", "approval", "rejection", "module", "ai_settings", "document")
 
 
 def owners_of(**namespaces):
@@ -111,11 +116,12 @@ class CoreVocabularyIsUnchangedTests(CleanAuditVocabularyMixin, SimpleTestCase):
         self.assertEqual(events.CORE_VOCABULARY.core_actions, CORE_ACTIONS)
         self.assertEqual({a: set(k) for a, k in events.CORE_VOCABULARY.detail_keys.items()}, CORE_KEYS)
 
-    def test_core_subject_types_are_the_old_four_plus_module_and_ai_settings(self):
+    def test_core_subject_types_are_the_old_four_plus_module_ai_settings_and_document(self):
         self.assertEqual(events.SUBJECT_TYPES, CORE_SUBJECTS)
         self.assertEqual(events.CORE_VOCABULARY.subject_types, CORE_SUBJECTS)
         self.assertEqual(events.SUBJECT_MODULE, "module")
         self.assertEqual(events.SUBJECT_AI_SETTINGS, "ai_settings")
+        self.assertEqual(events.SUBJECT_DOCUMENT, "document")
 
     def test_the_core_fingerprint_equals_one_built_from_the_frozen_copy(self):
         rebuilt = AuditVocabulary.core(actions=CORE_ACTIONS, detail_keys=CORE_KEYS, subject_types=CORE_SUBJECTS)
@@ -137,7 +143,7 @@ class CoreVocabularyIsUnchangedTests(CleanAuditVocabularyMixin, SimpleTestCase):
         with self.assertRaises(AuditEventError):
             user_event(ACTOR, "request.deleted", "run", SUBJECT)
         with self.assertRaises(AuditEventError):
-            user_event(ACTOR, "run.state_changed", "document", SUBJECT)
+            user_event(ACTOR, "run.state_changed", "banana", SUBJECT)
         with self.assertRaises(AuditEventError):
             user_event(ACTOR, "run.state_changed", "run", SUBJECT, content_hash="a" * 64)
         with self.assertRaises(AuditEventError):
@@ -212,7 +218,7 @@ class ModuleActionsTests(CleanAuditVocabularyMixin, SimpleTestCase):
         user_event(ACTOR, "run.state_changed", "module", SUBJECT, cause="x")  # Core subject type, Core vocabulary
         with installed(demo_vocabulary()):
             demo_event(subject="module")
-            for subject in ("document", "Module", "", "modules", None, 5, ["module"]):
+            for subject in ("banana", "Module", "", "modules", None, 5, ["module"]):
                 with self.subTest(subject=subject), self.assertRaises(AuditEventError):
                     demo_event(subject=subject)
 
@@ -376,7 +382,7 @@ class VocabularyValueTests(CleanAuditVocabularyMixin, SimpleTestCase):
         vocabulary = demo_vocabulary()
         self.assertTrue(vocabulary.allows_action(DEMO_ACTION) and vocabulary.allows_action("run.state_changed"))
         self.assertFalse(vocabulary.allows_action("audit_demo.nope") or vocabulary.allows_action(None) or vocabulary.allows_action(["a"]))
-        self.assertTrue(vocabulary.allows_subject_type("module") and not vocabulary.allows_subject_type("document") and not vocabulary.allows_subject_type(None))
+        self.assertTrue(vocabulary.allows_subject_type("module") and not vocabulary.allows_subject_type("banana") and not vocabulary.allows_subject_type(None))
         self.assertEqual(vocabulary.detail_keys_of(DEMO_ACTION), frozenset({"count", "reason_code"}))
         self.assertEqual(vocabulary.detail_keys_of("run.state_changed"), frozenset(CORE_KEYS["run.state_changed"]))
         self.assertEqual((vocabulary.owner_of(DEMO_ACTION), vocabulary.owner_of("run.state_changed")), ("audit_demo", None))
@@ -733,8 +739,8 @@ class ShapeAgreementTests(SimpleTestCase):
         self.assertEqual(added["audit_event_action_shape"].condition.children[0], ("action__regex", ACTION_SHAPE_PATTERN))
         model = {c.name: c for c in AuditEvent._meta.constraints}
         self.assertEqual(added["audit_event_action_shape"], model["audit_event_action_shape"])
-        # migration 0003 replaced the subject-type list of 0002 (it added "ai_settings"); the current literal is 0003's and equals the model's
-        later = importlib.import_module("apps.audit.migrations.0003_ai_settings_subject_type").Migration
+        # migration 0004 replaced the subject-type list of 0003 (which had replaced that of 0002; 0003 added "ai_settings" and 0004 adds "document"); the current literal is 0004's and equals the model's
+        later = importlib.import_module("apps.audit.migrations.0004_document_subject_type").Migration
         replaced = {op.constraint.name: op.constraint for op in later.operations if isinstance(op, django_migrations.AddConstraint)}
         self.assertEqual(set(replaced), {"audit_event_subject_type_valid"})
         self.assertEqual(replaced["audit_event_subject_type_valid"], model["audit_event_subject_type_valid"])
@@ -979,13 +985,14 @@ class ArchitectureTests(SimpleTestCase):
         for word in ("RunSQL", "DeleteModel", "RemoveField", "AlterField", ".delete(", ".update(", ".bulk_update(", "DELETE", "UPDATE", "TRUNCATE", "cursor", "execute"):
             self.assertNotIn(word, code, word)
 
-    def test_the_audit_migrations_form_one_chain_and_0003_is_the_leaf(self):
+    def test_the_audit_migrations_form_one_chain_and_0004_is_the_leaf(self):
         from django.db.migrations.loader import MigrationLoader
 
         loader = MigrationLoader(None, ignore_no_migrations=True)
         self.assertEqual(loader.get_migration("audit", "0002_extensible_audit_vocabulary").dependencies, [("audit", "0001_initial")])
         self.assertEqual(loader.get_migration("audit", "0003_ai_settings_subject_type").dependencies, [("audit", "0002_extensible_audit_vocabulary")])
-        self.assertEqual([node for node in loader.graph.leaf_nodes() if node[0] == "audit"], [("audit", "0003_ai_settings_subject_type")])
+        self.assertEqual(loader.get_migration("audit", "0004_document_subject_type").dependencies, [("audit", "0003_ai_settings_subject_type")])
+        self.assertEqual([node for node in loader.graph.leaf_nodes() if node[0] == "audit"], [("audit", "0004_document_subject_type")])
 
     def test_model_state_and_migrations_agree_without_a_database(self):
         from django.apps import apps as django_apps
@@ -1041,6 +1048,8 @@ class OldSchemaHelperTests(SimpleTestCase):
                 events.ACTION_AI_CREDENTIAL_CREATED,
                 events.ACTION_AI_CREDENTIAL_REPLACED,
                 events.ACTION_AI_CREDENTIAL_DELETED,
+                events.ACTION_DOCUMENT_UPLOADED,
+                events.ACTION_DOCUMENT_DOWNLOADED,
             },
         )
 

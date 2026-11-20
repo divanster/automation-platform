@@ -25,7 +25,7 @@ from django.test import TestCase, tag
 
 from apps.accounts.authz import load_actor
 from apps.accounts.errors import AuthorizationError
-from apps.accounts.roles import APPROVER, AUDITOR, OPERATOR, ROLE_PERMISSIONS
+from apps.accounts.roles import APPROVER, AUDITOR, OPERATOR, granted_permissions
 from apps.intake import authorization
 from apps.intake.access import Action, access_problem, permission_problem
 from tests import authz_oracle as oracle
@@ -66,11 +66,11 @@ class RealActorEquivalenceTests(DedicatedTestDatabaseMixin, TestCase):
 
     def test_the_loaded_permissions_are_exactly_the_role_permissions(self):
         expected = {
-            "operator": ROLE_PERMISSIONS[OPERATOR],
-            "other_operator": ROLE_PERMISSIONS[OPERATOR],
-            "approver": ROLE_PERMISSIONS[APPROVER],
-            "auditor": ROLE_PERMISSIONS[AUDITOR],
-            "hybrid": ROLE_PERMISSIONS[OPERATOR] | ROLE_PERMISSIONS[APPROVER],
+            "operator": granted_permissions(OPERATOR),
+            "other_operator": granted_permissions(OPERATOR),
+            "approver": granted_permissions(APPROVER),
+            "auditor": granted_permissions(AUDITOR),
+            "hybrid": granted_permissions(OPERATOR) | granted_permissions(APPROVER),
             "nobody": frozenset(),
         }
         for name, permissions in expected.items():

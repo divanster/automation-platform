@@ -380,7 +380,7 @@ class MigrationStructureTests(SimpleTestCase):
         found = {key[1] for key in loader().disk_migrations if key[0] == "intake"}
         self.assertEqual(found, {"0001_initial", "0002_revisionedit_request_permissions"})
         self.assertEqual({key[1] for key in loader().disk_migrations if key[0] == "tasks"}, {"0001_initial"})
-        self.assertEqual({key[1] for key in loader().disk_migrations if key[0] == "audit"}, {"0001_initial", "0002_extensible_audit_vocabulary", "0003_ai_settings_subject_type"})
+        self.assertEqual({key[1] for key in loader().disk_migrations if key[0] == "audit"}, {"0001_initial", "0002_extensible_audit_vocabulary", "0003_ai_settings_subject_type", "0004_document_subject_type"})
 
     def test_the_historical_migrations_are_byte_for_byte_what_they_were(self):
         for name in ("0001_initial", "0002_workflowrun_state", "0003_backfill_run_state", "0004_workflowrun_state_constraints", "0005_rejection"):

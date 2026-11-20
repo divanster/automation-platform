@@ -197,7 +197,7 @@ class ExistingBehaviorIsUnchangedTests(SimpleTestCase):
     def test_installed_apps_gained_nothing(self):
         self.assertEqual(
             [a for a in settings.INSTALLED_APPS if a.startswith("apps.")],
-            ["apps.accounts", "apps.ai_settings", "apps.api", "apps.audit", "apps.cases", "apps.health", "apps.intake", "apps.module_host", "apps.tasks"],
+            ["apps.accounts", "apps.ai_settings", "apps.api", "apps.audit", "apps.cases", "apps.documents", "apps.health", "apps.intake", "apps.module_host", "apps.tasks"],
         )
 
     def test_the_http_routes_are_the_ones_the_api_documents(self):

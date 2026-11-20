@@ -533,6 +533,20 @@ class AIConnectionTestOutput(serializers.Serializer):
     duration_ms = serializers.IntegerField()
 
 
+class DocumentOutput(serializers.Serializer):
+    """One document's METADATA. Fixed fields: the storage key, any path and the content have no field here, so they cannot leak into a response."""
+
+    id = serializers.UUIDField()
+    original_filename = serializers.CharField()
+    content_type = serializers.CharField()
+    size_bytes = serializers.IntegerField()
+    sha256 = serializers.CharField()
+    uploaded_at = serializers.DateTimeField()
+    processing_state = serializers.CharField()
+    uploaded_by = serializers.UUIDField()
+    allowed_actions = serializers.ListField(child=serializers.CharField())
+
+
 def page_output(item_serializer, page) -> dict:
     """The paginated envelope ``{"count", "page", "page_size", "results"}`` for a service page."""
     return {

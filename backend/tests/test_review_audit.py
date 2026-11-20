@@ -24,8 +24,8 @@ class VocabularyTests(SimpleTestCase):
     def test_the_actions_are_the_fixed_vocabulary(self):
         self.assertEqual(
             set(events.ACTIONS),
-            {"request.submitted", "revision.created", "request.edited", "run.state_changed", "approval.recorded", "approval.invalidated", "rejection.recorded", "module.enabled", "module.disabled", "ai_settings.updated", "ai_settings.connection_changed", "ai_credential.created", "ai_credential.replaced", "ai_credential.deleted"},
-        )  # (module.*: MOD-1b S4, Core's own actions for the module host; ai_settings.updated and ai_settings.connection_changed: the AI settings API; ai_credential.*: AI-SEC-2)
+            {"request.submitted", "revision.created", "request.edited", "run.state_changed", "approval.recorded", "approval.invalidated", "rejection.recorded", "module.enabled", "module.disabled", "ai_settings.updated", "ai_settings.connection_changed", "ai_credential.created", "ai_credential.replaced", "ai_credential.deleted", "document.uploaded", "document.downloaded"},
+        )  # (module.*: MOD-1b S4, Core's own actions for the module host; ai_settings.updated and ai_settings.connection_changed: the AI settings API; ai_credential.*: AI-SEC-2; document.*: DOC-1)
         self.assertEqual(len(set(events.ACTIONS)), len(events.ACTIONS))
 
     def test_every_action_has_a_detail_key_list_and_nothing_else_does(self):
@@ -83,7 +83,7 @@ class EventShapeTests(SimpleTestCase):
         with self.assertRaises(AuditEventError):
             user_event(ACTOR, "request.deleted", "run", SUBJECT)
         with self.assertRaises(AuditEventError):
-            user_event(ACTOR, events.ACTION_RUN_STATE_CHANGED, "document", SUBJECT)
+            user_event(ACTOR, events.ACTION_RUN_STATE_CHANGED, "banana", SUBJECT)
 
     def test_identifiers_must_be_uuids(self):
         for kwargs in ({"case_id": "x"}, {"run_id": 5}):

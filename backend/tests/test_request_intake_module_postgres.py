@@ -33,7 +33,7 @@ from django.utils import timezone
 
 from apps.accounts.errors import AuthorizationError
 from apps.accounts.profile import current_user_profile
-from apps.accounts.roles import ROLES
+from apps.accounts.roles import DOCUMENT_PERMISSIONS, DOCUMENT_ROLE_PERMISSIONS, ROLES
 from apps.audit.models import AuditEvent
 from apps.cases.models import WorkflowRun
 from apps.intake import authorization as intake_authorization
@@ -348,9 +348,16 @@ class RolesAndProfileTests(DedicatedTestDatabaseMixin, TestCase):
         return {f"{p.content_type.app_label}.{p.codename}" for p in group.permissions.select_related("content_type")}
 
     def test_the_groups_setup_roles_writes_equal_the_manifests_derivation_exactly(self):
+        # The Request Intake part is compared with the manifest derivation EXACTLY; Core's document permissions (DOC-1) are a separate matrix and are checked on their own;
+        # nothing else may be present.
         for role in ROLES:
             with self.subTest(role=role):
-                self.assertEqual(self.stored(role), set(self.derived[role]))
+                stored = self.stored(role)
+                documents = {name for name in stored if name.startswith("documents.")}
+                self.assertFalse(set(self.derived[role]) & DOCUMENT_PERMISSIONS)  # no module grants a Core document permission
+                self.assertEqual(stored - documents, set(self.derived[role]))
+                self.assertEqual(documents, set(DOCUMENT_ROLE_PERMISSIONS[role]))
+                self.assertEqual(stored, set(self.derived[role]) | set(DOCUMENT_ROLE_PERMISSIONS[role]))
 
     def test_the_profile_of_a_user_in_each_role_reports_exactly_the_derived_permissions(self):
         for role in ROLES:

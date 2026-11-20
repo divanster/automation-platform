@@ -421,10 +421,11 @@ class BoundaryTests(unittest.TestCase):
                     if any(name == "apps.secret_store" or name.startswith(("apps.secret_store.", "config.secret_store")) for name in names):
                         importers.add(path.relative_to(backend).as_posix())
         # AI-SEC-2: the backend itself, the composition that chooses a store, the connection composition that reads a managed key, the credential service and the route wiring.
+        # DOC-1: config/document_storage.py reuses the DPAPI module's Windows DIRECTORY policy (not its secret store) for the document directory; it holds and reads no secret.
         # No settings rule, API view, provider adapter, Request Intake code or worker command imports a store.
         self.assertEqual(
             importers,
-            {"config/secret_store_dpapi.py", "config/secret_store.py", "config/ai_connections.py", "apps/ai_credentials/services.py", "config/urls.py"},
+            {"config/secret_store_dpapi.py", "config/secret_store.py", "config/ai_connections.py", "apps/ai_credentials/services.py", "config/urls.py", "config/document_storage.py"},
         )
 
 

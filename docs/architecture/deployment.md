@@ -94,7 +94,7 @@ Exact paths are an installer decision.
 | Directory | Contents | Notes |
 | --- | --- | --- |
 | Application | Program code of the installed release | Read-only to the running services where possible |
-| Data | PostgreSQL data, managed document storage, export artifacts | Access limited to the service account; sensitive |
+| Data | PostgreSQL data, managed document storage, export artifacts | Access limited to the service account; sensitive. DOC-1 implements the document storage as one directory named by `AP_DOCUMENT_STORAGE_DIRECTORY` (no default; outside the repository and any static or media root; created and verified by `manage.py prepare_document_storage`; [document-storage.md](document-storage.md)); it must be backed up and restored **together with the database** |
 | Logs | Application and service logs | Rotation and size limits needed; must not contain document content or secrets |
 | Backup | Backup output | Should be placed on separate storage from the data directory; destination is a decision for the company |
 | Models | Local model files, if a local runtime is used | Large; may be shared with the runtime's own location; not in source control |

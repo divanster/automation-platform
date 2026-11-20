@@ -40,6 +40,8 @@ implementation plan for the Automation Platform.
    registry (MOD-1a, a foundation with no registered module), the persistent module state, sync and
    enable/disable and the worker gate (MOD-1b / S4, pushed; owner-run PostgreSQL validation passed for the tested scenarios), trust boundaries, and the
    future lifecycle and update-manager requirements.
+10. [document-storage.md](document-storage.md): DOC-1, secure PDF upload, managed storage, the document API, its authorization and audit
+    (implemented on a branch, DB-free validated in the VM only; PostgreSQL tests written and not run; no AI, OCR, extraction or UI).
 
 What currently exists and how to run it: [../development/runbook.md](../development/runbook.md).
 
@@ -56,7 +58,7 @@ implemented.
 | Django API | Authentication, authorization, use-case orchestration, and the public API over the shared domain layer. |
 | Persistent background worker | Separate process that runs retryable tasks (extraction, export) using the same domain code. |
 | PostgreSQL | System of record for business records, workflow state, tasks, approvals, configuration, and audit events. |
-| Managed document storage | Controlled file storage outside the source tree, referenced by key and hash. |
+| Managed document storage | Controlled file storage outside the source tree, referenced by key and hash (DOC-1 implements the backend: [document-storage.md](document-storage.md)). |
 | AI gateway | Provider-neutral entry point for model calls; enforces the company data policy with no silent cloud fallback. |
 | Approvals and audit | Human approvals tied to specific result revisions, and an append-only event history. |
 | Optional future control portal | Possible later portal; never required for local operation. |
