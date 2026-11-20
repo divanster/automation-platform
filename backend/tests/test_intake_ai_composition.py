@@ -312,6 +312,9 @@ class FailureSemanticsTests(SimpleTestCase):
 
 class PrepareWorkerTests(SimpleTestCase):
     def setUp(self):
+        patcher = mock.patch("config.task_registry.load_stored_settings", return_value=None)  # no stored AI settings row, and no database in a SimpleTestCase
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.addCleanup(intake_handlers.install_extractor_source, intake_handlers._extractor_source)
         intake_handlers.install_extractor_source(None)
 
@@ -353,6 +356,9 @@ class PrepareWorkerTests(SimpleTestCase):
 
 class RunWorkerStartUpTests(SimpleTestCase):
     def setUp(self):
+        patcher = mock.patch("config.task_registry.load_stored_settings", return_value=None)  # no stored AI settings row, and no database in a SimpleTestCase
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.addCleanup(setattr, worker, "_composition", worker._composition)
         self.addCleanup(intake_handlers.install_extractor_source, intake_handlers._extractor_source)
         intake_handlers.install_extractor_source(None)

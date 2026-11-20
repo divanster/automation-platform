@@ -62,7 +62,7 @@ class ModulePackageIsPureTests(SimpleTestCase):
                     self.assertTrue(top in STDLIB or name == "apps.modules" or name.startswith("apps.modules."), f"{path.name} imports {name}")
 
     def test_it_imports_no_django_no_other_project_package_and_no_business_workflow(self):
-        forbidden = ("django", "rest_framework", "psycopg", "workflows", "config", "apps.intake", "apps.cases", "apps.tasks", "apps.audit", "apps.accounts", "apps.api", "apps.health")
+        forbidden = ("django", "rest_framework", "psycopg", "workflows", "config", "apps.intake", "apps.cases", "apps.tasks", "apps.audit", "apps.accounts", "apps.ai_settings", "apps.api", "apps.health")
         for path in _sources(MODULES):
             for name in absolute_imports(path):
                 with self.subTest(file=path.name, imported=name):
@@ -197,7 +197,7 @@ class ExistingBehaviorIsUnchangedTests(SimpleTestCase):
     def test_installed_apps_gained_nothing(self):
         self.assertEqual(
             [a for a in settings.INSTALLED_APPS if a.startswith("apps.")],
-            ["apps.accounts", "apps.api", "apps.audit", "apps.cases", "apps.health", "apps.intake", "apps.module_host", "apps.tasks"],
+            ["apps.accounts", "apps.ai_settings", "apps.api", "apps.audit", "apps.cases", "apps.health", "apps.intake", "apps.module_host", "apps.tasks"],
         )
 
     def test_the_http_routes_are_the_ones_the_api_documents(self):

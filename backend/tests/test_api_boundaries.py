@@ -1,4 +1,4 @@
-﻿"""DB-free static tests: the API is a thin transport over the services, and its security settings are explicit.
+"""DB-free static tests: the API is a thin transport over the services, and its security settings are explicit.
 
 They read source with ``ast`` and import settings fresh under controlled environments; no database is touched.
 """
@@ -12,7 +12,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.test import SimpleTestCase
 from django.urls import URLPattern, get_resolver
 
-from apps.api import base, views_auth, views_dashboard, views_requests
+from apps.api import base, views_ai_settings, views_auth, views_dashboard, views_requests
 from apps.intake import queries, review, submission
 from tests.settings_loader import load_settings
 from tests.test_request_intake_boundaries import imported_modules
@@ -77,6 +77,7 @@ class RouteInventoryTests(SimpleTestCase):
                 "api/auth/login/": "LoginView",
                 "api/auth/logout/": "LogoutView",
                 "api/auth/me/": "MeView",
+                "api/ai-settings/extraction/": "AIExtractionSettingsView",
                 "api/dashboard/summary/": "DashboardSummaryView",
                 "api/requests/": "RequestCollectionView",
                 "api/requests/<uuid:run_id>/": "RequestDetailView",
@@ -107,6 +108,7 @@ class RouteInventoryTests(SimpleTestCase):
             views_auth.LoginView: {"POST"},
             views_auth.LogoutView: {"POST"},
             views_auth.MeView: {"GET"},
+            views_ai_settings.AIExtractionSettingsView: {"GET", "PUT"},
             views_dashboard.DashboardSummaryView: {"GET"},
             views_requests.RequestCollectionView: {"GET", "POST"},
             views_requests.RequestDetailView: {"GET"},

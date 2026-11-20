@@ -22,6 +22,10 @@
 > rules and approved only by a person. Still **not** implemented: a stored company policy, an administrator's approval record, a credential store, an evaluation set and thresholds (section 11), and any measured accuracy. See
 > [ai-gateway.md](ai-gateway.md), section 15. Sections 4, 6, 7, 11 and 12 below remain the policy this follows.
 >
+> **Stored AI settings (backend only; written, DB-free tested, PostgreSQL tests not run).** An administrator can store the extraction mode, provider, profile, data policy and call deadline through `PUT /api/ai-settings/extraction/` instead of environment variables; a stored row
+> replaces the three mode, policy and timeout variables when the worker starts, and a change needs a worker restart (no hot reload). Each successful save records an `ai_settings.updated` audit event (actor, time, revision, mode, provider, profile, policy and timeout identifiers; no secret) in the same transaction (audit migration `0003`; its PostgreSQL tests are not run). This is still **not** the approved company policy of section 4: there is no approval record,
+> the event keeps the new values only, audit immutability is ORM-level, and the key is still environment-only. See [ai-gateway.md](ai-gateway.md), section 16.
+>
 > **Naming used by the code.** The third mode is `approved_cloud` with the locality `cloud` (this document first proposed
 > `approved_external` and `external`; ADR 0004 still uses the old names). The error codes are `provider_unavailable`,
 > `policy_violation`, `timeout`, `invalid_structured_output`, `rate_limit`, `authentication_failure`, `unsupported_model`,

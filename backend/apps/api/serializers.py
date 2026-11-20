@@ -332,6 +332,81 @@ class AuditEventOutput(serializers.Serializer):
     details = serializers.DictField()
 
 
+class StrictIntegerField(serializers.IntegerField):
+    """An integer field that accepts ONLY a JSON integer: no string such as ``"45"``, no float, no boolean."""
+
+    def to_internal_value(self, data):
+        if isinstance(data, bool) or not isinstance(data, int):
+            self.fail("invalid")
+        return super().to_internal_value(data)
+
+
+class AIExtractionSettingsInput(StrictSerializer):
+    """The body of ``PUT /api/ai-settings/extraction/``. Shape only: which provider, profile, policy and timeout are acceptable is the settings rules' decision.
+
+    Every AI field is optional and defaults to ``None`` (deterministic mode has none), and there is deliberately NO field for a key, endpoint, header or
+    charge code: a credential cannot be sent here, and an attempt is an ``unknown_field`` error.
+    """
+
+    extraction_mode = StrictCharField(max_length=32)
+    provider_id = StrictCharField(required=False, allow_null=True, default=None, max_length=64)
+    profile_id = StrictCharField(required=False, allow_null=True, default=None, max_length=64)
+    policy_mode = StrictCharField(required=False, allow_null=True, default=None, max_length=32)
+    timeout_seconds = StrictIntegerField(required=False, allow_null=True, default=None, min_value=0, max_value=100_000)
+    expected_revision = StrictIntegerField(min_value=0, max_value=2_147_483_647)  # 0: no settings have been saved yet
+
+
+class AIProviderStatusOutput(serializers.Serializer):
+    configured = serializers.BooleanField()
+    issue = serializers.CharField(allow_null=True)  # a fixed code (missing_api_key, invalid_configuration) or null; never a value
+
+
+class AIProfileOutput(serializers.Serializer):
+    profile_id = serializers.CharField()
+    model_id = serializers.CharField()
+    permitted_policy_modes = serializers.ListField(child=serializers.CharField())
+
+
+class AIProviderOutput(serializers.Serializer):
+    provider_id = serializers.CharField()
+    label = serializers.CharField()
+    locality = serializers.CharField()
+    status = AIProviderStatusOutput()
+    profiles = AIProfileOutput(many=True)
+
+
+class AIExtractionValuesOutput(serializers.Serializer):
+    extraction_mode = serializers.CharField()
+    provider_id = serializers.CharField(allow_null=True)
+    profile_id = serializers.CharField(allow_null=True)
+    policy_mode = serializers.CharField(allow_null=True)
+    timeout_seconds = serializers.IntegerField(allow_null=True)
+
+
+class AITimeoutOutput(serializers.Serializer):
+    min = serializers.IntegerField(source="timeout_min")
+    max = serializers.IntegerField(source="timeout_max")
+    default = serializers.IntegerField(source="timeout_default")
+
+
+class AICatalogOutput(serializers.Serializer):
+    providers = AIProviderOutput(many=True)
+    policy_modes = serializers.ListField(child=serializers.CharField())
+    timeout = AITimeoutOutput(source="*")
+
+
+class AIExtractionSettingsOutput(serializers.Serializer):
+    """Fixed fields only: nothing that holds, or could hold, a credential has a field here."""
+
+    settings = AIExtractionValuesOutput(source="record.values")
+    stored = serializers.BooleanField(source="record.stored")
+    revision = serializers.IntegerField(source="record.revision")
+    updated_at = serializers.DateTimeField(source="record.updated_at", allow_null=True)
+    updated_by = serializers.UUIDField(source="record.updated_by_public_id", allow_null=True)
+    apply = serializers.CharField(source="apply_mode")
+    catalog = AICatalogOutput(source="*")
+
+
 def page_output(item_serializer, page) -> dict:
     """The paginated envelope ``{"count", "page", "page_size", "results"}`` for a service page."""
     return {

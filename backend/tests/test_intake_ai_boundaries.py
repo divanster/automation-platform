@@ -130,8 +130,9 @@ class NothingElseChangedTests(unittest.TestCase):
         self.assertEqual(MANIFEST.capabilities_required, ("task.enqueue", "audit.record", "case.run", "revision.approval", "permissions.check"))
         self.assertNotIn("ai.invoke", MANIFEST.capabilities_required)  # the module does not claim an AI capability; the gateway is composed by the worker
 
-    def test_the_audit_vocabulary_gained_nothing(self):
+    def test_the_audit_vocabulary_gained_nothing_for_extraction(self):
         text = (BACKEND / "apps" / "audit" / "events.py").read_text(encoding="utf-8").lower()
+        text = re.sub(r"ai_settings\w*", "", text)  # the AI settings API's own action and subject type (not an extraction event) are tested in test_ai_settings_audit
         self.assertNotRegex(text, r"\bai[._]|extraction_failed|ai_extract")
 
     def test_no_django_setting_names_the_extraction_mode_a_provider_or_a_key(self):
