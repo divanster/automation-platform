@@ -31,6 +31,8 @@
 > and DNS rebinding, no redirects, no implicit proxy) are enforced by the adapter and a guarded transport. A company endpoint reaches only operator-approved CIDR ranges (`AP_AI_OPENAI_COMPANY_CIDRS`, required, no default), an explicit denylist of special-purpose and metadata ranges
 > applies to company and cloud endpoints, and a proxy is refused for host-name endpoints (a proxy would resolve names where no address rule can be applied). Request Intake, the AI settings catalog and the deterministic default are unchanged. See [ai-gateway.md](ai-gateway.md), section 17.
 >
+> **AI-CON-2: a native Ollama provider (written, DB-free tested with a mocked transport; not run against any real Ollama; opt-in; used by nothing).** The provider `ollama` calls Ollama's own `/api/chat` on THIS machine only: its locality is always `local` (a constant, not a setting), its endpoint must be `localhost` or a loopback literal and listed in an explicit approved-origin list, the model is named explicitly (no default, never downloaded, no other model tried), and there is no key, no proxy (a configured proxy is refused), no redirect and no fallback. `local_only` permits it, `company_endpoint` and `approved_cloud` permit it by the cumulative rule, and no cloud provider approval is involved. The guarded transport checks that every resolved address is loopback. Request Intake, the AI settings catalog, the Workbench and the OpenAI-compatible provider are unchanged. See [ai-gateway.md](ai-gateway.md), section 18.
+>
 > **Naming used by the code.** The third mode is `approved_cloud` with the locality `cloud` (this document first proposed
 > `approved_external` and `external`; ADR 0004 still uses the old names). The error codes are `provider_unavailable`,
 > `policy_violation`, `timeout`, `invalid_structured_output`, `rate_limit`, `authentication_failure`, `unsupported_model`,
@@ -78,7 +80,8 @@ The gateway does not depend on business workflows
    workflow, including failure paths, can be tested without a real model.
 2. **Local adapter (later, Phase 6).** A model running on the same machine.
    *AI-CON-1: an OpenAI-compatible adapter can serve this role for a server on loopback (`local`: plain http allowed, loopback only, key optional). It has never run against a real server, nothing selects it
-   yet, and bundling or managing a local runtime is still undecided.*
+   yet, and bundling or managing a local runtime is still undecided.* *AI-CON-2: a native Ollama adapter (`ollama`, `POST /api/chat`) is the dedicated local adapter: always `local`, loopback endpoint only, explicit approved origin and model, no key, no proxy, no
+   redirect, no model download and no fallback. It has never run against a real Ollama and nothing selects it yet; it does not install, start or manage Ollama.*
 3. **Company-endpoint adapter.** A model server operated by the
    company. *AI-1b: the KPMG Workbench adapter is this kind, classified `company_endpoint` by the owner; it refuses to run under `local_only`, may run under
    `company_endpoint`, and by the cumulative rule under `approved_cloud`. Written, not verified against the service. AI-CON-1: the OpenAI-compatible adapter can also be declared `company_endpoint`
@@ -180,6 +183,7 @@ specific capabilities, and human approval for consequential actions.
 - *As implemented in AI-CON-1 (OpenAI-compatible provider):* the same interim approach with its own variable (`AP_AI_OPENAI_API_KEY`), sent only as `Authorization: Bearer <key>`. It is optional for a `local` endpoint and required for
   `company_endpoint` and `cloud` (fail closed). The endpoint is not a secret but is still never stored in a `ModelProfile`; it must be approved separately in an explicit origin list, a company endpoint must also have its approved CIDR ranges, and a transport refuses to send to a resolved
   address its locality may not reach (loopback-only, approved-ranges-only, global-only, and never a special-purpose or metadata range), to a redirect target, through a proxy for a host name, or in plain text unless the endpoint is on loopback. See [ai-gateway.md](ai-gateway.md), section 17.4.
+- *As implemented in AI-CON-2 (native Ollama provider):* there is no credential at all (Ollama's native API takes no key here and the adapter sends no `Authorization` header), so nothing secret is configured, stored or logged. The endpoint is still approved explicitly, must be loopback, and is never stored in a `ModelProfile`. See [ai-gateway.md](ai-gateway.md), section 18.4.
 
 ## 10. Capability checks
 
