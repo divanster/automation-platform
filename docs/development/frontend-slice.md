@@ -920,9 +920,13 @@ a body of the wrong shape is `unexpected_response`.
 
 ### 19.4 Secrets
 
-There is no field for a key, token, password, header, proxy or charge code, no `type="password"` input, and the API has none either (an
+**Superseded in part by section 20 (AI-SEC-3):** the settings form itself still has no secret field, and the settings `PUT` still cannot carry one; a
+secret can now be entered, but only in the separate Managed credentials section (section 20), which sends it only to `/api/ai-credentials/`.
+
+There is no field for a key, token, password, header, proxy or charge code in the settings form, and the settings API has
+none either (an
 attempt is a 400 `unknown_field`). A connection holds `credential_ref`, the **name** of a backend environment variable that starts with
-the catalog's `AP_AI_CRED_`. The field is checked against that shape before anything is sent, so a pasted key is **not sent**; the error
+the catalog's `AP_AI_CRED_` (since AI-SEC-2 the name of a managed credential when `credential_source` is `managed`, section 20). The field is checked against that shape before anything is sent, so a pasted key is **not sent**; the error
 text is a fixed sentence and never repeats the value. The key itself stays in the backend environment (`runbook.md` section 5.10). Nothing is
 written to browser storage (`security.test.ts` forbids it in application source, and a test spies on `Storage.setItem` while loading,
 editing and saving), and the page logs nothing (a test spies on every `console` method). Unlisted response fields are dropped (19.2).
@@ -989,8 +993,8 @@ Testing Library's default 1000 ms `findByRole` timeout under CPU contention. **F
   It was never run against a worker or a provider; the contract was read from the backend source and its tests, not exercised.
 - The page cannot restart the worker, cannot tell whether it was restarted, and does not poll: it shows the status the web process
   computed when the page loaded (or last saved), which may differ from the worker's environment.
-- No connection test, no model list, no model download, no credential entry or store, no hot reload and no worker status report (all
-  out of scope of the backend API).
+- No connection test, no model list, no model download, no hot reload and no worker status report (all
+  out of scope of the backend API). Credential entry and storage were added in section 20.
 - Limits and field patterns mirrored from the backend (10 connections, 10 profiles, identifier and reference shapes) are copies: the
   backend refuses what it does not accept, but a backend change shows up here only as a server error until the frontend is updated; no
   backend test pins them (unlike the run states in `test_frontend_contract.py`).
@@ -998,3 +1002,128 @@ Testing Library's default 1000 ms `findByRole` timeout under CPU contention. **F
 - Visual layout was written against the design tokens and not reviewed on screen; the sticky save bar and the two-column field rows need
   the owner's browser review (including the narrow-screen layout).
 - A list edited in two tabs is resolved only by the revision check (section 19.6); there is no live merge.
+
+## 20. AI-SEC-3: managed credentials in the AI settings page (administrators)
+
+Frontend only, on `feat/fe-ai-credentials`. **No backend, API, payload, migration or dependency change, no request to any AI provider, and the
+secret store was never touched by the development VM.** **Status: development-validated in jsdom with `fetch` stubbed; NOT yet reviewed in a
+browser and never run against the real Django, the DPAPI secret store or a worker. It is the interface for the API of `ai-gateway.md` section 20
+and `secret-store.md` sections 8 and 9 (AI-SEC-2, merged), read from `apps/api/views_ai_credentials.py`, `apps/api/serializers.py`,
+`apps/api/errors.py`, `apps/ai_credentials/` and `apps/ai_settings/` before any field was written.**
+
+### 20.1 What it adds (on `/settings/ai`)
+
+- **Credential source per connection.** The connection editor has a select, `Environment variable (set by the operator)` (the default) or
+  `Managed (stored by the server's secret store)`, shown only for a provider type whose `credential` is not `none`. It is the existing
+  `credential_source` field of a connection and travels in the one settings `PUT`, with the connection (the settings list is sent only when
+  it changed, as before; every connection in it now carries `credential_source` explicitly). Changing the provider type resets it to
+  environment. A managed connection must name a reference (a local check mirrors the server's `required`). The card shows the source, and its
+  status sentence for `missing_api_key` reads "The managed credential is not stored..." for a managed connection. There is no fallback between the
+  two sources; the page says so.
+- **Managed credentials section** (a `region` below the settings form, outside it). One row per reference that a **saved** managed connection reads, plus
+  any reference the administrator adds or looks up here (the API has no list endpoint). A row shows the reference (a name), the status
+  (`Stored`, `Not stored`, `Stored, but unreadable by the server`, or `Checking…` / `Status unknown` when the check failed), the saved connections
+  that read it, and the secret store's backend identifier. Actions: **Store credential** (not stored), **Replace** and **Delete** (stored or
+  unreadable), **Check status**. An **Add** form takes a reference and a secret (**Store new credential**) or just a reference (**Check status only**).
+- After a successful change the saved connections' status badges are refreshed (see 20.4).
+
+### 20.2 API use (`api/aiCredentials.ts`; `http.ts` gained the `DELETE` method)
+
+| Action | Request | Answer used |
+|---|---|---|
+| Status | `GET /api/ai-credentials/<reference>/` | `reference`, `source` (`managed`), `status` (`set`, `not_set`, `unreadable`), `store`, `connections`, `apply` |
+| Store | `POST /api/ai-credentials/` body exactly `{reference, value}` | the same status object, 201 |
+| Replace | `PUT /api/ai-credentials/<reference>/` body exactly `{value}` | the same, 200 |
+| Delete | `DELETE /api/ai-credentials/<reference>/`, no body | the same with `not_set`, 200 |
+
+All through `request()`: same origin, session cookie, `no-store`, `X-CSRFToken` on every unsafe call with the one retry after 403 `csrf_failed`.
+The reference is placed in the path with `encodeURIComponent`. The answer is copied field by field into a new object that has no field a value
+could occupy (`parseCredentialStatus`): an unlisted field is dropped, a wrong shape is `unexpected_response`. Create refuses an existing
+reference and replace a missing one (the server's explicit operations, no upsert); the page never turns one into the other behind the user's back.
+
+### 20.3 Permissions
+
+Same as section 19.3: administrator = `is_superuser`, enforced by the route (`RequireAdministrator`); a non-administrator never mounts the page, so
+no credential control renders and **no `/api/ai-credentials/` request is made**. The backend stays authoritative (`require_administrator` in every
+service): a 403 `permission_denied` from a credential call is shown as "You do not have permission to manage credentials. Nothing was changed." and
+the section stays as it was.
+
+### 20.4 Secret handling
+
+- The value is entered in a **masked** `type="password"` input (`autocomplete="new-password"`, no reveal control) that **starts empty**. Existing
+  secrets cannot be shown or prefilled: the API never returns one, and the page has no field in its types that could hold one.
+- The value lives only in the state of the one form that is open and goes only into the body of that one `POST` or `PUT`. The credentials section is a
+  **sibling of the settings `<form>`, not inside it**, and the settings draft, `buildUpdate`, the settings client and the settings `PUT` body have no
+  field for a value (the server would also answer 400 `unknown_field`); a test types a secret, saves the settings and checks the `PUT` does not
+  contain it. A credential change leaves unsaved settings edits untouched and does not save them.
+- **Cleared after success**: on success the form is closed or its fields emptied. After 409 `credential_already_exists` and 404 `credential_not_found`
+  the secret is cleared too (the stored state changed, so it must not be sent again by accident) and the current status is shown. After a retryable
+  failure (network, 503) or a 400 the typed value stays in the masked field so it need not be retyped; Cancel discards it.
+- Never in browser storage (the existing `security.test.ts` forbids it in source; a test spies on `Storage.setItem` and checks both storages are
+  empty after store, replace and delete) and never logged (a test spies on every `console` method).
+- Messages are fixed sentences chosen by the stable error code. The server's message text, the value and the reference's input are never echoed:
+  a refused secret produces "This secret cannot be stored..." and a test asserts the value is absent from every message and from the page text. Only a
+  well-formed connection identifier from a `credential_in_use` answer is shown. The local checks (`checkSecret`, `referenceProblem`) return codes,
+  never the text: non-empty, at most 4096 characters, no space or line break at either end; the server's other rule (printable text) is its answer.
+- The credential **reference** is a name, not a secret, and is displayed (as it already was on the connection card).
+- **Destructive operations are confirmed.** Delete asks first (what is removed, that it cannot be recovered, that a running worker keeps its start-up
+  value). Replace asks after the value is entered. Cancelling either sends nothing. **Store** (create) does not overwrite anything and needs no
+  confirmation. A delete of a credential a stored connection still reads is refused by the server (409 `credential_in_use`); the page then names the
+  connections and the way out (switch them to another credential or to the environment, save, then delete).
+- **Status refresh.** After a successful change the page re-reads the settings and copies only the connections' computed `status` into the shown
+  settings, and only when the revision is the one on screen, so another administrator's change is never pulled in and no unsaved edit is touched.
+
+### 20.5 Errors
+
+| Answer | What is shown |
+|---|---|
+| Local check fails | the problem beside the field; no request |
+| 400 `validation_error` | the server's `reference` / `value` codes mapped to fixed sentences beside the fields (`invalid_reference`, `invalid_secret`, `too_long`, ...); the form and its value stay |
+| 403 `permission_denied` | "You do not have permission to manage credentials. Nothing was changed." |
+| 404 `credential_not_found` | the current status is shown (probably "Not stored"), the form closes and the secret is cleared |
+| 409 `credential_already_exists` | "...already stored... It was not overwritten; use Replace to change it."; the row shows the current status; the secret is cleared |
+| 409 `credential_in_use` | names the connections that read it; the credential stays |
+| 503 `secret_store_disabled` | a fixed sentence pointing to the operator (runbook 5.11); a status check that finds it also shows a section-level error |
+| 503 `secret_store_unavailable` / `secret_store_busy` | "Nothing was changed. Try again later..." / "...Wait a moment, then try again." |
+| 503 `secret_unreadable` | "The stored secret cannot be read by this server process. Replace it with a new value." |
+| Network failure on a change | "The change may or may not have been applied: check the status before trying again." (the outcome is unknown); on a status check, "the status is unknown" |
+| 403 `csrf_failed` | handled by `http.ts`: new token, one retry |
+| Anything else | the existing generic text for the code, or the code only; never the server's message |
+
+### 20.6 Worker restart
+
+After any successful store, replace or delete the section shows **"Worker restart required."**: the change is stored, a running worker keeps the
+credential it read when it started, the new, replaced or deleted credential is **not active until the worker is restarted**, and **this page cannot
+restart it** (runbook section 5.11). The notice stays for the rest of the page session, including after a later failed attempt. There is no restart
+control, no automatic restart and no claim that a credential is active; the only calls are the credential and settings endpoints. Changing a connection's
+source or reference is a settings change and has the settings notice of section 19.5.
+
+### 20.7 Tests (development VM, jsdom, `fetch` stubbed)
+
+New: `pages/AiCredentials.test.tsx` (48 tests: access for an administrator and a non-administrator with no credential request, status for stored,
+not stored, unreadable and a failed check, create, replace and delete with their confirmations, double submit, secret masking, no prefill, no storage
+or logging, the settings `PUT` never carrying a secret and unsaved edits surviving a credential change, redaction of a refused value and of a rogue
+response field, CSRF refresh and retry, every error answer of 20.5, the restart notice, the source select in the connection editor, and the existing
+settings save and conflict flows), `api/aiCredentials.test.ts` (paths, methods, exact bodies, CSRF, encoding, parsing, no value in an error) and
+`lib/aiCredentials.test.ts` (references, local checks, message text). `lib/aiSettingsForm.test.ts` gained the credential-source cases;
+`AiSettingsPage.test.tsx` was updated for the new field and sentences only (every connection now carries `credential_source`; the "no password input"
+check is scoped to the settings form). A deliberate mutation (the add form not clearing its secret) was caught.
+Result: whole suite 24 files, 589 of 589 tests passed; `npm run typecheck` and `npm run build` pass; `git diff --check` is clean. No backend test was run and no
+backend file was changed; nothing was sent to a provider.
+
+### 20.8 Remaining limitations
+
+- **Not reviewed in a browser.** Never run against the real API, the DPAPI store or a worker; the contract was read from source, not exercised. The layout
+  (the new section, the masked field, the confirmation steps, the narrow screen) is unreviewed, and the sticky save bar is unchanged.
+- No list endpoint exists, so a credential no saved managed connection reads appears only after the administrator adds or looks up its reference (and
+  after a reload it must be looked up again).
+- The page cannot restart the worker, cannot tell whether it was restarted, and cannot show which value a running worker holds. There is no connection test.
+- Rotating or deleting a credential has no effect on a running worker until it restarts; after a restart a connection whose managed credential is missing
+  or unreadable stops the worker (no fallback).
+- A status of `Stored` means the web process could decrypt it; the worker must run as the same Windows account (`secret-store.md` section 8) or it will
+  find it unreadable. The page cannot check the worker.
+- The secret is held in React state while typed; a browser extension or a compromised page could read it. There is no clipboard handling, no password
+  generator and no strength check. Password managers may offer to save the field despite `autocomplete="new-password"`.
+- The local checks mirror the backend's (reference shape, length bound, no space at either end) and are copies; a backend change shows up as a server error.
+- Audit events of credential changes (`ai_credential.created`, `.replaced`, `.deleted`) are written by the backend; this page has no view of them.
+- Concurrency across administrators is the backend's (a per-reference lock); the page shows the outcome and re-reads status only on request.

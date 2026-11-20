@@ -1,6 +1,6 @@
 import { useId, type ReactNode } from "react";
 
-import type { AiCatalog, AiProfileRef, AiProviderType } from "../../api/types";
+import type { AiCatalog, AiProfileRef, AiProviderType, CredentialSource } from "../../api/types";
 import { MAX_PROFILES, describeCodes, localityLabel, typeOf, withProviderType, type ConnectionDraft } from "../../lib/aiSettingsForm";
 import { Icon } from "../ui/Icon";
 
@@ -35,9 +35,17 @@ function Field({ label, hint, codes, children }: { label: string; hint?: ReactNo
   );
 }
 
-function credentialHint(type: AiProviderType, locality: string, prefix: string): ReactNode {
+function credentialHint(type: AiProviderType, locality: string, prefix: string, source: CredentialSource): ReactNode {
   const need =
     type.credential === "required_unless_local" ? (locality === "local" ? "Optional for a local endpoint." : "Required for this locality.") : "Optional.";
+  if (source === "managed") {
+    return (
+      <>
+        {need} The <strong>name</strong> of a managed credential, starting with <code>{prefix}</code>. The key is stored under this name in the Managed credentials section below
+        (save the settings first if the connection is new); it is never typed, sent or shown in this form. Required when the source is Managed.
+      </>
+    );
+  }
   return (
     <>
       {need} The <strong>name</strong> of a backend environment variable, starting with <code>{prefix}</code>. The key itself is set by the operator in
@@ -53,8 +61,8 @@ const MODEL_NOTE: Record<string, string> = {
 
 /**
  * The form of ONE connection. It edits a draft; nothing is sent until the page's Save. It has no field for a key, token,
- * password or header: the credential reference is a variable NAME, and a value that is not shaped like one is refused
- * before anything is sent.
+ * password or header: the credential reference is a NAME (of a variable or of a managed credential), a value that is not shaped like one
+ * is refused before anything is sent, and a secret is entered only in the separate credentials panel.
  */
 export function ConnectionEditor({
   draft,
@@ -169,7 +177,26 @@ export function ConnectionEditor({
       ) : null}
 
       {type && type.credential !== "none" ? (
-        <Field label="Credential reference (variable name)" hint={credentialHint(type, draft.locality, catalog.credential_ref_prefix)} codes={problems.credential_ref}>
+        <Field
+          label="Credential source"
+          hint="Where the key is read from. There is no fallback from one source to the other: a missing managed credential stops the worker; it never looks in the environment."
+          codes={problems.credential_source}
+        >
+          {(props) => (
+            <select {...props} value={draft.credential_source} onChange={(e) => set({ credential_source: e.target.value === "managed" ? "managed" : "environment" })}>
+              <option value="environment">Environment variable (set by the operator)</option>
+              <option value="managed">Managed (stored by the server's secret store)</option>
+            </select>
+          )}
+        </Field>
+      ) : null}
+
+      {type && type.credential !== "none" ? (
+        <Field
+          label={draft.credential_source === "managed" ? "Credential reference (name)" : "Credential reference (variable name)"}
+          hint={credentialHint(type, draft.locality, catalog.credential_ref_prefix, draft.credential_source)}
+          codes={problems.credential_ref}
+        >
           {(props) => (
             <input
               {...props}

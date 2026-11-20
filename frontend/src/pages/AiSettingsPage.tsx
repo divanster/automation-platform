@@ -4,6 +4,7 @@ import { getAiSettings, saveAiSettings } from "../api/aiSettings";
 import { ApiError } from "../api/http";
 import type { AiSettings } from "../api/types";
 import { ConnectionCard } from "../components/ai/ConnectionCard";
+import { CredentialsPanel } from "../components/ai/CredentialsPanel";
 import { ConfirmStep } from "../components/ConfirmStep";
 import { PageHeader } from "../components/PageHeader";
 import { ErrorState, LoadingState, Notice } from "../components/Status";
@@ -224,12 +225,28 @@ function Editor({ initial, onReload }: { initial: AiSettings; onReload: () => vo
     setServerProblems({});
   }
 
+  async function refreshStatuses() {
+    // A credential change alters only what the server computes for a connection (its status), never its stored content. Update the statuses
+    // only when the settings are the very revision on screen, so no other change is pulled in and no unsaved edit is touched.
+    try {
+      const latest = await getAiSettings();
+      setBaseline((current) =>
+        latest.revision !== current.revision
+          ? current
+          : { ...current, connections: current.connections.map((c) => ({ ...c, status: latest.connections.find((l) => l.connection_id === c.connection_id)?.status ?? c.status })) },
+      );
+    } catch {
+      // The statuses stay as they were; "Check status" in the credentials section is the reliable view.
+    }
+  }
+
   const shownSettingsPaths = new Set<string>([...SETTINGS_FIELDS, "connections"]);
   const unplaced = Object.entries(problems).filter(([path]) => !shownSettingsPaths.has(path) && parseConnectionPath(path) === null);
   const stale = saveError !== null && isStaleSettings(saveError);
   const otherError = saveError !== null && !stale && saveError.code !== "validation_error";
 
   return (
+    <div className="ai-page">
     <form className="ai-settings" onSubmit={submit} noValidate>
       {restartRevision !== null ? (
         <Notice kind="warning">
@@ -240,7 +257,7 @@ function Editor({ initial, onReload }: { initial: AiSettings; onReload: () => vo
 
       <Notice kind="info">
         Saved changes reach the worker only when it starts. There is no automatic fallback: if the selected connection or model cannot be used, the worker does not start and requests stay queued. Nothing is
-        downloaded automatically, and secrets are never entered, stored or shown on this page.
+        downloaded automatically. A secret is never part of these settings: it is entered only in the Managed credentials section below, is never shown again, and is never stored in the browser.
       </Notice>
 
       {baseline.unreadable_connections > 0 ? (
@@ -435,7 +452,7 @@ function Editor({ initial, onReload }: { initial: AiSettings; onReload: () => vo
             ) : null}
             {selectedStatus && !selectedStatus.configured ? (
               <Notice kind="warning">
-                The selected connection is <strong>not configured</strong>: {describeStatus(selectedStatus).detail} If the backend environment is not fixed, the worker will not start and requests will stay queued.
+                The selected connection is <strong>not configured</strong>: {describeStatus(selectedStatus, savedSelection?.credential_source).detail} If the backend environment is not fixed, the worker will not start and requests will stay queued.
               </Notice>
             ) : null}
           </div>
@@ -450,7 +467,8 @@ function Editor({ initial, onReload }: { initial: AiSettings; onReload: () => vo
           </span>
         </div>
         <p className="muted">
-          A connection names one provider, where it runs, the models it may use and the <em>name</em> of its credential variable. Credentials themselves are set by the operator in the backend environment.
+          A connection names one provider, where it runs, the models it may use and the <em>name</em> of its credential and whether that credential is an environment variable set by the operator or a
+          managed credential stored by the server (see Managed credentials below).
         </p>
         <FieldMessage id="connections-problem" codes={problems.connections} />
 
@@ -545,6 +563,8 @@ function Editor({ initial, onReload }: { initial: AiSettings; onReload: () => vo
         </p>
       </section>
     </form>
+    <CredentialsPanel connections={baseline.connections} prefix={catalog.credential_ref_prefix} onChanged={() => void refreshStatuses()} />
+    </div>
   );
 }
 

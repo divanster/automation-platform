@@ -305,8 +305,8 @@ describe("adding, editing, disabling and removing connections", () => {
       timeout_seconds: null,
       expected_revision: 3,
       connections: [
-        { connection_id: "corp-llm", display_name: "Company model server", provider_type: "openai_compatible", locality: "company_endpoint", endpoint: "https://llm.corp.example.invalid/v1", credential_ref: "AP_AI_CRED_CORP_LLM", enabled: true, profiles: [{ profile_id: "corp-small", model_id: "corp-model-8b" }] },
-        { connection_id: "ollama-two", display_name: "Local Ollama", provider_type: "ollama", locality: "local", endpoint: "http://127.0.0.1:11434", credential_ref: null, enabled: true, profiles: [{ profile_id: "llama", model_id: "llama3.1:8b" }] },
+        { connection_id: "corp-llm", display_name: "Company model server", provider_type: "openai_compatible", locality: "company_endpoint", endpoint: "https://llm.corp.example.invalid/v1", credential_ref: "AP_AI_CRED_CORP_LLM", credential_source: "environment", enabled: true, profiles: [{ profile_id: "corp-small", model_id: "corp-model-8b" }] },
+        { connection_id: "ollama-two", display_name: "Local Ollama", provider_type: "ollama", locality: "local", endpoint: "http://127.0.0.1:11434", credential_ref: null, credential_source: "environment", enabled: true, profiles: [{ profile_id: "llama", model_id: "llama3.1:8b" }] },
       ],
     });
     expect(await screen.findByRole("heading", { level: 3, name: "Local Ollama" })).toBeInTheDocument();
@@ -470,8 +470,8 @@ describe("credentials", () => {
     await user.click(screen.getByRole("button", { name: "Add connection" }));
     const editor = within(screen.getByRole("group", { name: /Edit connection/ }));
     await user.selectOptions(editor.getByLabelText("Provider type"), "openai_compatible");
-    expect(document.querySelector("input[type='password']")).toBeNull();
-    for (const label of Array.from(document.querySelectorAll("label")).map((l) => l.textContent ?? "")) {
+    expect(document.querySelector(".ai-settings input[type='password']")).toBeNull();
+    for (const label of Array.from(document.querySelectorAll(".ai-settings label")).map((l) => l.textContent ?? "")) {
       expect(label).not.toMatch(/api[ -]?key|secret|token|password|authorization|header|charge/i);
     }
     expect(editor.getByLabelText("Credential reference (variable name)")).toBeInTheDocument();
@@ -493,7 +493,7 @@ describe("credentials", () => {
     await user.type(editor.getByLabelText("Profile 1 model"), "m");
     await user.click(saveButton());
 
-    expect(await screen.findByText(/Enter only the NAME of a backend environment variable/)).toBeInTheDocument();
+    expect(await screen.findByText(/Enter only the NAME of a credential/)).toBeInTheDocument();
     expect(puts(api)).toHaveLength(0);
     const messages = Array.from(document.querySelectorAll(".field-error, [role='alert'], [role='status']")).map((e) => e.textContent ?? "");
     expect(messages.join(" ")).not.toContain(SECRET_SENTINEL);
@@ -559,7 +559,7 @@ describe("credentials", () => {
     const body = putBody(api);
     expect(Object.keys(body).sort()).toEqual(["connection_id", "connections", "expected_revision", "extraction_mode", "policy_mode", "profile_id", "provider_id", "timeout_seconds"]);
     for (const c of body.connections as Array<Record<string, unknown>>) {
-      expect(Object.keys(c).sort()).toEqual(["connection_id", "credential_ref", "display_name", "enabled", "endpoint", "locality", "profiles", "provider_type"]);
+      expect(Object.keys(c).sort()).toEqual(["connection_id", "credential_ref", "credential_source", "display_name", "enabled", "endpoint", "locality", "profiles", "provider_type"]);
     }
   });
 });
