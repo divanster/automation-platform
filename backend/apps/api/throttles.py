@@ -79,3 +79,32 @@ class ApiUserThrottle(ConfiguredRateThrottle):
         user = getattr(request, "user", None)
         ident = f"user-{user.pk}" if user is not None and getattr(user, "is_authenticated", False) else self.get_ident(request)
         return self.cache_format % {"scope": self.scope, "ident": ident}
+
+
+class ConnectionTestThrottle(ConfiguredRateThrottle):
+    """A STRICT ceiling per signed-in administrator on the AI connection test, which calls an external provider (a request, a cost and a load on someone else's server).
+    Every request that reaches the view counts, whatever its outcome. Authentication and the administrator check happen before throttling and validation."""
+
+    scope = "ai_connection_test"
+
+    def get_cache_key(self, request, view):
+        user = getattr(request, "user", None)
+        ident = f"user-{user.pk}" if user is not None and getattr(user, "is_authenticated", False) else self.get_ident(request)
+        return self.cache_format % {"scope": self.scope, "ident": ident}
+
+
+class ConnectionTestHourThrottle(ConnectionTestThrottle):
+    scope = "ai_connection_test_hour"
+
+
+class ConnectionTestGlobalThrottle(ConfiguredRateThrottle):
+    """One shared ceiling for all ADMINISTRATORS together, so several administrator sessions cannot add up to a flood (per process, like every throttle here). Requests of a user who
+    is not an administrator are not counted here (they are refused by the service anyway), so they cannot use up the ceiling and lock the administrators out."""
+
+    scope = "ai_connection_test_all"
+
+    def get_cache_key(self, request, view):
+        user = getattr(request, "user", None)
+        if user is None or not getattr(user, "is_authenticated", False) or not getattr(user, "is_superuser", False):
+            return None
+        return self.cache_format % {"scope": self.scope, "ident": "all"}

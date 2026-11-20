@@ -20,3 +20,27 @@ class AISettingsConflictError(AISettingsError):
 
     def __init__(self):
         super().__init__("The settings were changed since they were read.")
+
+
+class ConnectionNotFoundError(AISettingsError):
+    """The connection to test is not among the saved connections."""
+
+    def __init__(self):
+        super().__init__("There is no such saved connection.")
+
+
+class ConnectionTestBusyError(AISettingsError):
+    """Too many connection tests are running in this process at once; nothing was sent. The caller may retry shortly."""
+
+    def __init__(self):
+        super().__init__("Too many connection tests are running.")
+
+
+class ConnectionTestRefusedError(AISettingsError):
+    """The connection cannot be tested as saved, and nothing was sent. ``code`` is ``connection_disabled`` or ``connection_not_usable``; for the latter ``issue`` is one of
+    ``rules.PROVIDER_ISSUES`` (``missing_api_key``, ``endpoint_not_approved``, ``invalid_configuration``)."""
+
+    def __init__(self, code: str, issue: str | None = None):
+        self.code = code
+        self.issue = issue
+        super().__init__("The connection cannot be tested as saved.")

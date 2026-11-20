@@ -114,9 +114,9 @@ def load_openai_compatible_settings(environ=None) -> OpenAICompatibleSettings:
     )
 
 
-def build_openai_compatible_transport(settings: OpenAICompatibleSettings) -> GuardedHttpTransport:
-    """The real transport. Construction reads a CA file at most; it resolves and connects to nothing."""
-    return GuardedHttpTransport(proxy_url=settings.proxy_url, ca_bundle=settings.ca_bundle)
+def build_openai_compatible_transport(settings: OpenAICompatibleSettings, *, max_response_bytes=None) -> GuardedHttpTransport:
+    """The real transport. Construction reads a CA file at most; it resolves and connects to nothing. ``max_response_bytes`` can only LOWER the transport's response cap."""
+    return GuardedHttpTransport(proxy_url=settings.proxy_url, ca_bundle=settings.ca_bundle, **({} if max_response_bytes is None else {"max_response_bytes": max_response_bytes}))
 
 
 def build_openai_compatible_profile(settings: OpenAICompatibleSettings) -> ModelProfile:

@@ -50,6 +50,7 @@ from .rules import (
     CREDENTIAL_SOURCE_MANAGED,
     DEFAULT_VALUES,
     ISSUE_INVALID_CONFIGURATION,
+    MODE_AI,
     PROVIDER_ISSUES,
     ConnectionValues,
     ExtractionCatalog,
@@ -241,6 +242,27 @@ def connections_using_managed_reference(reference: str, *, lock: bool = False) -
     row = (manager.select_for_update() if lock else manager).filter(pk=SINGLETON_ID).first()
     connections, _ = _stored_connections(row)
     return tuple(c.connection_id for c in connections if c.credential_source == CREDENTIAL_SOURCE_MANAGED and c.credential_ref == reference)
+
+
+@dataclass(frozen=True)
+class ConnectionTestContext:
+    """What a connection test reads from the settings row: the saved connections and the data policy in force (``None`` unless the saved mode is ``ai``)."""
+
+    connections: tuple
+    policy_mode: str | None
+
+
+def administrator_actor(user, action: str):
+    """The administrator behind ``user``, or ``AuthorizationError``: for services of this app that live in their own module."""
+    return _require_administrator(user, action)
+
+
+def read_connection_test_context() -> ConnectionTestContext:
+    """The saved connections and policy, read WITHOUT a lock and outside any transaction, so no database transaction is held while a provider is called. Writes nothing."""
+    row = AIExtractionSettings.objects.filter(pk=SINGLETON_ID).first()
+    connections, _ = _stored_connections(row)
+    policy_mode = row.policy_mode if row is not None and row.extraction_mode == MODE_AI else None
+    return ConnectionTestContext(connections, policy_mode)
 
 
 def update_extraction_settings(*, user, data, expected_revision: int, catalog: ExtractionCatalog, lease_seconds: int | None = None) -> SettingsView:

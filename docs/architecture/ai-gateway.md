@@ -1098,7 +1098,7 @@ A credential write answers an error when the audit INSERT, the lock, the store c
 
 ### 20.7 Not done
 
-No frontend and no key or token typing in the UI; no connection test and no request to any provider; no list or export of credentials; no automatic rotation, expiry or reminder; no per-user or per-company store; no hot reload and no worker restart control; `AP_SECRET_STORE_*` are read per process with no shared status; the status of the worker's own store is not reported to the API; and everything in secret-store.md, section 7 (same-user code, administrators, rollback by a restore, untested service accounts, no real wrong-account run) still applies, plus the accepted credential-write limitations of section 9 (an uncertain commit and the crash window can leave a changed, unaudited credential; the reconciliation is manual).
+No frontend and no key or token typing in the UI; no connection test and no request to any provider (superseded for the backend by section 21: the connection test API sends one fixed probe; no UI uses it); no list or export of credentials; no automatic rotation, expiry or reminder; no per-user or per-company store; no hot reload and no worker restart control; `AP_SECRET_STORE_*` are read per process with no shared status; the status of the worker's own store is not reported to the API; and everything in secret-store.md, section 7 (same-user code, administrators, rollback by a restore, untested service accounts, no real wrong-account run) still applies, plus the accepted credential-write limitations of section 9 (an uncertain commit and the crash window can leave a changed, unaudited credential; the reconciliation is manual).
 
 ### 20.8 Tests
 
@@ -1114,3 +1114,64 @@ DB-free, in the development VM, no PostgreSQL, no network, synthetic sentinel se
 | `test_ai_credentials_postgres.py` | not run (20 tests written) | real audit rows and rollback, the lifecycle through real sessions and CSRF, no secret in any table, delete versus a concurrent settings save, the stored source and an omitted source; **transaction hardening**: concurrent rotations with `pg_locks` and audit order = write order, a delete and a settings save beside a rotation without a deadlock, a real definite and a real ambiguous COMMIT failure, and a child process killed before and after the store change (`tests/credential_crash_worker.py`) |
 
 Existing tests edited (pins and expected shapes only): `test_audit_vocabulary`, `test_review_audit`, `test_intake_ai_boundaries`, `test_api_boundaries`, `test_secret_store`, `test_runner`, `test_ai_connections_boundaries`, `test_ai_connections_api` and the support module `ai_connections_support`.
+
+## 21. AI connection test (AI-CON-TEST-1)
+
+### 21.1 What was added
+
+`POST /api/ai-settings/connections/<connection_id>/test/`: an administrator asks whether ONE saved connection and ONE of its saved model profiles can answer a fixed probe. Backend only; no frontend. It reuses everything that already decides how a connection is called: `config/ai_connections.build_connection_gateway` (the same one-provider, one-profile gateway the worker builds, with the provider's own loader, adapter and guarded transport), the credential resolution of section 19.5 and 20.3 (the environment variable the reference names, or the secret store, per the connection's `credential_source`, never the other), the operator's approved-origin lists, company CIDR ranges, proxy and CA rules, the guarded transport's resolved-address checks and the gateway's data-policy rule. Nothing is re-implemented or relaxed. There is **no fallback** to another connection, profile, model, provider, locality or credential source, and none to the environment-configured legacy Workbench (a connection that is not saved cannot be tested: `404`).
+
+| Piece | File | Role |
+| --- | --- | --- |
+| Service | `apps/ai_settings/connection_test.py` | authorization first, saved-connection lookup, disabled and profile checks, outcome validation, one log line; no gateway import |
+| Composition | `config/ai_connection_test.py` | builds the gateway, applies the policy and the fixed bounds, sends the probe, drops the answer |
+| View and route | `apps/api/views_ai_connection_test.py`, `config/urls.py` | shape validation only; the route injects the prober |
+| Throttles | `apps/api/throttles.py`, `API_THROTTLE_RATES` | `ai_connection_test` 5/min and `ai_connection_test_hour` 30/hour per administrator; `ai_connection_test_all` 10/min for all administrators together |
+| Transport cap | `config/ai_http_transport.py`, `config/ai_guarded_transport.py` | a new `max_response_bytes` that can only LOWER the 8 MiB cap |
+
+### 21.2 API contract
+
+- `POST` only (`GET`, `PUT`, `PATCH`, `DELETE`: `405`). Session authentication, CSRF (`403 csrf_failed`), `Cache-Control: no-store` on every response, errors per the API error contract.
+- Request body: `{"profile_id": "<a saved profile of the connection>"}` and nothing else. There is no field for a prompt, text, endpoint, key, header, timeout or token limit; any other field is `400 validation_error` (`unknown_field`).
+- Order of decisions: authentication, CSRF and the throttles (DRF), then the **administrator check, before the body or the connection identifier is looked at** (`403 permission_denied`; a non-administrator learns nothing about which connections exist), then the shape of the body (`400`), then the saved-connection lookup.
+- `200` (a test was run, whatever the provider answered):
+
+  ```json
+  {"connection_id": "corp-llm", "profile_id": "corp-small", "provider_type": "openai_compatible", "locality": "company_endpoint", "ok": true, "code": null, "retryable": false, "duration_ms": 412}
+  ```
+
+  `ok: false` carries one stable gateway `code` (section 8): `timeout`, `rate_limit`, `authentication_failure`, `provider_unavailable`, `unsupported_model`, `invalid_structured_output`, `provider_error` or `policy_violation` (the saved policy, or, when no AI policy is saved, the rule that a cloud connection is only tested under a saved `approved_cloud`, refuses the call before any provider code runs and nothing is sent). `retryable` says whether a later retry could help; `duration_ms` is the time spent in the call.
+- `404 not_found`: no such saved connection (also an unreadable stored one, an identifier that is not a path segment, and the legacy environment-configured provider).
+- `409 connection_disabled`: the connection is saved but disabled. `409 connection_not_usable` with `details.issue` one of `missing_api_key` (credential reference unset, managed credential not stored), `endpoint_not_approved` (the operator's origin list does not cover the endpoint) or `invalid_configuration` (an invalid or forbidden endpoint, a proxy with a host-name endpoint, a store that is disabled or unavailable, an invalid saved policy): nothing was sent.
+- `400 validation_error` with `fields.profile_id: ["unknown_profile"]`: the connection has no such saved profile.
+- `429 throttled` with `Retry-After`: the strict ceiling. `429 connection_test_busy`: two tests are already running in this process; nothing was sent.
+- No response, error or log line holds a secret, endpoint, credential reference, request content, provider text or model output.
+
+### 21.3 What a test sends and what bounds it
+
+One fixed, synthetic request: the instruction "connectivity check ... reply with only `{"status": "ok"}`", the input `connectivity check` and the schema `{"status": "ok"}` (`config/ai_connection_test.PROBE_*`). No company data and nothing from the request. Bounds, all tighter than or equal to the connection's own: **one attempt** (the environment copy sets every provider's retry count to 0, whatever the operator configured for real calls), a deadline of **20 s** (never above the profile's), **128** output tokens, and a response cap of **64 KiB** enforced by the real transport while it reads. The gateway validates the answer against the probe's schema and the composition drops it: **the provider's answer is never stored, logged or returned.**
+
+**Whole-exchange deadline (final security review, finding 1).** A socket timeout bounds one operation, so a server that sends a byte every few milliseconds could have held a read for as long as it liked. Both real transports (`config/ai_http_transport.py`, `config/ai_guarded_transport.py`; this applies to every call through them, the worker's included) now run a watchdog (`_Watchdog`) with the request's `read_timeout_seconds` (the adapters set it to the time left of the call's deadline) as ONE budget for the connection attempts, the request and the read: when it is used up the socket is shut down from a timer thread, the call fails with `timeout` and whatever was read is discarded (it may be truncated). Connection attempts to several validated addresses share the budget (an attempt gets at most the time left). Name resolution is still not covered. **Concurrency cap:** at most 2 tests run at once per process (`MAX_CONCURRENT_TESTS`); the next is refused at once with `429 connection_test_busy`, before any credential is read or request made. This also limits a burst that the local-memory throttle (a read-modify-write, per process) would let through.
+
+### 21.4 Data policy
+
+The policy in force is the saved one when the saved extraction mode is `ai` (so a connection is tested under the rule it would run under; `local_only` refuses a company or cloud connection). With no saved AI policy (deterministic mode), the connection's own locality picks the least permissive mode that permits it (`local`: `local_only`; `company_endpoint`: `company_endpoint`) and a `cloud` connection is refused as `policy_violation`. Under a saved `approved_cloud`, a cloud connection is tested without being the selected one (the policy is installation-wide; the probe holds no company data).
+
+### 21.5 What it does not do
+
+It writes nothing: no settings (the selected connection, profile, policy and timeout are unchanged), no audit row (an identifier-only log line records the actor's public id, the connection and profile identifiers, the outcome code and the duration), no run, case, revision or task, no workflow and no queue access; a test pins that the three source files import none of them and call no ORM write. It holds no database transaction while a provider is called. It does not touch a running worker: the worker still reads its settings and credential once, at start-up.
+
+### 21.6 Limitations
+
+- **Never run against a real provider.** Every test uses a scripted fake in place of the real transports' `send`. The real `GuardedHttpTransport` and `StdlibHttpsTransport` (address rules, TLS, timeouts) are covered by their own existing tests; this endpoint has not shown a real answer.
+- A test is a real provider call: it costs a request, can be rate-limited, and holds a web worker thread for up to its 20 s budget (name resolution, which is not bounded by the deadline, section 17, comes on top; at most 2 tests run at once per process). The throttles are per process (`locmem` cache; a read-modify-write, so a burst of simultaneous requests can exceed them, which the concurrency cap bounds) and per administrator and all-administrators together; several web processes multiply both.
+- The watchdog's socket shutdown was exercised only on a local `socketpair` (no TLS, no real server); how it behaves against a real TLS stream on every platform is unverified.
+- The probe cannot tell a model that is loading (Ollama's first call can exceed 20 s: `timeout`) from a model that is unreachable.
+- A pass means the saved endpoint, credential and model answered a valid JSON object once, in this process, under this environment. It is not an evaluation, not proof that extraction will be accurate, and says nothing about the worker's own environment (it may differ: the worker has its own process, variables and, for a managed credential, its own Windows account).
+- No audit event: a test that sends a request to an external provider is logged (identifiers only) but not recorded in the audit table, because the audit vocabulary and its migration are unchanged.
+- The legacy environment-configured Workbench provider cannot be tested here (it is not a saved connection); a saved Workbench connection can.
+- No frontend; no connection-test button.
+
+### 21.7 Tests
+
+DB-free, in the development VM, mocked HTTP only, no PostgreSQL, no network, sentinel secrets: `tests/test_ai_connection_test_api.py` (success for each provider type through the real URL, authentication, CSRF, throttling, view, service, composition, connection gateway and adapters; every failure outcome with exactly one request; disabled, missing credential (both sources), unapproved or invalid endpoints, proxy refusal, an address behind a cloud name refused by the real guarded transport, unknown connection or profile, strict body; non-administrator and anonymous refusal before validation; no-store; strict and global throttles; no secret, endpoint, reference, provider text or request content in any response or log line; no side effect; static checks on imports and the absence of any write path), plus the transport cap in `test_ai_workbench_transport.py` and `test_ai_openai_transport.py`. Existing pins edited: `test_api_boundaries`, `test_ai_gateway_boundaries`, `test_ai_connections_boundaries`, `test_ai_workbench_transport`.
