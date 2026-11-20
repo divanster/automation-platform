@@ -1,4 +1,6 @@
-# AI Gateway Foundation (AI-1a), the KPMG Workbench provider (AI-1b), Request Intake extraction (AI-2a) and the OpenAI-compatible provider (AI-CON-1)
+# AI Gateway Foundation (AI-1a), the KPMG Workbench provider (AI-1b), Request Intake extraction (AI-2a), the OpenAI-compatible provider (AI-CON-1) and the native Ollama provider (AI-CON-2)
+
+> **AI-CON-2 status (on `feat/ai-ollama-adapter`, not committed): a native Ollama provider (`ollama`) exists for a model server on THIS machine, opt-in and used by nothing.** It calls Ollama's own `POST /api/chat` (not the OpenAI-compatible `/v1` surface), with an explicit loopback endpoint, an explicit approved-origin list and an explicit model; locality is always `local`; no key, no proxy, no redirect, no model download, no fallback. Checked with DB-free tests and a MOCKED transport only; it has never talked to a real Ollama. Section 18 describes it and its limits; the Workbench, the OpenAI-compatible provider, the deterministic default and Request Intake are unchanged.
 
 > **AI-CON-1 status (on `feat/ai-openai-compatible`, not committed): an OpenAI-compatible provider (`openai_compatible`) exists for approved local and company endpoints (and, under the strictest policy, a cloud one), opt-in and used by nothing.** It has an explicit endpoint, approval list, locality and model, an optional key (required unless `local`), strict destination rules checked against the RESOLVED addresses by a guarded transport, and no fallback. Checked with DB-free tests and a MOCKED transport only; it has never talked to a real server. Section 17 describes it and its limits; the Workbench, the deterministic default and Request Intake are unchanged.
 
@@ -68,16 +70,18 @@ backend/apps/ai_gateway/          pure standard library; no Django; not an insta
     adapters/deterministic.py   the deterministic TEST provider (not re-exported by the package)
     adapters/workbench.py       (AI-1b) the KPMG Workbench provider; pure, talks only to an HttpTransport
     adapters/openai_compatible.py   (AI-CON-1) the OpenAI-compatible provider; pure, talks only to an HttpTransport
-backend/config/ai_gateway.py      composition root: BUILTIN_PROVIDERS = (), BUILTIN_PROFILES = ()   (unchanged by AI-1b and AI-CON-1)
+    adapters/ollama.py          (AI-CON-2) the native Ollama provider (POST /api/chat); loopback only; pure, talks only to an HttpTransport
+backend/config/ai_gateway.py      composition root: BUILTIN_PROVIDERS = (), BUILTIN_PROFILES = ()   (unchanged by AI-1b, AI-CON-1 and AI-CON-2)
 backend/config/ai_workbench.py    (AI-1b) opt-in composition: environment -> settings -> Workbench provider, profiles and gateway
 backend/config/ai_http_transport.py   (AI-1b) the Workbench's real transport (standard-library http.client, TLS, proxy); refuses a request that carries a network class
 backend/config/ai_openai_compatible.py   (AI-CON-1) opt-in composition for the OpenAI-compatible provider (AP_AI_OPENAI_*)
+backend/config/ai_ollama.py       (AI-CON-2) opt-in composition for the native Ollama provider (AP_AI_OLLAMA_*); uses the guarded transport with no proxy
 backend/config/ai_guarded_transport.py   (AI-CON-1) the guarded transport: resolves, validates every address, connects to a validated one; the other code that opens sockets
 ```
 
 Adapters import only the contract above them and the standard library; the gateway core never imports an adapter; no business module,
 workflow package or Core app imports the package, and the only `config` modules that do are `config/ai_gateway.py` and, since AI-1b,
-`config/ai_workbench.py` and `config/ai_http_transport.py` (since AI-CON-1 also `config/ai_openai_compatible.py` and `config/ai_guarded_transport.py`); only `config/ai_workbench.py` and `config/ai_openai_compatible.py` import an adapter (all pinned by
+`config/ai_workbench.py` and `config/ai_http_transport.py` (since AI-CON-1 also `config/ai_openai_compatible.py` and `config/ai_guarded_transport.py`, since AI-CON-2 also `config/ai_ollama.py`); only `config/ai_workbench.py`, `config/ai_openai_compatible.py` and `config/ai_ollama.py` import an adapter (all pinned by
 `tests/test_ai_gateway_boundaries.py`). The package itself stays free of `socket`, `ssl`, `http`, `urllib` and `os`: the real network code
 is outside it.
 
@@ -786,7 +790,7 @@ Detail values are checked by the existing event builder (booleans, integers, nul
 
 Added: the provider `openai_compatible` (`apps/ai_gateway/adapters/openai_compatible.py`), the pure destination rules (`apps/ai_gateway/network.py`), a `network_class` field and an `approved_networks` field on `HttpRequest` and a transport error kind `destination` (`transport.py`), the guarded real transport (`config/ai_guarded_transport.py`) and the opt-in composition (`config/ai_openai_compatible.py`, variables `AP_AI_OPENAI_*`).
 
-Not added: any change to Request Intake extraction, the AI settings catalog (still the Workbench only) or the worker; any setting, table, migration, endpoint or frontend; Ollama's native API; `json_schema` (native structured output); streaming; tool or function calling; embeddings; a credential store; a stored company policy; a second provider instance per process. `config/ai_gateway.py` still has empty tuples, the deterministic default is unchanged, and the Workbench adapter, composition and transport behave as before (an `HttpRequest` without a `network_class` is exactly the old request; the Workbench transport now refuses a request that asks for address rules it cannot enforce).
+Not added: any change to Request Intake extraction, the AI settings catalog (still the Workbench only) or the worker; any setting, table, migration, endpoint or frontend; Ollama's native API (added later by AI-CON-2, section 18); `json_schema` (native structured output); streaming; tool or function calling; embeddings; a credential store; a stored company policy; a second provider instance per process. `config/ai_gateway.py` still has empty tuples, the deterministic default is unchanged, and the Workbench adapter, composition and transport behave as before (an `HttpRequest` without a `network_class` is exactly the old request; the Workbench transport now refuses a request that asks for address rules it cannot enforce).
 
 ### 17.2 Supported endpoint types
 
@@ -873,3 +877,71 @@ A read-only review of 17.1 to 17.9 (before these fixes the suite had 2962 tests)
 3. **Special-purpose and metadata ranges were only partly covered (Low).** `network.DENIED_NETWORKS` is an explicit list (17.4) applied before any approved range and to `cloud` as well, instead of relying on `is_private` and `is_global`. It adds `0.0.0.0/8`, `198.18.0.0/15`, `192.0.0.0/24`, `192.88.99.0/24`, `168.63.129.16`, `fd00:ec2::/32`, the documentation ranges and the IPv6 transition forms to the loopback, link-local and metadata ranges already refused.
 
 Not changed: the Workbench transport and adapter (the Workbench request carries no network class), Request Intake, the AI settings catalog (still the Workbench only), the local-only behaviour (loopback only, plain http only there) and the deterministic default.
+
+## 18. Native Ollama provider (AI-CON-2)
+
+> **Status: written and DB-free tested in the development VM only (84 new tests, 3082 DB-free tests in all, OK), with a MOCKED transport, a fake resolver and a fake connection factory. No request has been sent to any Ollama server, no Ollama has ever answered this adapter, nothing was installed or started, no model was downloaded and no database was touched. The provider is opt-in and not used by anything in the application: Request Intake extraction, the AI settings catalog (Workbench only), the worker, modules and the frontend are unchanged, and `config/ai_gateway.py` still has empty tuples.**
+
+### 18.1 What was added, and what was not
+
+Added: the provider `ollama` (`apps/ai_gateway/adapters/ollama.py`, pure, standard library only) and its opt-in composition (`config/ai_ollama.py`, variables `AP_AI_OLLAMA_*`). It reuses, unchanged, the gateway contracts, the policy rules, the destination grammar in `network.py` and the guarded transport (`config/ai_guarded_transport.py`); no existing module of the gateway, the Workbench, the OpenAI-compatible provider or the transport was edited.
+
+Not added: wiring into Request Intake extraction, the AI settings API or its catalog (multi-provider settings are a later, reviewed change); a frontend; document upload; any model download, creation, deletion or listing (`/api/pull`, `/api/create`, `/api/delete`, `/api/tags` are never called); starting, stopping or installing Ollama or changing a system service; a remote Ollama host (use `openai_compatible` against its `/v1` surface with TLS, a key and approved ranges); streaming, tool calling, embeddings, vision, `keep_alive` and `think`; a credential store or a per-company policy; a second Ollama instance or model per process.
+
+### 18.2 Provider contract
+
+* **Identity.** `provider_id` `ollama`, kind `ollama_native_chat`, locality `local` (a constant, not a setting, so there is no declaration to get wrong), `test_only` false. One endpoint and one model per process; the one profile is `ollama-local`, approved for `local_only`. There is no second profile, model or provider to fall back to.
+* **Capabilities.** `json_mode` and `native_schema`; `temperature`, `top_p` and `seed` are accepted and sent only when the profile sets them; the token limits come from the configuration (defaults 3 072 input and 1 024 output, derived from Ollama's small default context window; they are the operator's limits, not a claim about the model).
+* **Request.** `POST {endpoint}/api/chat`, headers `Content-Type` and `Accept` only (no `Authorization`: Ollama's native API has no key here). Body: `model` (the configured identifier), `messages` (system: the instructions plus the output JSON Schema in words; user: the input text), `stream` `false`, `format` and `options`. `format` is the string `"json"` for `json_mode` and the output JSON Schema itself for `native_schema` (Ollama's structured outputs). `options` always holds `num_predict` (the call's output limit) and holds `temperature`, `top_p` and `seed` only when the profile sets them and `num_ctx` only when `AP_AI_OLLAMA_NUM_CTX` is set. Nothing else is sent.
+* **Response.** The answer is `message.content` of a single non-streamed JSON document with `done` true. `model` is recorded as the reported model (`unreported` when absent, never replaced by the requested one); `prompt_eval_count` and `eval_count` become the token counts when they are non-negative integers. `done_reason` `length` is `invalid_structured_output`; `done` not true, an `error` field, no content or any other `done_reason` than `stop` or none is `provider_error`. The gateway validates the structure against the schema in every case; nothing is repaired.
+* **Errors** (adapter code, reason token; no server text is ever copied, in particular not Ollama's `error` string, which names the model): 401 and 403 `authentication_failure` (a reverse proxy in front of Ollama); 404 `unsupported_model` (the model is not installed, or the route is not there: the model is never pulled); 408 and a transport timeout `timeout`; 429 `rate_limit` (retried); 502, 503 (Ollama's "server busy") and 504 and a refused connection (Ollama is not running) `provider_unavailable` (retried); 3xx `provider_error` / `redirect_refused`; a TLS, protocol or refused-destination failure `provider_error`; everything else `provider_error` with `http_<status>`.
+* **Retries.** At most `max_retries` (default 2, maximum 5) further attempts to the same endpoint and model, only for a refused connection, 429, 502, 503 and 504, with back-off, all inside the call's deadline. A timeout is not retried.
+* **Provenance.** The gateway's `Provenance` records the provider id and kind, the locality `local`, the policy mode, the requested and the reported model, the duration and the token counts; never a prompt, input, output or endpoint.
+
+### 18.3 Model selection
+
+The model is explicit: `AP_AI_OLLAMA_MODEL` has no default, and the provider supports exactly that one identifier (for example `llama3.1:8b`). A call for any other model is refused before a request is made (`unsupported_model`). If the model is not installed, Ollama answers 404 and the call fails with `unsupported_model`; nothing is downloaded and no other model is tried. Installing a model is the operator's own action (`ollama pull`, outside this application).
+
+### 18.4 Local endpoint security
+
+| Control | Where | What it does |
+| --- | --- | --- |
+| Loopback only | `OllamaConfig`, `origin_problem` | The endpoint and every approved origin must be `localhost` or a loopback literal (`127.0.0.0/8`, `::1`). A LAN address, a company or cloud host, `0.0.0.0`, a `*.localhost` name or a host that only SOUNDS local is refused at configuration, even when listed as approved. There is no switch to relax this. |
+| Explicit approval | `OllamaConfig` | The endpoint's origin must be in `AP_AI_OLLAMA_ALLOWED_ORIGINS` (no default); the built URL is checked against the list and must be the `/api/chat` path again immediately before every request. |
+| No arbitrary URLs | `network.parse_url` | The strict grammar of 17.4: no credentials, query, fragment, percent-encoding, `..`, numeric host spellings or zone identifiers. |
+| Resolved addresses | `config/ai_guarded_transport.py` | Every request carries the `loopback` network class: the transport resolves the host itself, refuses the call unless EVERY address is loopback (a `localhost` that resolves to a LAN or public address sends nothing), and connects to a validated address, not to the name. |
+| Redirects | the transport and the adapter | None is followed; a 3xx answer is refused (`redirect_refused`). |
+| Proxy | `config/ai_ollama.py`, the transport | There is no proxy setting. `AP_AI_OLLAMA_PROXY_URL` is REFUSED when set (`proxy_not_allowed_for_local`); `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` are never read; the real transport is built with no proxy, and the guarded transport would in any case refuse a loopback request while one is configured. A loopback request is never sent through a proxy or around one. |
+| No credentials | the grammar, the profile | A URL with credentials is refused without echo; the provider has no key; the profile holds no endpoint or secret. |
+| No work at import | `config/ai_ollama.py` | Importing reads no environment and opens no connection; constructing the transport or the gateway resolves and connects to nothing; a call is the only thing that does. |
+| No cloud | the policy, the adapter | The provider is `local`, so no policy mode needs to approve a cloud provider for it, and there is no code path that sends to a non-loopback address. |
+| No model or service management | the adapter | Only `/api/chat` is ever called (pinned by a test over the adapter's string constants); Ollama is never started, installed or configured. |
+
+### 18.5 Data policy
+
+The provider's locality is `local`: `local_only` permits it, `company_endpoint` permits it (cumulative rule), and `approved_cloud` permits it without naming it in the approved cloud providers (that list applies to `cloud` providers only). The profile is approved for `local_only` and the gateway applies the installation's mode on every call before any adapter code runs. Nothing falls back to another provider: when Ollama is down the call fails with `provider_unavailable`, whichever mode is in force.
+
+### 18.6 Configuration
+
+Backend environment only, read by `config/ai_ollama.py` when a function runs (never at import, never through Django settings, never from a database). Required, no defaults: `AP_AI_OLLAMA_ENDPOINT` (for example `http://127.0.0.1:11434`; `/api/chat` is appended), `AP_AI_OLLAMA_ALLOWED_ORIGINS`, `AP_AI_OLLAMA_MODEL`. Optional: `AP_AI_OLLAMA_STRUCTURED_OUTPUT` (`json_mode`, the default, or `native_schema`), `AP_AI_OLLAMA_TIMEOUT_SECONDS` (90), `AP_AI_OLLAMA_MAX_RETRIES` (2), `AP_AI_OLLAMA_MAX_INPUT_TOKENS` (3072), `AP_AI_OLLAMA_MAX_OUTPUT_TOKENS` (1024), `AP_AI_OLLAMA_NUM_CTX` (unset by default; when set it is sent as `num_ctx` and the two token limits must fit inside it). A missing or invalid value raises `configuration_error` naming the variable or a field token (`missing_ap_ai_ollama_model`, `invalid_ollama_allowed_origins`, `ollama_endpoint_not_approved`, `ollama_limits_exceed_num_ctx`, `proxy_not_allowed_for_local`, ...), never the value. The test runner removes every `AP_AI_*` variable, so a developer's `.env` cannot reach a test.
+
+### 18.7 Limitations (remaining)
+
+* **Never run against a real Ollama.** Whether the exact request is accepted (in particular `format` with a JSON Schema, which needs a recent Ollama release and a model that supports it, and `options.num_predict`) and what a given release reports in `model`, `done_reason` and the counts is unverified. `json_mode` is the default because it is the more widely supported; the gateway validates every answer, so a server that ignores `format` fails closed with `invalid_structured_output`.
+* **Silent prompt truncation is not detectable here.** Ollama truncates a prompt that does not fit its loaded context window and still answers. The adapter cannot see the window; the defaults (3 072 input, 1 024 output) assume a 4 096-token window, and `AP_AI_OLLAMA_NUM_CTX` plus a configuration check ties the limits to a declared window. The gateway's own pre-flight estimate (bytes divided by three) is a guard, not a tokenizer.
+* **Small local models are unmeasured.** There is no evaluation set; a small model may return syntactically valid but wrong values. Validation and human review apply as for every AI output.
+* **Loopback only.** A GPU server on a LAN or a shared company host is not supported by this provider; that is a `company_endpoint` and goes through `openai_compatible` (17) or a later reviewed slice.
+* **Not wired in.** Request Intake, the AI settings API and its catalog and modules do not use it; one endpoint and one model per process.
+* **Locality is a code-level rule, not a firewall.** The code confirms the destination is loopback; it cannot tell what another local process listening on that port does (a local Ollama could itself be configured to forward requests). Name resolution is not bounded by the deadline, and timeouts are cooperative (section 12).
+* **Model files are the operator's responsibility.** Provenance records the model name Ollama reports, not a digest of the weights.
+
+### 18.8 Tests
+
+DB-free, in the development VM, mocked HTTP only, no PostgreSQL, no network, no Ollama: 84 new tests (3082 DB-free tests in all, OK).
+
+| File | Tests | Covers |
+| --- | --- | --- |
+| `test_ai_ollama_adapter.py` | 54 | loopback-only configuration (every non-loopback host refused even when approved), the origin allowlist, credentials and odd URLs without echo, the explicit model, the native request on the wire (path, headers, body keys, `format`, `options`, not the OpenAI shape), model selection, structured JSON and invalid output, truncation and incomplete answers, status and transport classification (a missing model is `unsupported_model`), retries and deadlines, no fallback, no route but `/api/chat`, the policy matrix, no secret or content in errors, logs or reprs |
+| `test_ai_ollama_composition.py` | 30 | environment loading that fails closed and names only variables, proxy refusal with no bypass, profile and gateway, configuration -> adapter -> guarded transport end to end with a fake resolver (loopback dialled only, `localhost` resolving elsewhere refused, a proxy refused, redirects refused, proxy environment variables ignored), no network at import, the deterministic default, the Workbench and the OpenAI-compatible provider unchanged |
+
+Existing tests edited (file lists only): `test_ai_gateway_boundaries`, `test_intake_ai_boundaries`.

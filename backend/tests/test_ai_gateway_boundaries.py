@@ -49,7 +49,7 @@ class GatewayPackageIsPureTests(unittest.TestCase):
         names = {p.relative_to(GATEWAY).as_posix() for p in gateway_sources()}
         self.assertEqual(
             names,
-            {"__init__.py", "contracts.py", "errors.py", "gateway.py", "jsonvalue.py", "network.py", "policy.py", "provider.py", "registry.py", "structured.py", "transport.py", "adapters/__init__.py", "adapters/deterministic.py", "adapters/openai_compatible.py", "adapters/workbench.py"},
+            {"__init__.py", "contracts.py", "errors.py", "gateway.py", "jsonvalue.py", "network.py", "policy.py", "provider.py", "registry.py", "structured.py", "transport.py", "adapters/__init__.py", "adapters/deterministic.py", "adapters/ollama.py", "adapters/openai_compatible.py", "adapters/workbench.py"},
         )
 
     def test_it_imports_only_the_standard_library_and_itself(self):
@@ -139,7 +139,7 @@ class GatewayStaysOutOfCoreAndBusinessModulesTests(unittest.TestCase):
         # AI-2a: Request Intake's AI extractor (the ONE file of the app that names the gateway) and the composition that builds it.
         self.assertEqual(
             outside,
-            ["apps/intake/ai_extraction.py", "config/ai_gateway.py", "config/ai_guarded_transport.py", "config/ai_http_transport.py", "config/ai_openai_compatible.py", "config/ai_workbench.py", "config/intake_extraction.py"],
+            ["apps/intake/ai_extraction.py", "config/ai_gateway.py", "config/ai_guarded_transport.py", "config/ai_http_transport.py", "config/ai_ollama.py", "config/ai_openai_compatible.py", "config/ai_workbench.py", "config/intake_extraction.py"],
         )
 
     def test_nothing_imports_the_composition_root_yet(self):
@@ -184,6 +184,8 @@ class GatewayStaysOutOfCoreAndBusinessModulesTests(unittest.TestCase):
                     imported -= {"apps.ai_gateway.adapters", "apps.ai_gateway.adapters.workbench"}  # AI-1b: the one real adapter, named in the opt-in composition
                 if path.relative_to(BACKEND).as_posix() == "config/ai_openai_compatible.py":
                     imported -= {"apps.ai_gateway.adapters", "apps.ai_gateway.adapters.openai_compatible"}  # AI-CON-1: named in its own opt-in composition
+                if path.relative_to(BACKEND).as_posix() == "config/ai_ollama.py":
+                    imported -= {"apps.ai_gateway.adapters", "apps.ai_gateway.adapters.ollama"}  # AI-CON-2: named in its own opt-in composition
                 self.assertFalse(imported)
 
     def test_the_module_contract_still_marks_ai_invoke_as_a_future_capability(self):

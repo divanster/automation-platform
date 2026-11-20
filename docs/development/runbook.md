@@ -843,6 +843,65 @@ git diff --check
 
 **What nobody has checked:** any request to a real local, company or cloud server (whether it accepts `response_format` `json_object` and `max_tokens`, and what it reports in `model` and `usage`), real DNS answers, certificates, the resolved-address rules on a real network and whether a real company range and endpoint pass them, behaviour under load, and the quality of any model's answer. Use only synthetic, non-customer text for a first probe, and only against an endpoint the owner has approved.
 
+### 5.9 Native Ollama provider (AI-CON-2): configuration, DB-free validation and a local probe
+
+**Status: written and DB-free tested in the development VM only (84 new tests, 3082 DB-free tests in all), with a MOCKED transport, a fake resolver and a fake connection factory. No request was sent to any Ollama, nothing was installed or started, no model was downloaded, no key exists and no database was touched; no migration was added. It is opt-in and nothing in the application uses it:** with none of the variables below set there is no Ollama provider, Request Intake extracts as configured in sections 5.6 and 5.6a (deterministic by default), and the Workbench and the OpenAI-compatible provider (5.8) behave as before. See [ai-gateway.md](../architecture/ai-gateway.md) section 18.
+
+**What it is.** The provider `ollama` calls Ollama's NATIVE `POST /api/chat` on THIS machine (not the OpenAI-compatible `/v1` surface, which is 5.8). Its locality is always `local`; it needs no key. **Loopback only:** the endpoint must be `localhost` or a loopback literal (`127.0.0.1`, `::1`); a LAN, company or cloud host is refused at configuration even when listed as approved. A remote Ollama is reached through 5.8 instead, with TLS, a key and approved CIDR ranges. **The application never installs or starts Ollama, never changes a service, never downloads a model** (`/api/pull` is never called) and never lists or deletes models.
+
+**Variables** (names in `.env.example`, all commented out; set them in the git-ignored `.env` or the process environment). They are read by `config/ai_ollama.py` when a gateway is built, not by the Django settings. **There are no defaults for the first three.**
+
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `AP_AI_OLLAMA_ENDPOINT` | yes | The base URL, for example `http://127.0.0.1:11434`; `/api/chat` is appended. Loopback host only; no credentials, query, fragment, percent-encoding or `..`; a lower-case host. |
+| `AP_AI_OLLAMA_ALLOWED_ORIGINS` | yes | Comma-separated origins (`http://127.0.0.1:11434`; no path). The endpoint's origin must be listed: approving a destination is a separate, explicit step. Every listed origin must itself be loopback. |
+| `AP_AI_OLLAMA_MODEL` | yes | The one model to call, exactly as `ollama list` shows it (for example `llama3.1:8b`). It must already be installed; if it is not, a call fails with `unsupported_model` and nothing is downloaded. |
+| `AP_AI_OLLAMA_STRUCTURED_OUTPUT` | no | `json_mode` (default: `format: "json"`) or `native_schema` (the output JSON Schema is sent as `format`; needs a recent Ollama and a model that supports structured outputs). Either way the gateway validates every answer. |
+| `AP_AI_OLLAMA_TIMEOUT_SECONDS` | no | Default `90`, 1 to 300: the deadline of a whole call, retries included. The first call after a model is loaded into memory can be slow. |
+| `AP_AI_OLLAMA_MAX_RETRIES` | no | Default `2`, 0 to 5: same endpoint and model only, for a refused connection (Ollama not running), 429, 502, 503 and 504. |
+| `AP_AI_OLLAMA_MAX_INPUT_TOKENS`, `AP_AI_OLLAMA_MAX_OUTPUT_TOKENS` | no | Defaults `3072` and `1024`: the profile's limits, sized for Ollama's small default context window (provisional; set them to what your model and window support). |
+| `AP_AI_OLLAMA_NUM_CTX` | no | Unset by default. When set it is sent as `options.num_ctx` and the two limits above must fit inside it, or configuration stops. **Ollama silently truncates a prompt that does not fit its window**; this is the only way the application can tie the limits to a window. |
+| `AP_AI_OLLAMA_PROXY_URL` | **refused** | Setting it stops configuration (`proxy_not_allowed_for_local`). `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` are never read, and a loopback request is never sent through a proxy or around one. |
+
+**Policy.** The profile `ollama-local` is approved for `local_only`; `local_only`, `company_endpoint` and `approved_cloud` all permit a `local` provider (no cloud approval is involved), and the gateway applies the installation's mode on every call before any adapter code. There is no fallback to another provider, model or locality: if Ollama is down the call fails with `provider_unavailable`. Wiring this provider into Request Intake extraction or the AI settings API is a separate, later change.
+
+**What the VM checks (DB-free; from `backend\`; no network, no Ollama, nothing installed, no PostgreSQL):**
+
+```powershell
+$Py = "..\.venv\Scripts\python.exe"
+& $Py manage.py test tests.test_ai_ollama_adapter tests.test_ai_ollama_composition tests.test_ai_openai_adapter tests.test_ai_openai_transport tests.test_ai_openai_composition tests.test_ai_workbench_adapter tests.test_ai_workbench_transport tests.test_ai_workbench_composition tests.test_ai_gateway_boundaries tests.test_intake_ai_boundaries   # expect OK
+& $Py manage.py test                                                  # expect OK (3082 tests at the AI-CON-2 checkpoint; re-check the number)
+& $Py manage.py check
+& $Py manage.py makemigrations --check --dry-run                      # expect: No changes detected (AI-CON-2 adds no model or migration)
+& $Py -m compileall -q apps config tests workflows manage.py
+git diff --check
+```
+
+**Local probe (OWNER-OPERATED, on the local computer; it is the first real evidence and has not been run).** It sends ONE synthetic request to YOUR local Ollama. Do not use customer text. Nothing below installs, starts or downloads anything for you.
+
+```powershell
+# 1. Install Ollama yourself if you have not (your decision; not done by this application), start it, and make sure the model you will name is ALREADY pulled:
+ollama list
+#    If the model is missing, YOU run:  ollama pull llama3.1:8b   (a large download; do it deliberately).
+# 2. Edit the git-ignored .env in Notepad: AP_AI_OLLAMA_ENDPOINT, AP_AI_OLLAMA_ALLOWED_ORIGINS and AP_AI_OLLAMA_MODEL (see the table). Check that .env is not listed by `git status`.
+# 3. From backend\, with the project's .env and virtual environment active, build the gateway and make one call (prints the output and provenance only; never the prompt):
+$probe = @'
+from apps.ai_gateway import GenerationRequest, PolicyContext, PolicyMode
+from config.ai_ollama import build_ollama_gateway
+gateway = build_ollama_gateway()
+request = GenerationRequest("ollama-local", "Extract the fields.", "Order 10 boxes of A4 paper for Jane Example.",
+    {"type": "object", "properties": {"item": {"type": "string"}, "quantity": {"type": "integer", "minimum": 0}}, "required": ["item", "quantity"], "additionalProperties": False})
+response = gateway.generate(request, policy=PolicyContext(PolicyMode.LOCAL_ONLY))
+print(dict(response.output)); print(response.provenance)
+'@
+& $Py manage.py shell -c $probe
+# expect: a dict such as {'item': 'A4 paper', 'quantity': 10} and a provenance line naming provider ollama, locality local, your model and token counts.
+# Failures are stable codes: provider_unavailable (Ollama not running), unsupported_model (model not installed), invalid_structured_output (the model's answer did not match the schema), timeout.
+# 4. Try the other mode by setting AP_AI_OLLAMA_STRUCTURED_OUTPUT=native_schema and repeating step 3; report which works with your Ollama release.
+```
+
+**What nobody has checked:** any request to a real Ollama (whether it accepts this exact body, what a given release reports in `model`, `done_reason` and the counts, whether `native_schema` works with your model), real DNS answers for `localhost`, the loopback rules on a real network stack, behaviour under load or with a cold model, the quality of any local model's answer, and whether a model's context window truncated a prompt. Do not describe the provider as validated until the owner reports the probe.
+
 ## 6. Local Windows computer: setup and validation (reference procedure; owner-operated)
 
 > **Nothing in this section has been run.** No local repository, Python
