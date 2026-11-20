@@ -5,6 +5,7 @@ import { ApiError } from "../api/http";
 import type { AiSettings } from "../api/types";
 import { ConnectionCard } from "../components/ai/ConnectionCard";
 import { CredentialsPanel } from "../components/ai/CredentialsPanel";
+import type { TestLock } from "../components/ai/ConnectionTestPanel";
 import { ConfirmStep } from "../components/ConfirmStep";
 import { PageHeader } from "../components/PageHeader";
 import { ErrorState, LoadingState, Notice } from "../components/Status";
@@ -81,6 +82,25 @@ function Editor({ initial, onReload }: { initial: AiSettings; onReload: () => vo
   const [restartRevision, setRestartRevision] = useState<number | null>(null);
   const [rebased, setRebased] = useState<number | null>(null);
   const inFlight = useRef(false);
+  const testing = useRef<string | null>(null);
+  const [testingId, setTestingId] = useState<string | null>(null);
+  const testLock = useMemo<TestLock>(
+    () => ({
+      busyId: testingId,
+      begin(connectionId) {
+        if (testing.current !== null) return false;
+        testing.current = connectionId;
+        setTestingId(connectionId);
+        return true;
+      },
+      end(connectionId) {
+        if (testing.current !== connectionId) return;
+        testing.current = null;
+        setTestingId(null);
+      },
+    }),
+    [testingId],
+  );
 
   const catalog = baseline.catalog;
   const dirty = isDirty(draft, baseline);
@@ -497,6 +517,7 @@ function Editor({ initial, onReload }: { initial: AiSettings; onReload: () => vo
                   active={active !== null && active.key === c.key}
                   open={openKey === c.key}
                   confirm={askKind}
+                  testLock={testLock}
                   onOpen={() => setOpenKey(c.key)}
                   onClose={() => setOpenKey(null)}
                   onChange={(next) => updateConnection(index, next)}

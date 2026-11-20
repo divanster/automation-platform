@@ -12,6 +12,7 @@ import {
 import { ConfirmStep } from "../ConfirmStep";
 import { Icon } from "../ui/Icon";
 import { ConnectionEditor, type ConnectionProblems } from "./ConnectionEditor";
+import { ConnectionTestPanel, type TestLock } from "./ConnectionTestPanel";
 
 export type CardConfirm = "disable" | "remove" | null;
 
@@ -24,6 +25,7 @@ export function ConnectionCard({
   active,
   open,
   confirm,
+  testLock,
   onOpen,
   onClose,
   onChange,
@@ -42,6 +44,7 @@ export function ConnectionCard({
   active: boolean;
   open: boolean;
   confirm: CardConfirm;
+  testLock: TestLock;
   onOpen(): void;
   onClose(): void;
   onChange(next: ConnectionDraft): void;
@@ -115,6 +118,8 @@ export function ConnectionCard({
 
         {status && status.detail ? <p className="status-detail">{status.detail}</p> : null}
         {saved && edited ? <p className="muted">The status shown is that of the saved version.</p> : null}
+
+        {confirm === null ? <ConnectionTestPanel saved={saved} edited={edited} lock={testLock} /> : null}
 
         {open ? (
           <ConnectionEditor draft={draft} catalog={catalog} problems={problems} onChange={onChange} onDone={onClose} />

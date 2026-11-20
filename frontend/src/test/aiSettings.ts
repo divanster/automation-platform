@@ -1,6 +1,6 @@
 // TEST ONLY: synthetic AI settings. Every value is made up; no endpoint resolves and no secret exists anywhere in it.
 
-import type { AiCatalog, AiConnection, AiCredentialStatus, AiSettings, Profile } from "../api/types";
+import type { AiCatalog, AiConnection, AiConnectionTestResult, AiCredentialStatus, AiSettings, Profile } from "../api/types";
 import { apiError, json, type Handler, type RecordedCall } from "./fakeApi";
 import { operator } from "./fixtures";
 
@@ -154,6 +154,22 @@ export function credentialServer(
     return apiError(405, "method_not_allowed");
   };
   return { stored, handler };
+}
+
+// --- connection test (TEST ONLY: the stand-in never contacts anything; the answer is whatever the test scripts) ---
+
+export const CONNECTIONS_PREFIX = "/api/ai-settings/connections/";
+export const connectionTestPath = (connectionId: string) => `${CONNECTIONS_PREFIX}${connectionId}/test/`;
+
+export function testResult(overrides: Partial<AiConnectionTestResult> = {}): AiConnectionTestResult {
+  return { connection_id: "corp-llm", profile_id: "corp-small", provider_type: "openai_compatible", locality: "company_endpoint", ok: true, code: null, retryable: false, duration_ms: 412, ...overrides };
+}
+
+/** The settings stand-in plus a scripted answer for the connection test endpoint. */
+export function testingServer(initial: AiSettings, onTest: (call: RecordedCall) => ReturnType<Handler>) {
+  const server = settingsServer(initial);
+  const handler: Handler = (call) => (call.path.startsWith(CONNECTIONS_PREFIX) ? onTest(call) : server.handler(call));
+  return { server, handler };
 }
 
 /** One handler for both endpoints. */

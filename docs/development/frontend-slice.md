@@ -1117,7 +1117,7 @@ backend file was changed; nothing was sent to a provider.
   (the new section, the masked field, the confirmation steps, the narrow screen) is unreviewed, and the sticky save bar is unchanged.
 - No list endpoint exists, so a credential no saved managed connection reads appears only after the administrator adds or looks up its reference (and
   after a reload it must be looked up again).
-- The page cannot restart the worker, cannot tell whether it was restarted, and cannot show which value a running worker holds. There is no connection test.
+- The page cannot restart the worker, cannot tell whether it was restarted, and cannot show which value a running worker holds. There is no connection test in this section (a per-connection Test connection action was added later, section 21).
 - Rotating or deleting a credential has no effect on a running worker until it restarts; after a restart a connection whose managed credential is missing
   or unreadable stops the worker (no fallback).
 - A status of `Stored` means the web process could decrypt it; the worker must run as the same Windows account (`secret-store.md` section 8) or it will
@@ -1127,3 +1127,51 @@ backend file was changed; nothing was sent to a provider.
 - The local checks mirror the backend's (reference shape, length bound, no space at either end) and are copies; a backend change shows up as a server error.
 - Audit events of credential changes (`ai_credential.created`, `.replaced`, `.deleted`) are written by the backend; this page has no view of them.
 - Concurrency across administrators is the backend's (a per-reference lock); the page shows the outcome and re-reads status only on request.
+
+## 21. AI-CON-TEST-2: Test connection in the AI settings page (administrators)
+
+Frontend only, on `feat/fe-ai-connection-test`. **No backend, API, payload, migration or dependency change. Status: development-validated in jsdom with `fetch` stubbed (the endpoint's contract was read from `apps/api/views_ai_connection_test.py`, `apps/api/serializers.py`, `apps/api/errors.py` and `apps/ai_settings/connection_test.py`; `ai-gateway.md` section 21). It was never run against the real Django, a provider or a worker; nothing was sent to any provider by the development VM, and it has not been reviewed in a browser.**
+
+### 21.1 What it adds (on `/settings/ai`)
+
+Each **saved** connection card has a Test connection panel: a select of that connection's **saved** model profiles (the first is preselected), a **Test connection** button, a "testing" state, and the outcome (pass or fail, the duration in milliseconds, the sanitized error code with a fixed sentence, and whether a retry could help). The text "Connection test checks the Django web process. The worker may use a different environment or Windows account." is shown in every panel, and every result says it "does not show that the worker can use this connection". A pass is never described as proof for the worker, for extraction accuracy or for the saved policy of a running worker.
+
+- Not shown for a connection that has not been saved ("Save this connection before testing it"). Disabled, with the reason, for a connection that is saved as disabled or has no saved profile. The panel works from the **saved** version: when the draft differs it says "The test uses the saved version of this connection, not your unsaved edits." Nothing in the panel reads or changes the settings draft.
+- One test at a time on the whole page (the page holds a synchronous lock, so a double click or a second card cannot start a second request), which also keeps within the server's strict per-minute throttle and its cap of two concurrent tests per process.
+- A saved change (a new revision, a refreshed status) drops a shown result and ignores an answer still in flight for the old version.
+
+### 21.2 API use (`api/aiConnectionTest.ts`)
+
+`POST /api/ai-settings/connections/<connection_id>/test/` with the body exactly `{profile_id}` through `request()` (same origin, session cookie, `X-CSRFToken`). No key, endpoint, prompt, timeout or limit is ever sent. The identifier is placed in the path with `encodeURIComponent`. The answer is copied field by field (`connection_id`, `profile_id`, `provider_type`, `locality`, `ok`, `code`, `retryable`, `duration_ms`); an unlisted field is dropped, a wrong shape (a success with a code, a failure without one, a code that is not lower-case words, a negative or fractional duration) or an answer about another connection or profile is `unexpected_response`.
+
+### 21.3 Permissions, secrets and storage
+
+Administrator only: the route (`RequireAdministrator`) never mounts the page for anyone else, so no test control renders and no request is made; the backend stays authoritative (403 `permission_denied`, shown as "You do not have permission to test connections. Nothing was sent."). No credential is read, held or sent by React. Provider output, request content, headers and endpoints have no field in the types and are never shown. Results live in React state only: nothing is written to browser storage or logged (tests spy on `Storage.setItem` and every `console` method).
+
+### 21.4 Errors (fixed sentences by code; the server's message text is never shown; unsaved edits and the rest of the page are untouched by every outcome)
+
+| Answer | Shown |
+|---|---|
+| 400 `validation_error` (`profile_id: unknown_profile`) | the connection has no saved profile with that name; save, then choose a saved one |
+| 403 `permission_denied` / `csrf_failed` | no permission, nothing sent / the security check failed, reload and try again |
+| 404 `not_found` | the connection is not among the saved connections (removed?); save or reload |
+| 409 `connection_disabled` | saved as disabled; enable it and save first |
+| 409 `connection_not_usable` (`details.issue`) | the web process cannot use it, nothing was sent, with the reason for `missing_api_key`, `endpoint_not_approved` or `invalid_configuration` |
+| 429 `throttled` | too many tests; the retry-after seconds when given |
+| 429 `connection_test_busy` | other tests still running on the server; nothing was sent |
+| Network failure | the test may or may not have run; try again yourself |
+| Any other code | the existing generic text for the code |
+
+**No automatic retry.** A failed test is never repeated by the page. The one repetition that exists is the shared `http.ts` rule for a rejected CSRF token (403 `csrf_failed`: fetch a new token and send the request once more): the server refuses it in the CSRF check, before the test or its throttle runs, so no provider call was made by the first attempt.
+
+### 21.5 Tests (development VM, jsdom, `fetch` stubbed)
+
+New: `pages/AiConnectionTest.test.tsx` (27 tests: administrator and non-administrator access, unsaved, disabled and profile-less connections, the saved-version rule, the exact request, profile selection, the testing state and the duplicate and parallel guard, failure display, no automatic retry, no provider output or rogue field, a mismatched answer, a result dropped on a saved change, every error in 21.4, unsaved edits kept (also edits made while a test runs), no secret input, no storage and no logging), `api/aiConnectionTest.test.ts` and `lib/aiConnectionTest.test.ts` (parsing, the request, messages). Whole suite: 27 files, 669 of 669 tests passed; `npm run typecheck` and `npm run build` pass. A deliberate mutation (the duplicate guard removed) was caught. No backend test was run.
+
+### 21.6 Remaining limitations
+
+- Not reviewed in a browser; never run against the real endpoint. The layout of the panel is unreviewed.
+- A pass means the web process reached the saved endpoint with the saved credential once. It says nothing about the worker's own process, variables or Windows account, about extraction quality or about a model that is still loading (a first call can time out).
+- A test is a real provider call on the server: it costs a request, and the server throttles it per administrator and per process; the page does not count down a retry period.
+- The legacy environment-configured Workbench provider and an unsaved connection cannot be tested. There is no audit event of a test (the backend logs identifiers only).
+- The result is not remembered: a reload or a saved change clears it.
