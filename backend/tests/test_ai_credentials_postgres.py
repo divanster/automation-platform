@@ -21,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -326,11 +327,15 @@ class ConcurrentRotationTests(ThreadedCase):
         other, other_failures = self.run_thread(rotate, self.admins[2], "AP_AI_CRED_OTHER", SECRET_TWO + "-other")
         other.join(15)
         self.assertFalse(other.is_alive(), "a different reference must not wait")
-        second.join(1.5)
-        self.assertTrue(second.is_alive(), "the same reference must wait for the first rotation's transaction")
         locks = self.advisory_locks()
+        deadline = time.monotonic() + 10
+        while locks.get(False, 0) < 1 and time.monotonic() < deadline:  # wait (bounded) until the second rotation is blocked on the reference's lock
+            time.sleep(0.05)
+            locks = self.advisory_locks()
+        self.assertTrue(second.is_alive(), "the same reference must wait for the first rotation's transaction")
         self.assertEqual((locks.get(True, 0) >= 1, locks.get(False, 0)), (True, 1))  # one lock held, one waiting
-        self.assertEqual([e.actor_public_id for e in AuditEvent.objects.order_by("id")], [self.admins[0].public_id, self.admins[2].public_id])  # the waiting one has not audited yet
+        # READ COMMITTED: the first rotation's audit row is still in its open transaction, and the second has not inserted anything, so only the committed event of the other reference is visible
+        self.assertEqual([e.actor_public_id for e in AuditEvent.objects.order_by("id")], [self.admins[2].public_id])
         release.set()
         first.join(15)
         second.join(15)
