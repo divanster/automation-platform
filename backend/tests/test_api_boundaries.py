@@ -12,7 +12,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.test import SimpleTestCase
 from django.urls import URLPattern, get_resolver
 
-from apps.api import base, views_ai_connection_test, views_ai_credentials, views_ai_settings, views_auth, views_dashboard, views_documents, views_requests
+from apps.api import base, views_ai_connection_test, views_ai_credentials, views_ai_settings, views_auth, views_dashboard, views_document_text, views_documents, views_requests
 from apps.intake import queries, review, submission
 from tests.settings_loader import load_settings
 from tests.test_request_intake_boundaries import imported_modules
@@ -84,6 +84,9 @@ class RouteInventoryTests(SimpleTestCase):
                 "api/documents/": "DocumentCollectionView",
                 "api/documents/<uuid:document_id>/": "DocumentDetailView",
                 "api/documents/<uuid:document_id>/content/": "DocumentContentView",
+                "api/documents/<uuid:document_id>/text-extractions/": "TextExtractionCollectionView",
+                "api/documents/<uuid:document_id>/text-extractions/<uuid:extraction_id>/": "TextExtractionDetailView",
+                "api/documents/<uuid:document_id>/text-extractions/<uuid:extraction_id>/text/": "TextExtractionTextView",
                 "api/dashboard/summary/": "DashboardSummaryView",
                 "api/requests/": "RequestCollectionView",
                 "api/requests/<uuid:run_id>/": "RequestDetailView",
@@ -127,6 +130,9 @@ class RouteInventoryTests(SimpleTestCase):
             views_documents.DocumentCollectionView: {"GET", "POST"},
             views_documents.DocumentDetailView: {"GET"},
             views_documents.DocumentContentView: {"GET"},
+            views_document_text.TextExtractionCollectionView: {"GET", "POST"},
+            views_document_text.TextExtractionDetailView: {"GET"},
+            views_document_text.TextExtractionTextView: {"GET"},
             views_dashboard.DashboardSummaryView: {"GET"},
             views_requests.RequestCollectionView: {"GET", "POST"},
             views_requests.RequestDetailView: {"GET"},
@@ -311,7 +317,7 @@ class SecuritySettingsTests(SimpleTestCase):
 
     def test_throttle_rates_exist_for_every_scope_and_login_is_stricter_than_general_use(self):
         rates = self.base.API_THROTTLE_RATES
-        self.assertEqual(set(rates), {"login_ip", "login_user", "login_user_hour", "api_user", "ai_connection_test", "ai_connection_test_hour", "ai_connection_test_all", "document_upload", "document_upload_hour"})
+        self.assertEqual(set(rates), {"login_ip", "login_user", "login_user_hour", "api_user", "ai_connection_test", "ai_connection_test_hour", "ai_connection_test_all", "document_upload", "document_upload_hour", "document_text", "document_text_hour"})
         per_minute = lambda r: int(r.split("/")[0]) * {"sec": 60, "min": 1, "hour": 1 / 60, "day": 1 / 1440}[r.split("/")[1]]  # noqa: E731
         self.assertLess(per_minute(rates["login_user"]), per_minute(rates["api_user"]))
         self.assertLess(per_minute(rates["login_ip"]), per_minute(rates["api_user"]))

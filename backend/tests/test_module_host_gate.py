@@ -55,6 +55,8 @@ WORKER_REGISTRY = MappingProxyType({kind: fake_handler(kind) for kind in ("test.
 
 PRODUCTION_LEGACY = frozenset({"test.add_numbers"})
 INTAKE_KIND = "request_intake.extract"
+DOC_KIND = "documents.extract_text"  # DOC-2: Core's own kind, claimable with no module state
+PRODUCTION_UNGATED = PRODUCTION_LEGACY | {DOC_KIND}
 
 
 def production_state(*, enabled=True, version="1.0.0", present=True, initialized=True):
@@ -65,33 +67,35 @@ def production_state(*, enabled=True, version="1.0.0", present=True, initialized
 class RequestIntakeModuleGateTests(SimpleTestCase):
     """MOD-2: Request Intake is a registered module. Its task kind is gated by the stored module state and is no longer a legacy kind."""
 
-    def test_the_legacy_kinds_are_only_the_queues_test_kind_and_every_other_production_kind_belongs_to_a_module(self):
+    def test_the_legacy_kinds_are_only_the_queues_test_kind_and_every_other_production_kind_belongs_to_a_module_or_is_core(self):
         self.assertEqual(task_registry.LEGACY_UNGATED_KINDS, PRODUCTION_LEGACY)
+        self.assertEqual(task_registry.CORE_UNGATED_KINDS, {DOC_KIND})  # DOC-2: a Core kind, decided on here, not a legacy one
         owned = set(task_registry.MODULE_REGISTRY.task_kinds)
         self.assertEqual(owned, {INTAKE_KIND})
-        self.assertEqual(task_registry.LEGACY_UNGATED_KINDS | owned, frozenset(PRODUCTION_REGISTRY))  # a new production kind forces a decision
-        self.assertFalse(task_registry.LEGACY_UNGATED_KINDS & owned)
+        self.assertEqual(task_registry.UNGATED_KINDS | owned, frozenset(task_registry.WORKER_REGISTRY))  # a new production kind forces a decision
+        self.assertEqual(frozenset(PRODUCTION_REGISTRY) | {DOC_KIND}, frozenset(task_registry.WORKER_REGISTRY))
+        self.assertFalse(task_registry.UNGATED_KINDS & owned)
 
     def test_the_gate_reads_the_state_and_allows_request_intake_only_when_it_is_available(self):
         with production_state():
-            self.assertEqual(task_registry.COMPOSITION.kind_gate(), PRODUCTION_LEGACY | {INTAKE_KIND})
+            self.assertEqual(task_registry.COMPOSITION.kind_gate(), PRODUCTION_UNGATED | {INTAKE_KIND})
         with production_state(enabled=False):
-            self.assertEqual(task_registry.COMPOSITION.kind_gate(), PRODUCTION_LEGACY)  # held: tasks stay queued, test.add_numbers is untouched
+            self.assertEqual(task_registry.COMPOSITION.kind_gate(), PRODUCTION_UNGATED)  # held: tasks stay queued, test.add_numbers and Core's text extraction are untouched
         with production_state(version="0.9.0"):
-            self.assertEqual(task_registry.COMPOSITION.kind_gate(), PRODUCTION_LEGACY)
+            self.assertEqual(task_registry.COMPOSITION.kind_gate(), PRODUCTION_UNGATED)
 
     def test_missing_state_after_initialization_fails_closed_for_request_intake(self):
         # the development database may hold the marker from an earlier empty-registry sync: an absent row is NOT "enabled"
         with production_state(present=False, initialized=True):
-            self.assertEqual(task_registry.COMPOSITION.kind_gate(), PRODUCTION_LEGACY)
+            self.assertEqual(task_registry.COMPOSITION.kind_gate(), PRODUCTION_UNGATED)
 
     def test_before_any_sync_the_legacy_window_keeps_request_intake_claimable(self):
         with production_state(present=False, initialized=False):
-            self.assertEqual(task_registry.COMPOSITION.kind_gate(), PRODUCTION_LEGACY | {INTAKE_KIND})
+            self.assertEqual(task_registry.COMPOSITION.kind_gate(), PRODUCTION_UNGATED | {INTAKE_KIND})
 
     def test_the_production_registry_and_reconciler_are_unchanged(self):
-        self.assertIs(task_registry.COMPOSITION.registry, PRODUCTION_REGISTRY)
-        self.assertEqual(task_registry.COMPOSITION.maintenance_hooks, ())
+        self.assertEqual(dict(task_registry.COMPOSITION.registry), {**PRODUCTION_REGISTRY, DOC_KIND: task_registry.WORKER_REGISTRY[DOC_KIND]})  # Request Intake's registry is untouched; DOC-2 adds one handler
+        self.assertEqual([hook.hook_id for hook in task_registry.COMPOSITION.maintenance_hooks], ["documents.reconcile_text"])
         self.assertIs(task_registry.COMPOSITION.after_iteration, services.reconcile_after_iteration)
 
     def test_the_worker_claims_request_intake_only_through_the_production_gate(self):
@@ -99,15 +103,15 @@ class RequestIntakeModuleGateTests(SimpleTestCase):
         self.addCleanup(setattr, worker, "_composition", previous)
         worker.install_composition(task_registry.COMPOSITION)
         with production_state():
-            self.assertEqual(worker._claimable_kinds(PRODUCTION_REGISTRY), PRODUCTION_LEGACY | {INTAKE_KIND})
+            self.assertEqual(worker._claimable_kinds(task_registry.WORKER_REGISTRY), PRODUCTION_UNGATED | {INTAKE_KIND})
         with production_state(enabled=False):
-            self.assertEqual(worker._claimable_kinds(PRODUCTION_REGISTRY), PRODUCTION_LEGACY)
+            self.assertEqual(worker._claimable_kinds(task_registry.WORKER_REGISTRY), PRODUCTION_UNGATED)
 
     def test_process_one_passes_the_gated_kinds_to_the_claim_with_the_production_composition(self):
         previous = worker._composition
         self.addCleanup(setattr, worker, "_composition", previous)
         worker.install_composition(task_registry.COMPOSITION)
-        for enabled, expected in ((True, PRODUCTION_LEGACY | {INTAKE_KIND}), (False, PRODUCTION_LEGACY)):
+        for enabled, expected in ((True, PRODUCTION_UNGATED | {INTAKE_KIND}), (False, PRODUCTION_UNGATED)):
             with self.subTest(enabled=enabled), production_state(enabled=enabled), mock.patch.object(worker, "recover_expired_leases"), mock.patch.object(
                 worker, "claim_next_task", return_value=None
             ) as claim, mock.patch.object(worker, "_run_after_iteration"):
@@ -139,7 +143,7 @@ class HandlerCompositionTests(SimpleTestCase):
     """``rules.check_handler_composition``: the allowlist is exactly the legacy kinds plus the registry's task kinds."""
 
     def test_the_production_composition_fits(self):
-        rules.check_handler_composition(task_registry.MODULE_REGISTRY, PRODUCTION_REGISTRY, task_registry.LEGACY_UNGATED_KINDS)
+        rules.check_handler_composition(task_registry.MODULE_REGISTRY, task_registry.WORKER_REGISTRY, task_registry.UNGATED_KINDS)
 
     def test_a_declared_kind_without_a_handler_is_refused(self):
         with self.assertRaises(ModuleHostError) as caught:

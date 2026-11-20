@@ -240,11 +240,11 @@ class NoGateTests(CompositionTestCase):
         composition = worker.Composition(None, lambda: None)
         self.assertEqual((composition.maintenance_hooks, composition.kind_gate), ((), None))
 
-    def test_the_production_composition_has_the_module_gate_and_no_extra_hook(self):
-        # MOD-1b S4 installs the module-state gate (apps.module_host.gate); there is still no extra maintenance hook. Without any registered module the gate
-        # answers the legacy kinds, so nothing is held (tests/test_module_host_gate.py).
+    def test_the_production_composition_has_the_module_gate_and_one_core_maintenance_hook(self):
+        # MOD-1b S4 installs the module-state gate (apps.module_host.gate). DOC-2 adds ONE maintenance hook, Core's ``documents.reconcile_text``. Without any registered module the gate
+        # answers the ungated kinds, so nothing is held (tests/test_module_host_gate.py).
         self.assertIsNotNone(task_registry.COMPOSITION.kind_gate)
-        self.assertEqual(task_registry.COMPOSITION.maintenance_hooks, ())
+        self.assertEqual([hook.hook_id for hook in task_registry.COMPOSITION.maintenance_hooks], ["documents.reconcile_text"])
         self.assertIsNotNone(task_registry.COMPOSITION.after_iteration)
 
 

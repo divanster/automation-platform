@@ -775,3 +775,21 @@ No PostgreSQL was involved. The AI-2a PostgreSQL results are recorded in the nex
 | Anything sent to an AI provider or any network service | **nothing** (there is no AI, OCR or extraction in this slice) |
 
 The owner's PostgreSQL run, when made, supports the tested scenarios only.
+
+## Pending: DOC-2 PDF text extraction backend (not yet validated)
+
+> **Scope.** DOC-2 (`feat/document-text-extraction`, not committed): `apps/document_text` (models, services, worker execution, the isolated extraction process), `config/document_extraction.py`, `/api/documents/<id>/text-extractions/`,
+> migration `document_text.0001_text_extraction`, the new dependency `pypdf==7.1.1` and three Core audit actions (see [document-storage.md](../architecture/document-storage.md) section 11 and [runbook.md](runbook.md), section 5.14).
+> **Nothing in this section is owner-supplied.**
+
+| Item | State |
+| --- | --- |
+| DB-free tests in the development VM | passed: 230 new tests (4091 DB-free tests in all). They include a REAL child process: the real extractor on synthetic PDFs, and stand-in children that hang, burn CPU, exhaust memory, write too much, write garbage, crash, try to start a process or inspect their environment, against a real Windows job object (memory, CPU time, no child process, kill on timeout). **The POSIX `setrlimit` path was not run** (only tested with a fake `resource` module) |
+| Existing tests edited for the changed composition, the audit vocabulary, the installed apps, the throttle scopes and the API route inventory | edited and passing DB-free; the PostgreSQL ones among them (`tests/test_request_intake_module_postgres.py`, `tests/test_module_context_postgres.py`) are edited, **NOT run** |
+| PostgreSQL tests (`tests/test_document_text_postgres.py`, 57 tests) | **written, NOT run** (persistence, the worker, refusals, retry and recovery, two end-to-end runs with the real extractor, constraints and immutability, API permissions and audit, concurrent requests, runs, workers and reconcilers, the migration) |
+| The migration `document_text.0001` against a real PostgreSQL | **NOT run** (its SQL was rendered with `sqlmigrate` and the ORM queries were compiled offline; neither is evidence of behaviour) |
+| `pip install --require-hashes` of the new lock on the owner's computer | **not run** (it succeeded and `pip check` was clean in the development VM) |
+| A real-world PDF, a scanned or multi-column document, non-Latin text, speed and memory against the default limits, a POSIX host, a service account, a browser or any UI | **never exercised** |
+| Anything sent to an AI provider or any network service | **nothing** (no OCR, no AI, no provider call; the PDF library is imported only by the child process) |
+
+The owner's PostgreSQL run, when made, supports the tested scenarios only.

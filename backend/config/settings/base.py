@@ -24,6 +24,7 @@ INSTALLED_APPS = [
     "apps.api",
     "apps.audit",
     "apps.cases",
+    "apps.document_text",
     "apps.documents",
     "apps.health",
     "apps.intake",
@@ -142,6 +143,9 @@ API_THROTTLE_RATES = {
     # Each document upload writes up to DOC-1's size limit to disk: bounded per user per minute and per hour (per process, not a quota).
     "document_upload": "20/min",
     "document_upload_hour": "200/hour",
+    # Each text extraction request queues a worker task that runs a PDF parser in a child process (DOC-2): far fewer than uploads, per user per minute and per hour (per process).
+    "document_text": "10/min",
+    "document_text_hour": "60/hour",
 }
 
 # Largest accepted request body, in bytes (the parser refuses more with 413 before decoding it).

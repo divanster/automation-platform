@@ -49,6 +49,7 @@ from apps.documents.errors import (
     DocumentRejectedError,
     DocumentStorageError,
 )
+from apps.document_text.errors import ExtractionNotReadyError
 from apps.intake.errors import (
     ClientRequestConflictError,
     DraftInvalidError,
@@ -112,6 +113,7 @@ MESSAGES = {
     "invalid_document": "The document is not acceptable.",
     "document_storage_disabled": "Document storage is not configured.",
     "document_storage_unavailable": "Document storage is unavailable.",
+    "extraction_not_ready": "The text extraction has not finished.",
     "content_hash_mismatch": "The content hash is not the current revision's hash.",
     "run_not_in_review": "The request is not waiting for review.",
     "run_state_not_editable": "The request cannot be edited in its current state.",
@@ -230,6 +232,8 @@ def problem_for(exc) -> Problem:
         if exc.reason == "length_required":
             return Problem(411, "length_required")
         return Problem(400, "invalid_document", {"reason": exc.reason if exc.reason in DOCUMENT_REJECTION_REASONS else "malformed_pdf"})
+    if isinstance(exc, ExtractionNotReadyError):
+        return Problem(409, "extraction_not_ready")
     if isinstance(exc, DocumentStorageError):
         return Problem(503, "document_storage_disabled" if exc.code == DOCUMENT_STORAGE_DISABLED else "document_storage_unavailable")
     if isinstance(exc, RequestTextError):  # a ValueError subclass: must come before any generic handling

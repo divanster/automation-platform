@@ -82,7 +82,10 @@ class RegistryCompositionTests(SimpleTestCase):
                 self.assertIsNone(task_handlers.get_handler(kind, intake_registry.PRODUCTION_REGISTRY))
 
     def test_the_composition_root_assembles_exactly_this_registry_and_the_reconciler(self):
-        self.assertIs(task_registry.COMPOSITION.registry, intake_registry.PRODUCTION_REGISTRY)
+        # DOC-2: Request Intake's composed registry is unchanged; the worker's allowlist is that registry plus Core's one text extraction handler.
+        self.assertEqual(dict(task_registry.COMPOSITION.registry), {**intake_registry.PRODUCTION_REGISTRY, "documents.extract_text": task_registry.WORKER_REGISTRY["documents.extract_text"]})
+        for kind, handler in intake_registry.PRODUCTION_REGISTRY.items():
+            self.assertIs(task_registry.COMPOSITION.registry[kind], handler)
         self.assertIs(task_registry.COMPOSITION.after_iteration, services.reconcile_after_iteration)
         self.assertIsInstance(task_registry.COMPOSITION, worker.Composition)
 

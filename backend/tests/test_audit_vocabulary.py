@@ -54,7 +54,7 @@ ACTOR, SUBJECT, CASE, RUN = (uuid.uuid4() for _ in range(4))
 # "ai_settings" namespace is Core's too) and "ai_settings.connection_changed" (AI-SET-2: one event per connection a save created, changed or removed).
 # "ai_settings" namespace is Core's too) and "ai_settings.connection_changed" (AI-SET-2: one event per connection a save created, changed or removed), plus the three
 # "ai_credential.*" actions of AI-SEC-2 (the managed AI credential API; the "ai_credential" namespace is Core's too), plus "document.uploaded" and "document.downloaded" of DOC-1
-# (the document storage; the "document" namespace is Core's too).
+# (the document storage; the "document" namespace is Core's too), plus "document.text_requested", "document.text_extracted" and "document.text_read" of DOC-2 (PDF text extraction).
 # The "module", "ai_settings" and "document" subject types are asserted separately. If an action or a detail key of Core ever
 # changes, this table is what makes the change visible.
 CORE_ACTIONS = (
@@ -74,6 +74,9 @@ CORE_ACTIONS = (
     "ai_credential.deleted",
     "document.uploaded",
     "document.downloaded",
+    "document.text_requested",
+    "document.text_extracted",
+    "document.text_read",
 )
 CORE_KEYS = {
     "request.submitted": {"byte_length", "client_request_id_used"},
@@ -92,6 +95,9 @@ CORE_KEYS = {
     "ai_credential.deleted": {"store"},
     "document.uploaded": {"byte_length", "content_hash"},
     "document.downloaded": {"byte_length", "content_hash", "by_owner"},
+    "document.text_requested": {"extraction_id"},
+    "document.text_extracted": {"extraction_id", "status", "error_code", "page_count", "char_count", "content_hash", "extractor_version"},
+    "document.text_read": {"extraction_id", "page_count", "char_count", "by_owner"},
 }
 CORE_SUBJECTS = ("run", "revision", "approval", "rejection", "module", "ai_settings", "document")
 
@@ -968,7 +974,7 @@ class ArchitectureTests(SimpleTestCase):
         from config.task_registry import COMPOSITION
 
         self.assertIsNotNone(COMPOSITION.kind_gate)  # S4 installs the module gate; it has nothing to do with the audit vocabulary
-        self.assertEqual(COMPOSITION.maintenance_hooks, ())
+        self.assertEqual([hook.hook_id for hook in COMPOSITION.maintenance_hooks], ["documents.reconcile_text"])  # DOC-2's Core hook; it records no audit action of its own here
         source = (BACKEND / "config" / "task_registry.py").read_text(encoding="utf-8")
         self.assertNotIn("audit", source)
         self.assertEqual(len(module_root.BUILTIN_MODULES), 1)  # MOD-2: Request Intake
@@ -1050,6 +1056,9 @@ class OldSchemaHelperTests(SimpleTestCase):
                 events.ACTION_AI_CREDENTIAL_DELETED,
                 events.ACTION_DOCUMENT_UPLOADED,
                 events.ACTION_DOCUMENT_DOWNLOADED,
+                events.ACTION_DOCUMENT_TEXT_REQUESTED,
+                events.ACTION_DOCUMENT_TEXT_EXTRACTED,
+                events.ACTION_DOCUMENT_TEXT_READ,
             },
         )
 

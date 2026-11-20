@@ -894,10 +894,11 @@ class RequestIntakeCompatibilityTests(SimpleTestCase):
 
     def test_the_worker_composition_keeps_the_handlers_and_only_the_test_kind_is_legacy(self):
         from apps.intake.registry import PRODUCTION_REGISTRY
-        from config.task_registry import COMPOSITION, LEGACY_UNGATED_KINDS
+        from config.task_registry import COMPOSITION, CORE_UNGATED_KINDS, LEGACY_UNGATED_KINDS
 
         self.assertEqual(LEGACY_UNGATED_KINDS, {"test.add_numbers"})  # MOD-2: request_intake.extract is the registered module's kind
-        self.assertIs(COMPOSITION.registry, PRODUCTION_REGISTRY)
+        self.assertEqual(CORE_UNGATED_KINDS, {"documents.extract_text"})  # DOC-2: Core's text extraction, not a legacy kind
+        self.assertEqual(dict(COMPOSITION.registry), {**PRODUCTION_REGISTRY, "documents.extract_text": COMPOSITION.registry["documents.extract_text"]})
 
     def test_the_synthetic_request_intake_manifest_still_works_with_a_context_and_is_not_the_registered_one(self):
         from tests.module_support import intake_like_manifest

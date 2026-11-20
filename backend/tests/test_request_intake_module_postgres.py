@@ -56,7 +56,7 @@ from apps.tasks.services import claim_next_task
 from config.audit_vocabulary import build_audit_vocabulary
 from config.module_context import module_context
 from config.modules import build_registry
-from config.task_registry import COMPOSITION, LEGACY_UNGATED_KINDS, MODULE_REGISTRY
+from config.task_registry import COMPOSITION, MODULE_REGISTRY, UNGATED_KINDS
 from tests import test_review_postgres as review_base
 from tests.intake_support import VALID_TEXT
 from tests.test_intake_postgres import DedicatedTestDatabaseMixin, make_user, requires_postgres, submit
@@ -112,10 +112,10 @@ class SyncTests(DedicatedTestDatabaseMixin, TestCase):
         # the development database may already hold the marker from a sync that ran while no module was registered
         host.sync_modules(EMPTY_REGISTRY)
         self.assertEqual((ModuleState.objects.count(), ModuleHostMarker.objects.count()), (0, 1))
-        self.assertEqual(COMPOSITION.kind_gate(), LEGACY_UNGATED_KINDS)  # missing state after initialization fails closed: not "enabled"
+        self.assertEqual(COMPOSITION.kind_gate(), UNGATED_KINDS)  # missing state after initialization fails closed: not "enabled"
         report = host.sync_modules(MODULE_REGISTRY)
         self.assertEqual((report.initial, report.created), (False, ((MODULE_ID, True),)))
-        self.assertEqual(COMPOSITION.kind_gate(), LEGACY_UNGATED_KINDS | {KIND_EXTRACT})
+        self.assertEqual(COMPOSITION.kind_gate(), UNGATED_KINDS | {KIND_EXTRACT})
 
     def test_a_disabled_request_intake_is_never_re_enabled_by_a_sync(self):
         host.sync_modules(MODULE_REGISTRY)
@@ -123,7 +123,7 @@ class SyncTests(DedicatedTestDatabaseMixin, TestCase):
         report = host.sync_modules(MODULE_REGISTRY)
         self.assertEqual((report.created, report.unchanged), ((), (MODULE_ID,)))
         self.assertFalse(state_row().enabled)
-        self.assertEqual(COMPOSITION.kind_gate(), LEGACY_UNGATED_KINDS)
+        self.assertEqual(COMPOSITION.kind_gate(), UNGATED_KINDS)
 
     def test_a_version_mismatch_is_reported_and_holds_the_kind(self):
         host.sync_modules(MODULE_REGISTRY)
@@ -131,10 +131,10 @@ class SyncTests(DedicatedTestDatabaseMixin, TestCase):
         report = host.sync_modules(MODULE_REGISTRY)
         self.assertEqual((report.ok, [m.module_id for m in report.version_mismatches]), (False, [MODULE_ID]))
         self.assertEqual(state_row().installed_version, "0.9.0")  # never changed by a sync
-        self.assertEqual(COMPOSITION.kind_gate(), LEGACY_UNGATED_KINDS)
+        self.assertEqual(COMPOSITION.kind_gate(), UNGATED_KINDS)
 
     def test_no_state_row_without_the_marker_is_the_pre_sync_window_and_the_kind_is_claimable(self):
-        self.assertEqual(COMPOSITION.kind_gate(), LEGACY_UNGATED_KINDS | {KIND_EXTRACT})  # an installation that has not synced yet keeps working
+        self.assertEqual(COMPOSITION.kind_gate(), UNGATED_KINDS | {KIND_EXTRACT})  # an installation that has not synced yet keeps working
 
     def test_the_audit_vocabulary_composed_from_the_registry_is_cores_and_historical_events_stay_readable(self):
         user = make_user("historic")
@@ -176,7 +176,7 @@ class WorkerCase(DedicatedTestDatabaseMixin, TransactionTestCase):
 @requires_postgres
 class GatedWorkerTests(WorkerCase):
     def test_the_production_composition_is_the_one_with_the_real_handler_and_the_module_gate(self):
-        self.assertIs(COMPOSITION.registry, PRODUCTION_REGISTRY)
+        self.assertIs(COMPOSITION.registry[KIND_EXTRACT], EXTRACT_HANDLER)  # DOC-2 adds Core's text extraction handler beside it
         self.assertIs(PRODUCTION_REGISTRY[KIND_EXTRACT], EXTRACT_HANDLER)
         self.assertIsNotNone(COMPOSITION.kind_gate)
 

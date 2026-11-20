@@ -113,6 +113,22 @@ class DocumentUploadHourThrottle(DocumentUploadThrottle):
     scope = "document_upload_hour"
 
 
+class DocumentTextThrottle(ConfiguredRateThrottle):
+    """A bounded ceiling per signed-in user on text extraction REQUESTS (DOC-2): each one that is not answered by an existing extraction queues a worker task that runs a PDF parser in a child process. Applied to
+    POST only. Per process, like every throttle here."""
+
+    scope = "document_text"
+
+    def get_cache_key(self, request, view):
+        user = getattr(request, "user", None)
+        ident = f"user-{user.pk}" if user is not None and getattr(user, "is_authenticated", False) else self.get_ident(request)
+        return self.cache_format % {"scope": self.scope, "ident": ident}
+
+
+class DocumentTextHourThrottle(DocumentTextThrottle):
+    scope = "document_text_hour"
+
+
 class ConnectionTestGlobalThrottle(ConfiguredRateThrottle):
     """One shared ceiling for all ADMINISTRATORS together, so several administrator sessions cannot add up to a flood (per process, like every throttle here). Requests of a user who
     is not an administrator are not counted here (they are refused by the service anyway), so they cannot use up the ceiling and lock the administrators out."""

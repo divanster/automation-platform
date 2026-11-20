@@ -349,9 +349,9 @@ class PrepareWorkerTests(SimpleTestCase):
 
         before = (task_registry.COMPOSITION.registry, task_registry.COMPOSITION.kind_gate, task_registry.COMPOSITION.after_iteration)
         task_registry.prepare_worker(60, ai_environ(), transport=FakeTransport())
-        self.assertIs(task_registry.COMPOSITION.registry, PRODUCTION_REGISTRY)
+        self.assertEqual(set(task_registry.COMPOSITION.registry), set(PRODUCTION_REGISTRY) | {"documents.extract_text"})  # DOC-2's Core handler is the only addition
         self.assertEqual((task_registry.COMPOSITION.registry, task_registry.COMPOSITION.kind_gate, task_registry.COMPOSITION.after_iteration), before)
-        self.assertEqual(set(PRODUCTION_REGISTRY), {"test.add_numbers", "request_intake.extract"})  # no second kind, queue or worker
+        self.assertEqual(set(PRODUCTION_REGISTRY), {"test.add_numbers", "request_intake.extract"})  # no second kind, queue or worker for Request Intake
 
 
 class RunWorkerStartUpTests(SimpleTestCase):
