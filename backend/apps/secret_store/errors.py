@@ -6,6 +6,8 @@ CODE_NOT_FOUND = "secret_not_found"
 CODE_ALREADY_EXISTS = "secret_already_exists"
 CODE_DISABLED = "secret_store_disabled"
 CODE_UNAVAILABLE = "secret_store_unavailable"
+CODE_UNREADABLE = "secret_unreadable"
+CODE_BUSY = "secret_store_busy"
 
 _MESSAGES = {
     CODE_INVALID_REFERENCE: "The secret reference is not valid.",
@@ -14,6 +16,8 @@ _MESSAGES = {
     CODE_ALREADY_EXISTS: "A secret is already stored under that reference.",
     CODE_DISABLED: "The secret store is disabled.",
     CODE_UNAVAILABLE: "The secret store is unavailable.",
+    CODE_UNREADABLE: "The stored secret cannot be read.",
+    CODE_BUSY: "The secret store is busy; try again later.",
 }
 CODES = tuple(_MESSAGES)
 

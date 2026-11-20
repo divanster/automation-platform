@@ -2,11 +2,13 @@
 
 from .errors import (
     CODE_ALREADY_EXISTS,
+    CODE_BUSY,
     CODE_DISABLED,
     CODE_INVALID_REFERENCE,
     CODE_INVALID_SECRET,
     CODE_NOT_FOUND,
     CODE_UNAVAILABLE,
+    CODE_UNREADABLE,
     CODES,
     SecretStoreError,
 )
@@ -16,11 +18,13 @@ from .values import MAX_SECRET_LENGTH, SecretValue, validate_reference
 __all__ = [
     "CODES",
     "CODE_ALREADY_EXISTS",
+    "CODE_BUSY",
     "CODE_DISABLED",
     "CODE_INVALID_REFERENCE",
     "CODE_INVALID_SECRET",
     "CODE_NOT_FOUND",
     "CODE_UNAVAILABLE",
+    "CODE_UNREADABLE",
     "MAX_SECRET_LENGTH",
     "DisabledSecretStore",
     "SecretStore",

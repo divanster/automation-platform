@@ -46,11 +46,17 @@ class SecretStore(ABC):
     @staticmethod
     def _guard(hook, *args):
         try:
-            return hook(*args)
-        except SecretStoreError:
+            try:
+                return hook(*args)
+            except SecretStoreError:
+                raise
+            except Exception:
+                raise SecretStoreError(CODE_UNAVAILABLE) from None
+        except SecretStoreError as error:
+            error.__context__ = None  # what a backend was handling when it refused (a file error that names a path) is not kept either
+            error.__cause__ = None
+            error.__suppress_context__ = True
             raise
-        except Exception:
-            raise SecretStoreError(CODE_UNAVAILABLE) from None
 
     @abstractmethod
     def _put(self, reference: str, secret: SecretValue, replace: bool) -> None:

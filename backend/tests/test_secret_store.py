@@ -11,11 +11,13 @@ from pathlib import Path
 
 from apps.secret_store import (
     CODE_ALREADY_EXISTS,
+    CODE_BUSY,
     CODE_DISABLED,
     CODE_INVALID_REFERENCE,
     CODE_INVALID_SECRET,
     CODE_NOT_FOUND,
     CODE_UNAVAILABLE,
+    CODE_UNREADABLE,
     CODES,
     MAX_SECRET_LENGTH,
     DisabledSecretStore,
@@ -254,7 +256,7 @@ class BackendFailureTests(unittest.TestCase):
 
     def test_an_unknown_code_becomes_unavailable_and_every_code_has_a_fixed_message(self):
         self.assertEqual(SecretStoreError("anything").code, CODE_UNAVAILABLE)
-        self.assertEqual(set(CODES), {CODE_INVALID_REFERENCE, CODE_INVALID_SECRET, CODE_NOT_FOUND, CODE_ALREADY_EXISTS, CODE_DISABLED, CODE_UNAVAILABLE})
+        self.assertEqual(set(CODES), {CODE_INVALID_REFERENCE, CODE_INVALID_SECRET, CODE_NOT_FOUND, CODE_ALREADY_EXISTS, CODE_DISABLED, CODE_UNAVAILABLE, CODE_UNREADABLE, CODE_BUSY})
         for code in CODES:
             self.assertEqual(str(SecretStoreError(code)), str(SecretStoreError(code)))
             self.assertEqual(pickle.loads(pickle.dumps(SecretStoreError(code))).code, code)
@@ -407,7 +409,7 @@ class BoundaryTests(unittest.TestCase):
     def test_the_package_is_not_an_installed_app_and_has_no_models_or_migrations(self):
         self.assertEqual({path.name for path in PACKAGE.iterdir() if path.is_file() or path.is_dir()} - {"__pycache__"}, {"__init__.py", "errors.py", "store.py", "values.py"})
 
-    def test_nothing_else_in_the_application_imports_it_yet(self):
+    def test_nothing_else_in_the_application_imports_it_yet_except_the_windows_dpapi_backend(self):
         backend = PACKAGE.parent.parent
         offenders = []
         for root in (backend / "apps", backend / "config"):
@@ -415,8 +417,8 @@ class BoundaryTests(unittest.TestCase):
                 if PACKAGE in path.parents:
                     continue
                 if "secret_store" in path.read_text(encoding="utf-8"):
-                    offenders.append(str(path.relative_to(backend)))
-        self.assertEqual(offenders, [])
+                    offenders.append(path.relative_to(backend).as_posix())
+        self.assertEqual(offenders, ["config/secret_store_dpapi.py"])  # AI-SEC-1b: the backend only; no setting, API, provider or intake code uses a secret store yet
 
 
 if __name__ == "__main__":
