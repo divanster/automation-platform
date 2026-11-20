@@ -96,11 +96,12 @@ class ManifestContentsTests(SimpleTestCase):
         ):  # fmt: skip
             self.assertIn(action, events.ACTIONS)
 
-    def test_no_maintenance_hook_is_declared_and_the_reconciler_stays_the_after_iteration_hook(self):
+    def test_no_module_hook_is_declared_the_reconciler_stays_the_after_iteration_hook_and_core_adds_one_maintenance_hook(self):
         self.assertEqual(MANIFEST.maintenance_hooks, ())
         self.assertEqual(REGISTRY.maintenance_hooks, ())
         self.assertIs(task_registry.COMPOSITION.after_iteration, task_registry.reconcile_after_iteration)
-        self.assertEqual(task_registry.COMPOSITION.maintenance_hooks, ())
+        # DOC-2: Core (not this module) added ONE maintenance hook, which closes text extractions whose task failed for good; Request Intake's reconciler is untouched.
+        self.assertEqual([hook.hook_id for hook in task_registry.COMPOSITION.maintenance_hooks], ["documents.reconcile_text"])
 
     def test_the_manifest_matches_the_synthetic_one_the_contract_was_designed_against_apart_from_what_this_slice_adds(self):
         synthetic = intake_like_manifest()
@@ -250,14 +251,16 @@ class WorkerCompositionTests(SimpleTestCase):
         self.assertEqual(EXTRACT_HANDLER.kind, MANIFEST.task_handlers[0].kind)
         self.assertFalse(EXTRACT_HANDLER.is_test_handler)
         self.assertEqual(set(PRODUCTION_REGISTRY), {"test.add_numbers", "request_intake.extract"})
-        self.assertIs(task_registry.COMPOSITION.registry, PRODUCTION_REGISTRY)
+        self.assertEqual(set(task_registry.COMPOSITION.registry), set(PRODUCTION_REGISTRY) | {"documents.extract_text"})  # DOC-2 adds Core's one handler; Request Intake's are the same objects
+        self.assertIs(task_registry.COMPOSITION.registry[KIND_EXTRACT], EXTRACT_HANDLER)
 
     def test_every_production_kind_is_owned_exactly_once(self):
         legacy, owned = task_registry.LEGACY_UNGATED_KINDS, frozenset(REGISTRY.task_kinds)
         self.assertEqual(legacy, {"test.add_numbers"})
         self.assertEqual(legacy & owned, frozenset())
-        self.assertEqual(legacy | owned, frozenset(PRODUCTION_REGISTRY))
-        rules.check_handler_composition(REGISTRY, PRODUCTION_REGISTRY, legacy)
+        self.assertEqual(task_registry.CORE_UNGATED_KINDS & (legacy | owned), frozenset())
+        self.assertEqual(task_registry.UNGATED_KINDS | owned, frozenset(task_registry.WORKER_REGISTRY))
+        rules.check_handler_composition(REGISTRY, task_registry.WORKER_REGISTRY, task_registry.UNGATED_KINDS)
 
     def test_there_is_one_worker_composition_and_the_module_context_uses_the_same_registry_and_handlers(self):
         self.assertIs(task_registry.MODULE_REGISTRY.get("request_intake"), MANIFEST)
@@ -279,7 +282,7 @@ def normalized(path: str) -> str:
 
 # The dashboard (BE-DASH-1 / FE-6) is a Core screen and a Core API route: it is not a Request Intake contribution and is not in the
 # manifest. Adding to these sets is a deliberate decision; an undeclared module route still fails the equality checks below.
-CORE_API_PREFIXES = {"auth", "dashboard"}
+CORE_API_PREFIXES = {"auth", "dashboard", "documents"}  # ``documents``: DOC-2's text extraction routes under /api/documents/<id>/ (Core, not a module)
 CORE_SCREENS = {"/dashboard"}
 CORE_NAVIGATION = {
     "/dashboard": ("intake.view_own_request", "intake.view_any_request"),  # any-of display hint, not a module permission

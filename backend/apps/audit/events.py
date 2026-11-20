@@ -49,6 +49,12 @@ ACTION_AI_CREDENTIAL_DELETED = "ai_credential.deleted"
 # The subject is the document (``SUBJECT_DOCUMENT``). Details are the byte length and the content hash only (never a file name, a path or any content).
 ACTION_DOCUMENT_UPLOADED = "document.uploaded"
 ACTION_DOCUMENT_DOWNLOADED = "document.downloaded"
+# DOC-2: text extraction of a stored PDF (apps.document_text). Same Core-reserved ``document`` namespace and subject. ``document.text_requested`` is done by the requesting user (in the transaction that queues the
+# task); ``document.text_extracted`` by the system actor (the worker), in the transaction that stores the result; ``document.text_read`` by the user who was handed the extracted text. Details are identifiers,
+# counts, a hash, a status and a code only: NEVER extracted text, a file name or a path.
+ACTION_DOCUMENT_TEXT_REQUESTED = "document.text_requested"
+ACTION_DOCUMENT_TEXT_EXTRACTED = "document.text_extracted"
+ACTION_DOCUMENT_TEXT_READ = "document.text_read"
 ACTIONS = (
     ACTION_REQUEST_SUBMITTED,
     ACTION_REVISION_CREATED,
@@ -66,6 +72,9 @@ ACTIONS = (
     ACTION_AI_CREDENTIAL_DELETED,
     ACTION_DOCUMENT_UPLOADED,
     ACTION_DOCUMENT_DOWNLOADED,
+    ACTION_DOCUMENT_TEXT_REQUESTED,
+    ACTION_DOCUMENT_TEXT_EXTRACTED,
+    ACTION_DOCUMENT_TEXT_READ,
 )
 
 SUBJECT_RUN = "run"
@@ -105,6 +114,11 @@ DETAIL_KEYS = MappingProxyType(
         # ``content_hash`` is the SHA-256 hex of the stored bytes; ``byte_length`` their count; ``by_owner`` whether the downloader is the uploader. Never a name, a path or content.
         ACTION_DOCUMENT_UPLOADED: frozenset({"byte_length", "content_hash"}),
         ACTION_DOCUMENT_DOWNLOADED: frozenset({"byte_length", "content_hash", "by_owner"}),
+        # ``extraction_id`` is the request's UUID; ``status`` and ``error_code`` come from the closed vocabularies of apps.document_text.rules (``error_code`` is null for a clean extraction); ``content_hash`` is the
+        # SHA-256 of the canonical page JSON; ``extractor_version`` a version token. Counts are integers. Never any text.
+        ACTION_DOCUMENT_TEXT_REQUESTED: frozenset({"extraction_id"}),
+        ACTION_DOCUMENT_TEXT_EXTRACTED: frozenset({"extraction_id", "status", "error_code", "page_count", "char_count", "content_hash", "extractor_version"}),
+        ACTION_DOCUMENT_TEXT_READ: frozenset({"extraction_id", "page_count", "char_count", "by_owner"}),
     }
 )
 

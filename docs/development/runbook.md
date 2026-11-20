@@ -70,6 +70,7 @@ Recorded 2026-11-10. Rationale and sources: [ADR 0007](../decisions/0007-technol
 | Django REST Framework | **3.18.3** | `requirements/runtime.in` |
 | Psycopg 3 | **3.3.8**, installed as `psycopg[binary]` | `requirements/runtime.in` |
 | `psycopg-binary` (transitive) | 3.3.8, wheel `cp314-cp314-win_amd64`, bundled libpq reported as 18.4 | Resolved |
+| pypdf (DOC-2, PDF text extraction) | **7.1.1**, pure-Python universal wheel (`py3-none-any`, BSD-3-Clause, no required dependency on Python 3.11 and later); none of its optional extras is installed | `requirements/runtime.in`; the wheel's SHA-256 is in `requirements/runtime.txt` (obtained from the public package index, installed with `--require-hashes`, `pip check` clean; not independently reproduced on the owner's computer) |
 | asgiref, sqlparse, tzdata (transitive) | 3.13.0, 0.6.1, 2026.6 | Resolved |
 | PostgreSQL server | **18**, native Windows install (not Docker, not WSL), on the owner's **local** computer | Owner decision; reported as 18.6 and validated for the tested scenarios ([record](local-validation-record.md)) |
 
@@ -86,7 +87,7 @@ Compatibility notes:
   test run and smoke test** for the tested scenarios ([record](local-validation-record.md));
   other 18.x releases are not covered.
 - **What the lock actually constrains.** The lock records exactly one sha256 hash
-  per package. Six of the seven locked packages are **pure-Python universal
+  per package. Seven of the eight locked packages (pypdf, added by DOC-2, among them) are **pure-Python universal
   wheels** (`py3-none-any`; `py2.py3-none-any` for tzdata) whose declared
   `Requires-Python` is 3.10 or newer (asgiref 3.11 or newer, tzdata 2 or newer), so
   they do **not** require Python 3.14. Only `psycopg-binary` is interpreter- and
@@ -1124,6 +1125,70 @@ then the suites whose expectations this slice changed (they now count the docume
 
 **What nobody has checked:** any of the PostgreSQL behaviour above; a real browser upload (a `File` as the body of `fetch` with `X-Document-Filename: encodeURIComponent(name)`); a real WSGI production server; the Windows policy under a service account, gMSA or LocalSystem (it ran as one developer account only); a POSIX host (the POSIX policy tests were skipped in this Windows development VM and have never run); large files (the 20 MiB default and the 100 MiB maximum were exercised with a few MiB in tests); antivirus interaction; backup and restore of the directory with the database.
 
+### 5.14 PDF text extraction (DOC-2): install, configuration, use and checks
+
+**Status: implemented on `feat/document-text-extraction` (not committed, not merged). DB-free validated in the development VM only: 230 new DB-free tests (4091 DB-free tests in all) pass, including a REAL child process for the isolation tests. The 57 PostgreSQL tests (`backend/tests/test_document_text_postgres.py`) and the migration `document_text.0001` are written and NOT run. Nothing was sent to any provider; no OCR; no AI; no frontend; no real document and no real-world PDF was ever extracted.** Design, contract and limits: [document-storage.md](../architecture/document-storage.md) section 11; API: [rest-api-slice.md](rest-api-slice.md) section 23.
+
+**Set up once (owner; local computer).**
+
+1. Install the one new dependency from the lock (it is `pypdf==7.1.1`, pure Python; nothing else changes) and check the environment:
+
+   ```powershell
+   cd C:\Projects\newnew\automation-platform
+   & .\.venv\Scripts\python.exe -m pip install --require-hashes --only-binary=:all: -r requirements\development.txt
+   & .\.venv\Scripts\python.exe -m pip check          # expect: No broken requirements found.
+   ```
+
+2. Apply the migration (additive: three new tables; nothing existing changes). **`setup_roles` does not need to be run again**: there is no new permission (extraction needs the download permissions):
+
+   ```powershell
+   cd backend
+   $Py = "..\.venv\Scripts\python.exe"
+   & $Py manage.py migrate                          # document_text.0001_text_extraction
+   ```
+
+3. Optionally set the limits (all optional, provisional defaults; see `.env.example` and [document-storage.md](../architecture/document-storage.md) section 11.4). They are read by the **worker only**, at start-up, so **restart the worker** after a change; an invalid value stops it with a message naming the variable. The worker lease (`AP_WORKER_LEASE_SECONDS`, default 60) must be at least `AP_DOCUMENT_EXTRACTION_TIMEOUT_SECONDS` (default 20) plus 15, or that worker starts but **does not claim extraction tasks** and says so in its log line `Document text extraction: DISABLED in this worker ...`.
+4. Document storage must be set up (section 5.13): extraction reads the stored files through the same directory, so `AP_DOCUMENT_STORAGE_DIRECTORY` must be set **in the worker's environment too** (the worker and the web process must run as the same account). With the directory unset the worker's attempts fail closed (`document_storage_disabled`), are retried, and the request ends as `failed` with `extraction_unavailable`.
+
+**Start-up check.** `runworker` (with or without `--once`) logs one line about the extraction to the console at start, after the Request Intake extraction line, for example `Document text extraction: pypdf 7.1.1 in an isolated process; timeout 20 s, memory 1024 MiB, at most 200 pages, 500000 characters, 20480 KiB.` (or the `DISABLED in this worker` line above).
+
+**Try it once (owner; synthetic PDF only; never a real document).** After uploading a synthetic PDF with the steps of section 5.13 (the `$Jar`, `$Base` and `$Csrf` of that block), with a user who may download it (the uploader, or an Approver):
+
+```powershell
+$Doc = "<the id from the upload answer>"
+curl.exe -s -b $Jar -X POST -H "X-CSRFToken: $Csrf" "$Base/api/documents/$Doc/text-extractions/"        # 201, "status": "queued"; the same call again: 200 and the same id
+# in the worker window (or once): & $Py manage.py runworker --once       # prints: Task <id> succeeded.
+$Ext = "<the id from the answer above>"
+curl.exe -s -b $Jar "$Base/api/documents/$Doc/text-extractions/$Ext/"                                   # status and facts, NO text
+curl.exe -s -b $Jar "$Base/api/documents/$Doc/text-extractions/$Ext/text/"                              # the pages: text, status, source_reference
+```
+
+Expect `status` `extracted` for a PDF with a text layer; `empty` (`no_text`) for a scanned or image-only one; `failed` with `encrypted_pdf`, `malformed_pdf`, `too_many_pages`, `document_too_large`, `extraction_timeout` or `resource_limit` for the cases that name them. In `audit_auditevent`: `document.text_requested`, `document.text_extracted` and, after reading the text, `document.text_read` (no text in any of them). Calling `.../text/` before the worker ran answers `409 extraction_not_ready`. An Auditor gets `403` on every one of these routes; another Operator gets `404`.
+
+**Failure reading.** `queued` for a long time: no worker is running, or its lease is shorter than the timeout plus 15 s (read its start-up line), or its extraction runtime was not installed (use `manage.py runworker`, not a custom loop). `failed` with `extraction_unavailable`: three attempts failed for a reason outside the document: the document storage cannot be used in the worker's environment (`503 document_storage_*` causes in section 5.13), or the extraction process could not start or put its limits in force (`sandbox_unavailable` is logged as a retryable failure; on macOS and other platforms without a working `RLIMIT_AS` it never succeeds); request it again once fixed. `not_authorized`: the requester lost the download permission or was deactivated before the worker ran. `integrity_mismatch` or `document_missing`: the stored object does not match its recorded hash or size, or is gone (restore the directory and database together; never edit an object). `extraction_timeout` or `resource_limit`: the file needs more than the limits; raise them deliberately, not by habit.
+
+**Checks (DB-free; from `backend\`; no network, no key, no PostgreSQL):**
+
+```powershell
+$Py = "..\.venv\Scripts\python.exe"
+& $Py manage.py check
+& $Py manage.py makemigrations --check --dry-run                                        # expect: No changes detected
+& $Py -m compileall -q apps config tests manage.py
+& $Py manage.py test tests.test_document_text_rules tests.test_document_text_pdf tests.test_document_text_isolation tests.test_document_text_worker tests.test_document_text_services tests.test_document_text_api tests.test_document_text_boundaries   # 230 tests; the isolation tests start real processes and take about 25 s
+& $Py manage.py test                                                                  # expect OK (4091 in the development VM; re-check the number)
+git diff --check
+```
+
+**PostgreSQL validation (LOCAL COMPUTER ONLY; owner-run; NOT YET RUN).** On a dedicated development server, no `--keepdb`, no `--noinput`: with `AP_RUN_DB_TESTS=1` set only around the command,
+
+```powershell
+& $Py manage.py test tests.test_document_text_postgres --tag requires_postgres -v 2
+```
+
+then the suites whose expectations this slice changed (the production composition now holds Core's text extraction handler, hook and kind, and Core's audit vocabulary gained three actions): `tests.test_request_intake_module_postgres tests.test_module_context_postgres tests.test_audit_vocabulary_postgres tests.test_tasks_gating_postgres tests.test_documents_postgres`, and finally the whole regression. Report the exact `Ran N tests` line; passing would cover the tested scenarios only. The new file covers request persistence (one extraction, one task, one audit event, atomic rollback), the worker (result, pages, audit, the task result), refusals (a permission lost, a deactivated requester, a missing or altered object, the size limit), retry and recovery (a repeated run, a crash between the result and the queue's bookkeeping, a stale worker, an unusable storage, an unavailable extractor, the reconciler), two end-to-end tests with the real isolated extractor, the constraints and immutability, the permissions and audit of the API, concurrent requests, runs, workers and reconcilers, and the migration.
+
+**What nobody has checked:** any of the PostgreSQL behaviour above; a real-world PDF of any kind (scanned, multi-column, tables, non-Latin or right-to-left text, a font without a usable encoding, a very large or deliberately hostile file); the extraction speed and memory use against the defaults; the isolation on a POSIX host (its `setrlimit` path was never run) and under a Windows service account; reading order quality; a browser or any UI; that `pip install --require-hashes` of the new lock succeeds on the owner's computer (it did on the development VM).
+
 ## 6. Local Windows computer: setup and validation (reference procedure; owner-operated)
 
 > **Nothing in this section has been run.** No local repository, Python
@@ -1581,7 +1646,8 @@ be updated when that is done and confirmed.
 | Workflow attribution (MOD-1b S5: `WorkflowRun.module_id`, `workflow_key`, `workflow_version`; migrations `cases.0006` to `0009`; [section 5.2](#52-workflow-attribution-mod-1b-s5-migration-preflight-postgresql-tests-and-the-migration), [module-contract.md](../architecture/module-contract.md) section 3.12) | **Implemented on `feat/module-workflow-attribution`** (`e2a4c55`; PR not yet merged); DB-free tests pass on the VM (1998 in all); **the owner ran the four migrations, the 37 PostgreSQL tests and a 604-test regression locally, all passed** (owner-supplied, tested scenarios only); an installation holding a run without a Request Intake source stops at `0008` by design |
 | ModuleContext capability facade (MOD-1b S6: `apps/module_host/context.py`, `context_rules.py`, `config/module_context.py`; [section 5.3](#53-modulecontext-mod-1b-s6-db-free-checks-and-the-postgresql-tests), [module-contract.md](../architecture/module-contract.md) section 3.13) | **Implemented on `feat/module-capability-facade`** (`ee4198d`, test fix `5b61298`; pushed, PR not yet opened); DB-free tests pass on the VM (2129 in all); the owner ran the 72 PostgreSQL tests and a 676-test selected regression locally, all passed (owner-supplied, tested scenarios only); no module is registered, Request Intake does not use it, no migration, nothing in the application calls it; a naming and authority boundary, not a sandbox |
 | Request Intake as the first built-in module (MOD-2: `apps/intake/module.py`, `config/modules.py`, `config/task_registry.py`; [section 5.4](#54-request-intake-as-a-registered-module-mod-2-activation-sequence-and-postgresql-tests), [module-contract.md](../architecture/module-contract.md) section 3.14) | **Implemented on `feat/request-intake-module`** (`871bf2d`, test corrections `8915925` and `05cf1a7`; pushed, PR not opened); DB-free tests pass on the VM (2172 in all); the owner ran the PostgreSQL tests locally, 701 passed, and `module_sync` on the development database (owner-supplied, tested scenarios only); no migration; `module_sync` must be run before the worker claims Request Intake tasks on an installation that has already synced; the module is declared and gated, not sandboxed, and does not use `ModuleContext` |
-| Document upload backend (DOC-1: `apps/documents`, `config/document_storage.py`, `/api/documents/`, migrations `documents.0001` and `audit.0004`; [section 5.13](#513-document-upload-doc-1-storage-set-up-use-and-checks), [document-storage.md](../architecture/document-storage.md)) | **Implemented on `feat/document-upload-backend`** (not committed, not merged); DB-free tests pass in the development VM (see the final report for the count), including the real Windows directory policy run for real on one developer account; **the PostgreSQL tests and the two migrations are written and NOT run**; no frontend, no AI, OCR, extraction or worker task; plaintext at rest, no malware scan, no quota; development-validated, not production-ready |
+| Document upload backend (DOC-1: `apps/documents`, `config/document_storage.py`, `/api/documents/`, migrations `documents.0001` and `audit.0004`; [section 5.13](#513-document-upload-doc-1-storage-set-up-use-and-checks), [document-storage.md](../architecture/document-storage.md)) | **Merged into `main`** (PR #37); DB-free tests pass in the development VM, including the real Windows directory policy run for real on one developer account; **the PostgreSQL tests and the two migrations are written and NOT run**; no frontend, no AI or OCR; plaintext at rest, no malware scan, no quota; development-validated, not production-ready |
+| PDF text extraction (DOC-2: `apps/document_text`, `config/document_extraction.py`, `/api/documents/<id>/text-extractions/`, migration `document_text.0001`, dependency `pypdf==7.1.1`; [section 5.14](#514-pdf-text-extraction-doc-2-install-configuration-use-and-checks), [document-storage.md](../architecture/document-storage.md) section 11) | **Implemented on `feat/document-text-extraction`** (not committed, not merged); 230 new DB-free tests pass in the development VM (4091 in all), the isolation ones with a REAL child process (a Windows job object: memory, CPU time, no child process, kill on timeout, run for real; the POSIX `setrlimit` path was NOT run); **the 57 PostgreSQL tests and the migration are written and NOT run**; synthetic PDFs only, no real document, no OCR, no AI, no frontend; not a sandbox; extracted text is plaintext in PostgreSQL; development-validated, not production-ready |
 | Business workflow beyond that: a login mechanism, exports | Not implemented |
 | Task queue and background worker ([details](persistent-worker-slice.md)) | **Implemented** (first slice); the PostgreSQL tests passed in the owner's local run, tested scenarios only |
 | AI gateway foundation (AI-1a: contracts, policy, registry, deterministic test provider; [ai-gateway.md](../architecture/ai-gateway.md)) | **Implemented and merged** (PR #19); DB-free tests only; called only by the opt-in Request Intake extractor (AI-2a) |

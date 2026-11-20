@@ -547,6 +547,51 @@ class DocumentOutput(serializers.Serializer):
     allowed_actions = serializers.ListField(child=serializers.CharField())
 
 
+class TextExtractionOutput(serializers.Serializer):
+    """One text extraction's STATUS and facts (DOC-2). No text field exists here: the extracted text leaves the API only through ``ExtractedTextOutput``."""
+
+    id = serializers.UUIDField()
+    document_id = serializers.UUIDField()
+    requested_at = serializers.DateTimeField()
+    requested_by = serializers.UUIDField()
+    status = serializers.CharField()
+    error_code = serializers.SerializerMethodField()
+    extractor = serializers.SerializerMethodField()
+    source = serializers.SerializerMethodField()
+    page_count = serializers.IntegerField(allow_null=True)
+    char_count = serializers.IntegerField(allow_null=True)
+    text_sha256 = serializers.CharField(allow_null=True)
+    completed_at = serializers.DateTimeField(allow_null=True)
+
+    def get_error_code(self, item):
+        return item.error_code or None
+
+    def get_extractor(self, item):
+        return None if item.extractor_name is None else {"name": item.extractor_name, "version": item.extractor_version}
+
+    def get_source(self, item):
+        return None if item.source_sha256 is None else {"document_id": str(item.document_id), "sha256": item.source_sha256, "size_bytes": item.source_size_bytes}
+
+
+class ExtractedPageOutput(serializers.Serializer):
+    page_number = serializers.IntegerField()
+    status = serializers.CharField()
+    error_code = serializers.SerializerMethodField()
+    text = serializers.CharField(allow_blank=True)
+    char_count = serializers.IntegerField()
+    source_reference = serializers.CharField()
+
+    def get_error_code(self, item):
+        return item.error_code or None
+
+
+class ExtractedTextOutput(serializers.Serializer):
+    """The extracted text of a finished extraction: its status block and one entry per page."""
+
+    extraction = TextExtractionOutput()
+    pages = ExtractedPageOutput(many=True)
+
+
 def page_output(item_serializer, page) -> dict:
     """The paginated envelope ``{"count", "page", "page_size", "results"}`` for a service page."""
     return {

@@ -4,8 +4,9 @@
     python manage.py runworker              # poll until Ctrl+C
 
 The handlers that can run are the fixed allowlist assembled in ``config.task_registry``: the deterministic
-TEST handler ``test.add_numbers`` and the request-intake extraction handler. After every iteration the worker also
-reconciles runs whose extraction task failed for good. The first Ctrl+C (or SIGTERM / Ctrl+Break) finishes the current task and
+TEST handler ``test.add_numbers``, the request-intake extraction handler and, since DOC-2, Core's PDF text extraction handler (its runtime and limits are installed by ``config.document_extraction``, and the worker lease must
+cover its timeout plus 15 seconds). After every iteration the worker also
+reconciles runs whose extraction task failed for good, and text extractions whose task failed for good. The first Ctrl+C (or SIGTERM / Ctrl+Break) finishes the current task and
 exits; a second Ctrl+C interrupts at once, and an interrupted task is recovered after its lease
 expires. Handlers may run more than once. No payloads or results are printed or logged.
 """
@@ -22,12 +23,12 @@ from django.db import DatabaseError, connections
 
 from apps.tasks import worker
 from apps.tasks.policy import QueuePolicyError, validate_lease_seconds, validate_poll_seconds
-from config.task_registry import COMPOSITION, WorkerConfigurationError, prepare_worker  # the composition root: the one place the production allowlist is assembled
+from config.task_registry import COMPOSITION, WorkerConfigurationError, prepare_document_runtime, prepare_worker  # the composition root: the one place the production allowlist is assembled
 
 _log = logging.getLogger(__name__)
 
 _SIGNAL_NAMES = ("SIGINT", "SIGTERM", "SIGBREAK")  # SIGBREAK exists on Windows only
-_LOGGER_NAMES = ("apps.tasks", "apps.intake", "apps.ai_gateway")
+_LOGGER_NAMES = ("apps.tasks", "apps.intake", "apps.ai_gateway", "apps.document_text")
 
 
 @contextmanager
@@ -96,12 +97,14 @@ class Command(BaseCommand):
         worker.install_composition(COMPOSITION)
         try:
             description = prepare_worker(lease_seconds)  # AI-2a: the extraction mode is decided here, explicitly; a bad setting stops the start-up
+            document_description = prepare_document_runtime(lease_seconds)  # DOC-2: the document text extraction runtime; a bad setting stops the start-up
         except WorkerConfigurationError as error:
             raise CommandError(f"Extraction configuration error: {error}") from None
         worker_id = worker.make_worker_id()
         try:
             with console_logging():
                 _log.info("%s", description)  # the log, not the command's output: what --once and the loop print is unchanged
+                _log.info("%s", document_description)
                 if options["once"]:
                     self._run_once(worker_id, lease_seconds)
                 else:

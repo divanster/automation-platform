@@ -185,7 +185,9 @@ class ExistingBehaviorIsUnchangedTests(SimpleTestCase):
         from apps.intake.registry import PRODUCTION_REGISTRY
         from config.task_registry import COMPOSITION
 
-        self.assertIs(COMPOSITION.registry, PRODUCTION_REGISTRY)
+        self.assertEqual(dict(COMPOSITION.registry), {**PRODUCTION_REGISTRY, "documents.extract_text": COMPOSITION.registry["documents.extract_text"]})  # DOC-2 adds Core's one handler to Request Intake's registry
+        for kind, handler in PRODUCTION_REGISTRY.items():
+            self.assertIs(COMPOSITION.registry[kind], handler)
         self.assertEqual(set(PRODUCTION_REGISTRY), {"test.add_numbers", "request_intake.extract"})  # unchanged by MOD-2: the kind is a module's now, the handler is the same
         source = (BACKEND / "config" / "task_registry.py").read_text(encoding="utf-8")
         self.assertIn("from apps.intake.registry import PRODUCTION_REGISTRY", source)
@@ -197,7 +199,7 @@ class ExistingBehaviorIsUnchangedTests(SimpleTestCase):
     def test_installed_apps_gained_nothing(self):
         self.assertEqual(
             [a for a in settings.INSTALLED_APPS if a.startswith("apps.")],
-            ["apps.accounts", "apps.ai_settings", "apps.api", "apps.audit", "apps.cases", "apps.documents", "apps.health", "apps.intake", "apps.module_host", "apps.tasks"],
+            ["apps.accounts", "apps.ai_settings", "apps.api", "apps.audit", "apps.cases", "apps.document_text", "apps.documents", "apps.health", "apps.intake", "apps.module_host", "apps.tasks"],
         )
 
     def test_the_http_routes_are_the_ones_the_api_documents(self):

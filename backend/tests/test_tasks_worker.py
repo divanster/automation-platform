@@ -392,6 +392,11 @@ class RunWorkerCommandTests(SimpleTestCase):
         self.connections = patcher.start()
         self.addCleanup(patcher.stop)
         self.addCleanup(setattr, worker, "_composition", worker._composition)  # the command installs a composition
+        from apps.document_text import handlers as document_handlers
+        from config import task_registry
+
+        self.addCleanup(setattr, task_registry, "_held_kinds", task_registry._held_kinds)  # the command decides, per process, whether text extraction is held back (DOC-2)
+        self.addCleanup(document_handlers.install_runtime, document_handlers._runtime)
 
     def run_command(self, *args, **kwargs):
         out, err = io.StringIO(), io.StringIO()

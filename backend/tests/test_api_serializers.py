@@ -282,11 +282,15 @@ class ResponseSerializerTests(SimpleTestCase):
 
     def test_declared_response_fields_never_include_secret_like_names(self):
         banned = {"password", "canonical_bytes", "text", "payload", "result", "lease_token", "traceback", "source_text", "secret"}
+        # DOC-2: the extracted text of a document is returned by exactly one serializer, and only to a caller who may download the document (apps/api/views_document_text.py).
+        allowed = {"ExtractedPageOutput": {"text"}}
         for name in dir(s):
             cls = getattr(s, name)
             if isinstance(cls, type) and issubclass(cls, s.serializers.Serializer) and name.endswith("Output"):
                 with self.subTest(serializer=name):
-                    self.assertEqual(set(cls().fields) & banned, set())
+                    self.assertEqual(set(cls().fields) & (banned - allowed.get(name, set())), set())
+        outputs = [(name, getattr(s, name)) for name in dir(s) if name.endswith("Output") and isinstance(getattr(s, name), type) and issubclass(getattr(s, name), s.serializers.Serializer)]
+        self.assertEqual({name for name, cls in outputs if "text" in cls().fields}, {"ExtractedPageOutput"})  # and no other response carries text
 
     def test_warning_pairs_are_objects(self):
         self.assertEqual(s.PairField().to_representation(("duplicate_item", "items[1]")), {"code": "duplicate_item", "field_path": "items[1]"})

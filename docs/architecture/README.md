@@ -40,8 +40,8 @@ implementation plan for the Automation Platform.
    registry (MOD-1a, a foundation with no registered module), the persistent module state, sync and
    enable/disable and the worker gate (MOD-1b / S4, pushed; owner-run PostgreSQL validation passed for the tested scenarios), trust boundaries, and the
    future lifecycle and update-manager requirements.
-10. [document-storage.md](document-storage.md): DOC-1, secure PDF upload, managed storage, the document API, its authorization and audit
-    (implemented on a branch, DB-free validated in the VM only; PostgreSQL tests written and not run; no AI, OCR, extraction or UI).
+10. [document-storage.md](document-storage.md): DOC-1, secure PDF upload, managed storage, the document API, its authorization and audit; DOC-2 (section 11), deterministic PDF text extraction in the worker
+    (DOC-1 merged; DOC-2 implemented on a branch; both DB-free validated in the VM only; PostgreSQL tests written and not run; no OCR, no AI use of documents and no UI).
 
 What currently exists and how to run it: [../development/runbook.md](../development/runbook.md).
 

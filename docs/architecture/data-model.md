@@ -155,6 +155,9 @@ AuditEvent * --- 0..1 Case / WorkflowRun / other subject
   (only `uploaded` is ever set). It is **Core's, not a module's**, has **no case link yet** and **no `(case, SHA-256)` uniqueness or duplicate
   policy** (the same bytes uploaded twice are two documents), and no retention or deletion. The bytes are in a managed storage directory, never in
   PostgreSQL. Immutability of the metadata (except the processing state) is at the ORM and service boundary only.
+- **Built so far (DOC-2, [document-storage.md](document-storage.md) section 11):** `document_text.TextExtraction` (one request, with its queue task), `TextExtractionResult` (its one outcome: status,
+  code, extractor name and version, counts, the document's SHA-256 and the text hash) and `TextExtractionPage` (the extracted text of one page). Append-only at the ORM level; a new extraction is a new row and the
+  history stays. Core's, not a module's; the extracted text is in PostgreSQL in plaintext; `Document.processing_state` is not touched.
 
 ### WorkflowDefinition
 
@@ -315,7 +318,8 @@ AuditEvent * --- 0..1 Case / WorkflowRun / other subject
   `rejection.recorded`, written in the transaction of the operation they describe. Append-only at the ORM and
   service boundary only: no trigger, no restricted database role, no hash chain. The `details` values are
   restricted to booleans, integers, null and short tokens. DOC-1 adds `document.uploaded` and `document.downloaded` (subject type `document`; details
-  `byte_length`, `content_hash` and, for a download, `by_owner`; never a file name, path or content; [document-storage.md](document-storage.md)).
+  `byte_length`, `content_hash` and, for a download, `by_owner`; never a file name, path or content; [document-storage.md](document-storage.md)). DOC-2 adds `document.text_requested`,
+  `document.text_extracted` and `document.text_read` (same subject type; identifiers, counts, a status, a code, a text hash and a library version only: never extracted text).
   Not recorded yet: `export.created`, `task.failed`, and refused attempts.
 
 ### ModelProfile
