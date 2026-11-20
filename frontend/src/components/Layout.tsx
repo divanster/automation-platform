@@ -18,7 +18,7 @@ const WIDE_QUERY = "(min-width: 900px)"; // keep in step with the 900px breakpoi
  * focus returns to the button that opened it.
  */
 export function Layout() {
-  const { state, logout, can } = useAuth();
+  const { state, logout, can, isAdministrator } = useAuth();
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -79,6 +79,7 @@ export function Layout() {
       <Sidebar
         id={SIDEBAR_ID}
         can={can}
+        isAdministrator={isAdministrator}
         collapsed={collapsed}
         onToggleCollapse={() => setCollapsed((v) => !v)}
         onNavigate={() => {

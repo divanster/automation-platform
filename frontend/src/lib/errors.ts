@@ -42,6 +42,8 @@ const MESSAGES: Record<string, string> = {
   self_approval_forbidden: "You cannot approve a request that you submitted or edited.",
   warnings_not_acknowledged: "The warnings changed. Review the current warnings and acknowledge them again.",
   unknown_warning_acknowledged: "The warnings changed. Review the current warnings and acknowledge them again.",
+  // AI settings
+  stale_settings_revision: "The AI settings were changed by someone else after you opened them, so nothing was saved.",
   draft_invalid: "The draft has blocking findings and was not saved. Nothing was changed.",
   draft_not_serializable: "A value in the draft cannot be saved.",
 };
@@ -63,6 +65,10 @@ const OUT_OF_DATE_CODES: ReadonlySet<string> = new Set([
 
 export function isOutOfDate(error: unknown): boolean {
   return error instanceof ApiError && OUT_OF_DATE_CODES.has(error.code);
+}
+
+export function isStaleSettings(error: unknown): boolean {
+  return error instanceof ApiError && error.code === "stale_settings_revision";
 }
 
 export function isStaleRevision(error: unknown): boolean {

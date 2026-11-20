@@ -27,6 +27,8 @@ interface AuthContextValue {
   retry(): void;
   /** UI hint only: the backend re-checks every permission on every call. */
   can(permission: string): boolean;
+  /** UI hint only: the AI settings endpoints answer 403 to anyone who is not a superuser, whatever this says. */
+  isAdministrator: boolean;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -89,6 +91,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logout,
       retry,
       can: (permission) => state.status === "authenticated" && state.user.permissions.includes(permission),
+      isAdministrator: state.status === "authenticated" && state.user.is_superuser,
     }),
     [state, login, logout, retry],
   );
