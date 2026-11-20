@@ -39,7 +39,12 @@ ACTION_AI_SETTINGS_UPDATED = "ai_settings.updated"
 # AI-SET-2: one event per connection a save created, changed or removed (``change``: ``created``, ``updated`` or ``removed``), in the same transaction as the save. Core's own
 # action in the same Core-reserved namespace. It carries identifiers, flags and counts only: never an endpoint, a credential reference or a display name.
 ACTION_AI_SETTINGS_CONNECTION_CHANGED = "ai_settings.connection_changed"
-
+# AI-SEC-2: the managed AI credential API (apps.ai_credentials) creates, replaces or deletes a secret in the secret store. Core's own actions in the Core-reserved ``ai_credential``
+# namespace; no module can declare them. The subject is an opaque id derived from the credential reference (``apps.ai_credentials.rules.credential_subject_id``); no event carries a
+# secret, a reference name or a path.
+ACTION_AI_CREDENTIAL_CREATED = "ai_credential.created"
+ACTION_AI_CREDENTIAL_REPLACED = "ai_credential.replaced"
+ACTION_AI_CREDENTIAL_DELETED = "ai_credential.deleted"
 ACTIONS = (
     ACTION_REQUEST_SUBMITTED,
     ACTION_REVISION_CREATED,
@@ -52,6 +57,9 @@ ACTIONS = (
     ACTION_MODULE_DISABLED,
     ACTION_AI_SETTINGS_UPDATED,
     ACTION_AI_SETTINGS_CONNECTION_CHANGED,
+    ACTION_AI_CREDENTIAL_CREATED,
+    ACTION_AI_CREDENTIAL_REPLACED,
+    ACTION_AI_CREDENTIAL_DELETED,
 )
 
 SUBJECT_RUN = "run"
@@ -82,7 +90,11 @@ DETAIL_KEYS = MappingProxyType(
         # the saved settings as identifiers and numbers only: never a key, header, endpoint, proxy or free text (every value was checked against the catalog).
         # ``connection_id`` is the selected connection (null: the legacy provider); ``connection_count`` and ``connections_changed`` describe the stored list.
         ACTION_AI_SETTINGS_UPDATED: frozenset({"revision", "extraction_mode", "provider_id", "profile_id", "policy_mode", "timeout_seconds", "connection_id", "connection_count", "connections_changed"}),
-        ACTION_AI_SETTINGS_CONNECTION_CHANGED: frozenset({"revision", "change", "connection_id", "provider_type", "locality", "enabled", "has_credential_ref", "profile_count"}),
+        ACTION_AI_SETTINGS_CONNECTION_CHANGED: frozenset({"revision", "change", "connection_id", "provider_type", "locality", "enabled", "has_credential_ref", "credential_source", "profile_count"}),
+        # ``store`` is the secret store backend's identifier (a fixed token such as ``windows_dpapi``); there is no value, no reference name and no path
+        ACTION_AI_CREDENTIAL_CREATED: frozenset({"store"}),
+        ACTION_AI_CREDENTIAL_REPLACED: frozenset({"store"}),
+        ACTION_AI_CREDENTIAL_DELETED: frozenset({"store"}),
     }
 )
 

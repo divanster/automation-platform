@@ -550,5 +550,34 @@ class WindowsRestoreTests(WindowsHardeningCase):
         self.assertEqual(code_of(self, self.store.get, REF_A), CODE_UNREADABLE)
 
 
+class WindowsExpectedIdentityTests(WindowsHardeningCase):
+    """AI-SEC-2: the operator can pin the ONE SID Django and the worker must run as; a process under any other account fails closed."""
+
+    def test_a_pinned_identity_accepts_exactly_that_sid(self):
+        sid = self.policy.current_user_sid()
+        WindowsDirectoryPolicy(expected_identity_sid=sid).verify(self.directory)
+        store = WindowsDpapiSecretStore(self.directory, expected_identity_sid=sid)
+        store.put(REF_A, SECRET_A)
+        self.assertEqual(store.get(REF_A).reveal(), SECRET_A)
+
+    def test_any_other_pinned_sid_fails_closed_everywhere_and_creates_nothing(self):
+        before = self.names(self.base)
+        self.assertEqual(code_of(self, WindowsDirectoryPolicy, expected_identity_sid=OTHER), CODE_UNAVAILABLE)
+        self.assertEqual(code_of(self, WindowsDpapiSecretStore, self.directory, expected_identity_sid=OTHER), CODE_UNAVAILABLE)
+        self.assertEqual(code_of(self, prepare_windows_secret_directory, os.path.join(self.base, "fresh"), expected_identity_sid=OTHER), CODE_UNAVAILABLE)
+        self.assertEqual(self.names(self.base), before)
+
+    def test_a_pin_that_is_not_a_sid_fails_closed(self):
+        for bad in ("SY", "", 5, "S-1-5-18 ", ["S-1-5-18"]):
+            self.assertEqual(code_of(self, WindowsDpapiSecretStore, self.directory, expected_identity_sid=bad), CODE_UNAVAILABLE, bad)
+
+    def test_the_pin_follows_the_identity_a_thread_has_not_a_cached_one(self):
+        sid = self.policy.current_user_sid()
+        policy = WindowsDirectoryPolicy(expected_identity_sid=sid)
+        with mock.patch.object(WindowsDirectoryPolicy, "current_user_sid", return_value=OTHER):
+            self.assertEqual(code_of(self, policy.verify, self.directory), CODE_UNAVAILABLE)
+        policy.verify(self.directory)
+
+
 if __name__ == "__main__":
     unittest.main()

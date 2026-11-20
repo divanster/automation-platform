@@ -23,6 +23,8 @@ from .values import SecretValue, as_secret, validate_reference
 
 
 class SecretStore(ABC):
+    backend_id = "custom"  # a fixed token naming the backend (audit events record it); a backend overrides it
+
     def put(self, reference, value, *, replace: bool = False) -> None:
         reference = validate_reference(reference)
         secret = as_secret(value)
@@ -78,6 +80,8 @@ class SecretStore(ABC):
 class DisabledSecretStore(SecretStore):
     """The safe default: every operation, including ``exists``, fails with ``secret_store_disabled``. It stores nothing and reads nothing, so a feature that needs a secret
     stops instead of continuing without one."""
+
+    backend_id = "disabled"
 
     def _put(self, reference, secret, replace):
         raise SecretStoreError(CODE_DISABLED)

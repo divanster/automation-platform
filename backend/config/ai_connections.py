@@ -34,6 +34,7 @@ from apps.ai_settings.rules import (
     CREDENTIAL_NONE,
     CREDENTIAL_OPTIONAL,
     CREDENTIAL_REQUIRED_UNLESS_LOCAL,
+    CREDENTIAL_SOURCE_MANAGED,
     ISSUE_ENDPOINT_NOT_APPROVED,
     ISSUE_INVALID_CONFIGURATION,
     ISSUE_MISSING_API_KEY,
@@ -44,8 +45,10 @@ from apps.ai_settings.rules import (
     ProviderTypeEntry,
     is_credential_ref,
 )
+from apps.secret_store import CODE_NOT_FOUND, SecretStoreError
 
 from config import ai_ollama, ai_openai_compatible, ai_workbench
+from config.secret_store import build_secret_store
 
 TYPE_WORKBENCH = workbench.PROVIDER_ID
 TYPE_OPENAI_COMPATIBLE = openai_compatible.PROVIDER_ID
@@ -96,6 +99,30 @@ def resolve_credential(reference, environ) -> str | None:
     return value
 
 
+def resolve_managed_credential(reference, store) -> str:
+    """The secret stored under ``reference`` in the secret store ``store``. Backend only. The environment is NEVER consulted: a managed credential that is not stored, or whose store
+    cannot answer (disabled, unavailable, busy, unreadable for this Windows identity), is an error, not a lookup anywhere else. The messages name no reference, path or value."""
+    if not is_credential_ref(reference):
+        raise configuration_error("invalid_credential_reference", "The credential reference of the connection is not valid.")
+    try:
+        return store.get(reference).reveal()
+    except SecretStoreError as error:
+        if error.code == CODE_NOT_FOUND:
+            raise configuration_error("missing_credential_reference", "The managed credential of the connection is not stored.") from None
+        raise configuration_error("credential_store_unavailable", "The secret store cannot supply the managed credential of the connection.") from None
+
+
+def _managed_key(connection: ConnectionValues, env, secret_store):
+    """The key of a MANAGED connection, from the secret store (``secret_store``, or the one this process is configured for)."""
+    if connection.credential_ref is None:
+        raise configuration_error("missing_credential_reference", "The managed credential of the connection has no reference.")
+    try:
+        store = build_secret_store(env) if secret_store is None else secret_store
+    except SecretStoreError:
+        raise configuration_error("credential_store_unavailable", "The secret store cannot supply the managed credential of the connection.") from None
+    return resolve_managed_credential(connection.credential_ref, store)
+
+
 def _origins_for(environ, name, locality: DataLocality, networks_name=None) -> str:
     """The operator's approved origins that suit ``locality``, as the comma-separated text the loader reads. It can only DROP an origin (one that is not valid for this locality);
     it never adds, rewrites or infers one. A malformed origin is still an error (the parser raises)."""
@@ -116,14 +143,19 @@ def _origins_for(environ, name, locality: DataLocality, networks_name=None) -> s
     return ",".join(kept)
 
 
-def connection_environ(connection: ConnectionValues, model_id: str, environ=None) -> dict:
+def connection_environ(connection: ConnectionValues, model_id: str, environ=None, *, secret_store=None) -> dict:
     """A COPY of the environment in which ``connection``'s values replace the provider's single-connection variables. The process environment is never modified.
 
-    The key of a connection comes from its credential reference only: an ``AP_AI_OPENAI_API_KEY`` in the environment is never used for a stored connection. For a
+    The key of a connection comes from ONE source, the one the connection names: an ``environment`` connection reads the variable its credential reference names and never the secret
+    store; a ``managed`` one reads the secret store under that reference and never the environment (an ``AP_AI_OPENAI_API_KEY`` or ``AP_AI_WORKBENCH_API_KEY`` in the environment is
+    replaced by the managed key, and a missing managed key is an error). For a
     local OpenAI-compatible connection the company CIDRs and the proxy are dropped (they do not apply to a loopback endpoint); for a company or cloud one the origins are
     reduced to those that suit its locality. The Ollama variables that exist (origins, limits, structured output) are the operator's, as is a refused proxy."""
     env = dict(os.environ if environ is None else environ)
-    key = resolve_credential(connection.credential_ref, env)
+    if connection.credential_source == CREDENTIAL_SOURCE_MANAGED:
+        key = _managed_key(connection, env, secret_store)
+    else:
+        key = resolve_credential(connection.credential_ref, env)
     kind = connection.provider_type
     if kind == TYPE_WORKBENCH:
         if key is not None:
@@ -150,8 +182,8 @@ def connection_environ(connection: ConnectionValues, model_id: str, environ=None
     return env
 
 
-def _load_settings(connection: ConnectionValues, model_id: str, environ):
-    env = connection_environ(connection, model_id, environ)
+def _load_settings(connection: ConnectionValues, model_id: str, environ, secret_store=None):
+    env = connection_environ(connection, model_id, environ, secret_store=secret_store)
     if connection.provider_type == TYPE_WORKBENCH:
         return ai_workbench.load_workbench_settings(env)
     if connection.provider_type == TYPE_OPENAI_COMPATIBLE:
@@ -159,20 +191,21 @@ def _load_settings(connection: ConnectionValues, model_id: str, environ):
     return ai_ollama.load_ollama_settings(env)
 
 
-def build_connection_gateway(connection: ConnectionValues, profile_id: str, environ=None, *, transport: HttpTransport | None = None) -> AIGateway:
+def build_connection_gateway(connection: ConnectionValues, profile_id: str, environ=None, *, transport: HttpTransport | None = None, secret_store=None) -> AIGateway:
     """A gateway whose only provider is ``connection`` and whose only profile is ``profile_id``. Raises ``AIGatewayError('configuration_error')`` naming a field, never a value.
-    Opens no connection and makes no network call; ``transport`` is for tests (otherwise the provider's own real, guarded transport is built)."""
+    Opens no connection and makes no network call; ``transport`` is for tests (otherwise the provider's own real, guarded transport is built). ``secret_store`` is for tests: a
+    managed connection otherwise reads the store this process is configured for (``config/secret_store.py``)."""
     selected = connection.profile(profile_id)
     if selected is None:
         raise configuration_error("unknown_profile", "The connection has no such profile.")
     kind = connection.provider_type
     if kind == TYPE_WORKBENCH:
-        env = connection_environ(connection, selected.model_id, environ)
+        env = connection_environ(connection, selected.model_id, environ, secret_store=secret_store)
         gateway = ai_workbench.build_workbench_gateway(env, transport=transport)
         if gateway.profile(profile_id).model_id != selected.model_id:
             raise configuration_error("profile_model_mismatch", "The profile's model is not the connection's.")
         return gateway
-    settings = _load_settings(connection, selected.model_id, environ)
+    settings = _load_settings(connection, selected.model_id, environ, secret_store)
     if kind == TYPE_OPENAI_COMPATIBLE:
         transport = ai_openai_compatible.build_openai_compatible_transport(settings) if transport is None else transport
         provider = openai_compatible.OpenAICompatibleProvider(settings.config, transport)
@@ -197,12 +230,12 @@ def _issue_of(error: AIGatewayError) -> str:
     return ISSUE_INVALID_CONFIGURATION
 
 
-def connection_status(connection: ConnectionValues, environ=None) -> ProviderStatus:
-    """Whether ``connection`` is usable in THIS process: a fixed code, never a value, a name or a message. Reads the environment (and so any credential variable, only to test that
-    it is set and acceptable); makes no network call and builds no transport."""
+def connection_status(connection: ConnectionValues, environ=None, secret_store=None) -> ProviderStatus:
+    """Whether ``connection`` is usable in THIS process: a fixed code, never a value, a name or a message. Reads the environment, or for a managed connection the secret store (the
+    credential only to test that it can be read); makes no network call and builds no transport."""
     model_id = connection.profiles[0].model_id if connection.profiles else _PROBE_MODEL
     try:
-        _load_settings(connection, model_id, environ)
+        _load_settings(connection, model_id, environ, secret_store)
     except AIGatewayError as error:
         return ProviderStatus(False, _issue_of(error))
     return ProviderStatus(True)

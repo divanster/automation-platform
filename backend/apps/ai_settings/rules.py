@@ -43,12 +43,18 @@ ISSUE_INVALID_CONFIGURATION = "invalid_configuration"
 ISSUE_ENDPOINT_NOT_APPROVED = "endpoint_not_approved"  # the endpoint's origin is not in the operator's approved-origin list of this process
 PROVIDER_ISSUES = (ISSUE_MISSING_API_KEY, ISSUE_INVALID_CONFIGURATION, ISSUE_ENDPOINT_NOT_APPROVED)
 
-CONNECTION_FIELDS = ("connection_id", "display_name", "provider_type", "locality", "endpoint", "credential_ref", "enabled", "profiles")
+CONNECTION_FIELDS = ("connection_id", "display_name", "provider_type", "locality", "endpoint", "credential_ref", "credential_source", "enabled", "profiles")
 PROFILE_FIELDS = ("profile_id", "model_id")
 MAX_CONNECTIONS = 10
 MAX_PROFILES_PER_CONNECTION = 10
 MAX_ENDPOINT_LENGTH = 512
 CREDENTIAL_REF_PREFIX = "AP_AI_CRED_"  # a reference may name only a variable with this prefix, so it can never name DJANGO_SECRET_KEY, a database password or another provider's key
+# WHERE the credential named by ``credential_ref`` is read from, chosen explicitly per connection (AI-SEC-2): ``environment`` (the default, and what every connection stored before this field
+# meant) reads the backend process environment variable of that name; ``managed`` reads the secret store (``apps.secret_store``) under that reference. A connection reads from ONE source and
+# never from the other: a managed credential that is missing is an error, not a lookup in the environment, and the reverse.
+CREDENTIAL_SOURCE_ENVIRONMENT = "environment"
+CREDENTIAL_SOURCE_MANAGED = "managed"
+CREDENTIAL_SOURCES = (CREDENTIAL_SOURCE_ENVIRONMENT, CREDENTIAL_SOURCE_MANAGED)
 
 _CONNECTION_ID = re.compile(r"[a-z][a-z0-9_-]{0,47}")
 _PROFILE_ID = re.compile(r"[a-z][a-z0-9_-]{0,63}")
@@ -140,7 +146,8 @@ class ProfileValues:
 
 @dataclass(frozen=True)
 class ConnectionValues:
-    """One named connection as stored. No field holds a credential: ``credential_ref`` is the NAME of a backend environment variable."""
+    """One named connection as stored. No field holds a credential: ``credential_ref`` is the NAME of the credential (a backend environment variable, or a reference in the secret store,
+    as ``credential_source`` says), never its value."""
 
     connection_id: str
     display_name: str
@@ -150,6 +157,7 @@ class ConnectionValues:
     credential_ref: str | None
     enabled: bool
     profiles: tuple
+    credential_source: str = CREDENTIAL_SOURCE_ENVIRONMENT
 
     def as_mapping(self) -> dict:
         return {
@@ -159,6 +167,7 @@ class ConnectionValues:
             "locality": self.locality,
             "endpoint": self.endpoint,
             "credential_ref": self.credential_ref,
+            "credential_source": self.credential_source,
             "enabled": self.enabled,
             "profiles": [{"profile_id": p.profile_id, "model_id": p.model_id} for p in self.profiles],
         }
@@ -229,6 +238,10 @@ def _structure(raw):
         add("endpoint", "invalid_value")
         endpoint = None
     credential_ref = text("credential_ref", _CREDENTIAL_REF, required=False)
+    credential_source = raw.get("credential_source", CREDENTIAL_SOURCE_ENVIRONMENT)  # absent: the environment, which is what every connection stored before this field meant
+    if credential_source not in CREDENTIAL_SOURCES:
+        add("credential_source", "invalid_value")
+        credential_source = CREDENTIAL_SOURCE_ENVIRONMENT
     enabled = raw.get("enabled")
     if not isinstance(enabled, bool):
         add("enabled", "required" if enabled is None else "invalid_value")
@@ -265,7 +278,7 @@ def _structure(raw):
                 profiles.append(ProfileValues(profile_id, model_id))
     if errors:
         return None, errors
-    return ConnectionValues(connection_id, display_name, provider_type, locality, endpoint, credential_ref, enabled, tuple(profiles)), {}
+    return ConnectionValues(connection_id, display_name, provider_type, locality, endpoint, credential_ref, enabled, tuple(profiles), credential_source), {}
 
 
 def parse_stored_connection(raw) -> ConnectionValues | None:
@@ -302,6 +315,11 @@ def connection_problems(connection: ConnectionValues, catalog: ExtractionCatalog
             add("credential_ref", "not_allowed")
     elif entry.credential == CREDENTIAL_REQUIRED_UNLESS_LOCAL and connection.credential_ref is None and connection.locality != "local":
         add("credential_ref", "required")
+    if connection.credential_source == CREDENTIAL_SOURCE_MANAGED:
+        if entry.credential == CREDENTIAL_NONE:
+            add("credential_source", "not_allowed")
+        elif connection.credential_ref is None:
+            add("credential_ref", "required")  # a managed credential is read by its reference: without one there is nothing to read, and nothing else is tried
     if not connection.profiles:
         add("profiles", "required")
     for index, profile in enumerate(connection.profiles):

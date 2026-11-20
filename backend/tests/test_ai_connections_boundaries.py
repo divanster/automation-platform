@@ -38,7 +38,7 @@ class SettingsAppStaysPureTests(SimpleTestCase):
     def test_the_only_credential_field_of_a_connection_is_a_reference_name(self):
         from apps.ai_settings.rules import CONNECTION_FIELDS
 
-        self.assertEqual([name for name in CONNECTION_FIELDS if "credential" in name], ["credential_ref"])
+        self.assertEqual([name for name in CONNECTION_FIELDS if "credential" in name], ["credential_ref", "credential_source"])  # the NAME of a credential and where it is read from; never a value
 
     def test_the_rules_stay_pure_standard_library(self):
         allowed = {"dataclasses", "re", "typing", "collections.abc", "__future__", ".errors", "enum", "math"}

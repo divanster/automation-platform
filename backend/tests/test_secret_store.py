@@ -101,7 +101,7 @@ class InterfaceContractTests(unittest.TestCase):
 
     def test_the_interface_is_exactly_put_get_delete_exists(self):
         public = {name for name in vars(SecretStore) if not name.startswith("_")}
-        self.assertEqual(public, {"put", "get", "delete", "exists"})
+        self.assertEqual(public, {"put", "get", "delete", "exists", "backend_id"})  # backend_id: a fixed token naming the backend, recorded by audit events
 
     def test_put_then_get_round_trips_as_a_secret_value(self):
         store = self.make_store()
@@ -409,16 +409,23 @@ class BoundaryTests(unittest.TestCase):
     def test_the_package_is_not_an_installed_app_and_has_no_models_or_migrations(self):
         self.assertEqual({path.name for path in PACKAGE.iterdir() if path.is_file() or path.is_dir()} - {"__pycache__"}, {"__init__.py", "errors.py", "store.py", "values.py"})
 
-    def test_nothing_else_in_the_application_imports_it_yet_except_the_windows_dpapi_backend(self):
+    def test_only_the_composition_roots_the_dpapi_backend_and_the_credential_service_import_the_store(self):
         backend = PACKAGE.parent.parent
-        offenders = []
+        importers = set()
         for root in (backend / "apps", backend / "config"):
             for path in root.rglob("*.py"):
-                if PACKAGE in path.parents:
+                if PACKAGE in path.parents or "migrations" in path.parts:
                     continue
-                if "secret_store" in path.read_text(encoding="utf-8"):
-                    offenders.append(path.relative_to(backend).as_posix())
-        self.assertEqual(offenders, ["config/secret_store_dpapi.py"])  # AI-SEC-1b: the backend only; no setting, API, provider or intake code uses a secret store yet
+                for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                    names = [alias.name for alias in node.names] if isinstance(node, ast.Import) else [node.module or ""] if isinstance(node, ast.ImportFrom) and node.level == 0 else []
+                    if any(name == "apps.secret_store" or name.startswith(("apps.secret_store.", "config.secret_store")) for name in names):
+                        importers.add(path.relative_to(backend).as_posix())
+        # AI-SEC-2: the backend itself, the composition that chooses a store, the connection composition that reads a managed key, the credential service and the route wiring.
+        # No settings rule, API view, provider adapter, Request Intake code or worker command imports a store.
+        self.assertEqual(
+            importers,
+            {"config/secret_store_dpapi.py", "config/secret_store.py", "config/ai_connections.py", "apps/ai_credentials/services.py", "config/urls.py"},
+        )
 
 
 if __name__ == "__main__":

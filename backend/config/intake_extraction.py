@@ -241,6 +241,7 @@ def build_extractor_source(
     lease_seconds: int | None = None,
     transport: HttpTransport | None = None,
     stored=None,
+    secret_store=None,
 ) -> IntakeExtractorSource:
     """The extractor source for this process, or ``ExtractionConfigurationError``. Opens no connection and makes no network call.
 
@@ -253,6 +254,10 @@ def build_extractor_source(
     it the module's state could not be re-checked before sending, so it is refused) and builds the Workbench gateway from ``AP_AI_WORKBENCH_*``
     (``transport`` is for tests; the real, TLS-verifying one is built by default). It then checks, at start-up, that the profile is approved for this
     workflow, that the data policy permits its provider, and (with ``lease_seconds``) that the lease covers the call deadline.
+
+    MANAGED CREDENTIALS (AI-SEC-2). A selected connection whose ``credential_source`` is ``managed`` has its key read HERE, once, from the secret store this process is configured for
+    (``config/secret_store.py``; ``secret_store`` is for tests): a credential that is missing, a store that is disabled, unavailable or busy, or one this process's Windows identity cannot
+    read stops the worker at start-up. The environment is not consulted for it and nothing else is tried. A credential changed later reaches this process only when it is restarted.
     """
     environ = os.environ if environ is None else environ
     settings = load_intake_extraction_settings(environ) if stored is None else settings_from_stored(stored)
@@ -265,7 +270,7 @@ def build_extractor_source(
         if settings.connection is not None:
             profile_id = settings.profile_id
             connection = settings.connection
-            gateway = ai_connections.build_connection_gateway(connection, profile_id, environ, transport=transport)
+            gateway = ai_connections.build_connection_gateway(connection, profile_id, environ, transport=transport, secret_store=secret_store)
             profile = gateway.profile(profile_id)
             policy = ai_connections.policy_for(connection, settings.policy_mode)
             provider_id, locality = connection.provider_type, DataLocality(connection.locality)

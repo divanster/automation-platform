@@ -588,9 +588,10 @@ class WindowsDirectoryPolicy(DirectoryPolicy):
     virtual service account, or a SID the operator listed in ``approved_identity_sids`` (for LocalSystem ``S-1-5-18``, LocalService ``S-1-5-19``, NetworkService ``S-1-5-20``). Anything else
     fails closed, at construction and again on every check."""
 
-    def __init__(self, approved_identity_sids=()):
+    def __init__(self, approved_identity_sids=(), expected_identity_sid=None):
         self._api = _windows_api()
         self._approved = normalize_approved_sids(approved_identity_sids)
+        self._expected = None if expected_identity_sid is None else next(iter(normalize_approved_sids([expected_identity_sid])))  # a pinned SID, or fail closed
         self.identity()
 
     def _location(self, path: str) -> None:
@@ -631,9 +632,10 @@ class WindowsDirectoryPolicy(DirectoryPolicy):
             api.kernel32.LocalFree(sid)
 
     def identity(self) -> str:
-        """The current identity's SID, after checking that it is supported."""
+        """The current identity's SID, after checking that it is supported and, when the operator pinned one, that it is exactly that SID (so Django and the worker can be made to run as the
+        one intended account: a process running as any other fails closed)."""
         sid = self.current_user_sid()
-        if not identity_supported(sid, self._approved):
+        if not identity_supported(sid, self._approved) or (self._expected is not None and sid != self._expected):
             raise SecretStoreError(CODE_UNAVAILABLE)
         return sid
 
@@ -759,18 +761,22 @@ class WindowsDpapiSecretStore(EncryptedFileSecretStore):
     explicitly allows this process to run as (``S-1-5-18`` LocalSystem, ``S-1-5-19`` LocalService, ``S-1-5-20`` NetworkService); the default is none, and any other identity that is not an
     ordinary, Azure AD or virtual service account fails closed."""
 
-    def __init__(self, directory, *, timeout: float = DEFAULT_TIMEOUT_SECONDS, approved_identity_sids=()):
-        super().__init__(directory, WindowsDpapiProtector(), WindowsDirectoryPolicy(approved_identity_sids), WindowsFileLocker(), timeout=timeout)
+    backend_id = "windows_dpapi"
+
+    def __init__(self, directory, *, timeout: float = DEFAULT_TIMEOUT_SECONDS, approved_identity_sids=(), expected_identity_sid=None):
+        super().__init__(
+            directory, WindowsDpapiProtector(), WindowsDirectoryPolicy(approved_identity_sids, expected_identity_sid), WindowsFileLocker(), timeout=timeout
+        )  # fmt: skip
 
 
-def prepare_windows_secret_directory(directory, *, approved_identity_sids=()) -> None:
+def prepare_windows_secret_directory(directory, *, approved_identity_sids=(), expected_identity_sid=None) -> None:
     """Explicit, operator-run set-up, all or nothing.
 
     The identity is validated and the location checked BEFORE anything is created, so a refusal leaves no directory. A missing directory is created (its parent must exist and be free of links)
     with a protected DACL for the current identity alone, then verified; if that verification fails the directory just created is removed. An EXISTING directory is never changed and never adopted
     unless it is already trusted (trusted owner, protected restrictive ACL, no links in its path) and holds nothing but this store's own files."""
     path = checked_directory(directory)
-    policy = WindowsDirectoryPolicy(approved_identity_sids)
+    policy = WindowsDirectoryPolicy(approved_identity_sids, expected_identity_sid)
     if os.path.lexists(path):
         reject_links(path)
         policy.verify(path)
