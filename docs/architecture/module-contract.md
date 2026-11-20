@@ -184,7 +184,7 @@ metadata; registering handlers with the worker is MOD-2.
 A capability is a named thing a module needs from Core or from another module. **Core provides today** (each backed by existing
 code, or in the case of `permissions.check` the authorization services): `task.enqueue`, `case.run`, `audit.record`,
 `revision.approval`, `permissions.check`. **Planned, not built** (requiring one is refused with
-`capability_not_yet_available`): `documents.read`, `ai.invoke`, `secrets.resolve`. A module may provide capabilities in its own
+`capability_not_yet_available`): `documents.read`, `ai.invoke`, `secrets.resolve`. (DOC-1 built document storage as a **Core** capability, [document-storage.md](document-storage.md); it grants no module any access, so `documents.read` stays planned.) A module may provide capabilities in its own
 namespaces.
 
 **Owner decision: strict direct capability dependencies.** A module that requires a capability provided by another module must

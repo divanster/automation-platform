@@ -15,7 +15,8 @@ application services (``apps.intake.review``) check the scope again against the 
 
 The permission codenames are declared on ``apps.intake.models.RequestSource`` (Django creates a permission
 only for a model) and ``audit.view_auditevent`` is Django's own view permission for the audit model; a test
-compares this module with those declarations so the two cannot drift apart.
+compares this module with those declarations so the two cannot drift apart. The document permissions (DOC-1)
+are a second, separate matrix declared on ``apps.documents.models.Document`` (see below).
 
 These role definitions are INITIAL DEVELOPMENT POLICY (docs/development/review-services-slice.md); the
 architecture's role model is still "to be confirmed" (data-model.md, open question 2.3).
@@ -50,6 +51,33 @@ ROLE_PERMISSIONS = MappingProxyType(
         AUDITOR: frozenset({PERM_VIEW_ANY, PERM_VIEW_AUDIT}),
     }
 )
+
+# DOC-1: Core's document permissions, declared on ``apps.documents.models.Document``. They are a SEPARATE matrix on purpose: ``ALL_PERMISSIONS`` and ``ROLE_PERMISSIONS`` above are the Request Intake
+# matrix that the derivation from module manifests is pinned to, and documents are Core's, not a module's. The same own / any scope is in the name. Reading a document's metadata and
+# downloading its original bytes are separate permissions. ``granted_permissions`` is what ``setup_roles`` gives a role: both matrices.
+PERM_DOC_UPLOAD = "documents.upload_document"
+PERM_DOC_VIEW_OWN = "documents.view_own_document"
+PERM_DOC_VIEW_ANY = "documents.view_any_document"
+PERM_DOC_DOWNLOAD_OWN = "documents.download_own_document"
+PERM_DOC_DOWNLOAD_ANY = "documents.download_any_document"
+
+DOCUMENT_PERMISSIONS = frozenset({PERM_DOC_UPLOAD, PERM_DOC_VIEW_OWN, PERM_DOC_VIEW_ANY, PERM_DOC_DOWNLOAD_OWN, PERM_DOC_DOWNLOAD_ANY})
+
+DOCUMENT_ROLE_PERMISSIONS = MappingProxyType(
+    {
+        # Upload, view and download their own documents.
+        OPERATOR: frozenset({PERM_DOC_UPLOAD, PERM_DOC_VIEW_OWN, PERM_DOC_DOWNLOAD_OWN}),
+        # View and download any document (to check a draft against its source). Cannot upload.
+        APPROVER: frozenset({PERM_DOC_VIEW_ANY, PERM_DOC_DOWNLOAD_ANY}),
+        # Read only: any document's metadata; no download of the original content.
+        AUDITOR: frozenset({PERM_DOC_VIEW_ANY}),
+    }
+)
+
+
+def granted_permissions(role: str) -> frozenset:
+    """Every permission ``setup_roles`` gives ``role``: the request matrix plus the document matrix."""
+    return ROLE_PERMISSIONS[role] | DOCUMENT_ROLE_PERMISSIONS[role]
 
 
 def split_permission(name: str) -> tuple[str, str]:

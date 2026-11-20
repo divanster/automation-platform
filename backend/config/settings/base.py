@@ -24,6 +24,7 @@ INSTALLED_APPS = [
     "apps.api",
     "apps.audit",
     "apps.cases",
+    "apps.documents",
     "apps.health",
     "apps.intake",
     "apps.module_host",
@@ -105,6 +106,12 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 
+# No document or other upload ever reaches a temporary file outside the managed storage directory (DOC-1, docs/architecture/document-storage.md). Django's default handlers stage a file
+# part larger than FILE_UPLOAD_MAX_MEMORY_SIZE in the system temporary directory, and that happens before any view runs (DRF's CSRF check parses a form body). So ONLY the in-memory handler
+# is installed, with a small bound: a multipart request larger than the bound has its file parts DISCARDED, never written. Documents are uploaded as a raw request body instead (apps/api/views_documents.py),
+# which the storage streams into its own protected directory. There is deliberately no MEDIA_ROOT or MEDIA_URL: no uploaded file is served from a public path.
+FILE_UPLOAD_HANDLERS = ["django.core.files.uploadhandler.MemoryFileUploadHandler"]
+FILE_UPLOAD_MAX_MEMORY_SIZE = 256 * 1024
 # Sessions and CSRF (docs/development/rest-api-slice.md, section 7). Django's session authentication is the only
 # authentication: no JWT, no tokens in browser storage. The cookies are HttpOnly (JavaScript cannot read the
 # session id, and the CSRF token is delivered in the body of GET /api/auth/csrf/), SameSite=Lax, and, in
@@ -132,6 +139,9 @@ API_THROTTLE_RATES = {
     "ai_connection_test": "5/min",
     "ai_connection_test_hour": "30/hour",
     "ai_connection_test_all": "10/min",
+    # Each document upload writes up to DOC-1's size limit to disk: bounded per user per minute and per hour (per process, not a quota).
+    "document_upload": "20/min",
+    "document_upload_hour": "200/hour",
 }
 
 # Largest accepted request body, in bytes (the parser refuses more with 413 before decoding it).

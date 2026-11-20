@@ -156,7 +156,7 @@ class MigrationIsAdditiveTests(SimpleTestCase):
 
     def test_the_only_other_migration_is_the_audit_subject_type_one(self):
         named = sorted(p.name for p in (BACKEND / "apps" / "audit" / "migrations").glob("0*.py") if "ai_settings" in source(p))
-        self.assertEqual(named, ["0003_ai_settings_subject_type.py"])
+        self.assertEqual(named, ["0003_ai_settings_subject_type.py", "0004_document_subject_type.py"])  # 0004 (DOC-1) restates the previous subject-type list, which includes ai_settings
         text = source(BACKEND / "apps" / "audit" / "migrations" / "0003_ai_settings_subject_type.py")
         self.assertNotIn("RunSQL", text)
         self.assertNotIn("DeleteModel", text)

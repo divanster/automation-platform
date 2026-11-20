@@ -4,16 +4,18 @@
 
 Needs a migrated database: Django creates the permissions when ``migrate`` runs, and this command only
 looks them up. For each role in ``apps.accounts.roles`` it creates the group if it is missing and sets the
-group's permissions to EXACTLY the role's set (so a permission removed from a role is removed from the
-group on the next run, and one added to it is added). It never creates a permission, never touches users or
-their group memberships, never touches any other group, and prints only role names and counts.
+group's permissions to EXACTLY the role's set (the request matrix plus the document matrix of DOC-1; run it
+again after a migration that adds permissions, or the role does not hold them), so a permission removed from a
+role is removed from the group on the next run, and one added to it is added. It never creates a permission,
+never touches users or their group memberships, never touches any other group, and prints only role names and
+counts.
 """
 
 from django.contrib.auth.models import Group, Permission
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
-from apps.accounts.roles import ROLE_PERMISSIONS, ROLES, split_permission
+from apps.accounts.roles import ROLE_PERMISSIONS, ROLES, granted_permissions, split_permission
 
 
 class Command(BaseCommand):
@@ -22,7 +24,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         with transaction.atomic():
             found, missing = {}, []
-            for name in sorted({name for names in ROLE_PERMISSIONS.values() for name in names}):
+            for name in sorted({name for role in ROLE_PERMISSIONS for name in granted_permissions(role)}):
                 app_label, codename = split_permission(name)
                 permission = Permission.objects.filter(content_type__app_label=app_label, codename=codename).first()
                 if permission is None:
@@ -34,5 +36,6 @@ class Command(BaseCommand):
 
             for role in ROLES:
                 group, created = Group.objects.get_or_create(name=role)
-                group.permissions.set([found[name] for name in sorted(ROLE_PERMISSIONS[role])])
-                self.stdout.write(f"{role}: {'created' if created else 'updated'}, {len(ROLE_PERMISSIONS[role])} permissions")
+                granted = granted_permissions(role)
+                group.permissions.set([found[name] for name in sorted(granted)])
+                self.stdout.write(f"{role}: {'created' if created else 'updated'}, {len(granted)} permissions")

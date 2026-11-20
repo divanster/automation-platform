@@ -150,6 +150,11 @@ AuditEvent * --- 0..1 Case / WorkflowRun / other subject
 - **Uniqueness:** unique `(case, SHA-256)`; uploading identical bytes twice into
   one case is rejected or linked to the existing document (policy to be decided
   in Phase 3). The same bytes may appear in different cases.
+- **Built so far (DOC-1, [document-storage.md](document-storage.md)):** `documents.Document` with the id, the uploader (`owner`), the
+  original filename as a label, content type (PDF only), size, SHA-256, upload time, a random `storage_key` and a closed `processing_state`
+  (only `uploaded` is ever set). It is **Core's, not a module's**, has **no case link yet** and **no `(case, SHA-256)` uniqueness or duplicate
+  policy** (the same bytes uploaded twice are two documents), and no retention or deletion. The bytes are in a managed storage directory, never in
+  PostgreSQL. Immutability of the metadata (except the processing state) is at the ORM and service boundary only.
 
 ### WorkflowDefinition
 
@@ -309,8 +314,9 @@ AuditEvent * --- 0..1 Case / WorkflowRun / other subject
   `revision.created`, `request.edited`, `run.state_changed`, `approval.recorded`, `approval.invalidated` and
   `rejection.recorded`, written in the transaction of the operation they describe. Append-only at the ORM and
   service boundary only: no trigger, no restricted database role, no hash chain. The `details` values are
-  restricted to booleans, integers, null and short tokens. Not recorded yet: `document.uploaded`,
-  `export.created`, `task.failed`, and refused attempts.
+  restricted to booleans, integers, null and short tokens. DOC-1 adds `document.uploaded` and `document.downloaded` (subject type `document`; details
+  `byte_length`, `content_hash` and, for a download, `by_owner`; never a file name, path or content; [document-storage.md](document-storage.md)).
+  Not recorded yet: `export.created`, `task.failed`, and refused attempts.
 
 ### ModelProfile
 

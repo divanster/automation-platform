@@ -47,4 +47,4 @@ class AIEnvironmentIsolationTests(SimpleTestCase):
     def test_the_prefixes_are_exactly_the_two_ai_families(self):
         from config.test_runner import AI_ENVIRONMENT_PREFIXES
 
-        self.assertEqual(AI_ENVIRONMENT_PREFIXES, ("AP_INTAKE_", "AP_AI_", "AP_SECRET_STORE_"))
+        self.assertEqual(AI_ENVIRONMENT_PREFIXES, ("AP_INTAKE_", "AP_AI_", "AP_SECRET_STORE_", "AP_DOCUMENT_"))  # DOC-1 added the document storage family

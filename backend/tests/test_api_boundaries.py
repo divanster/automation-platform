@@ -12,7 +12,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.test import SimpleTestCase
 from django.urls import URLPattern, get_resolver
 
-from apps.api import base, views_ai_connection_test, views_ai_credentials, views_ai_settings, views_auth, views_dashboard, views_requests
+from apps.api import base, views_ai_connection_test, views_ai_credentials, views_ai_settings, views_auth, views_dashboard, views_documents, views_requests
 from apps.intake import queries, review, submission
 from tests.settings_loader import load_settings
 from tests.test_request_intake_boundaries import imported_modules
@@ -81,6 +81,9 @@ class RouteInventoryTests(SimpleTestCase):
                 "api/ai-settings/connections/<str:connection_id>/test/": "AIConnectionTestView",
                 "api/ai-credentials/": "AICredentialCollectionView",
                 "api/ai-credentials/<str:reference>/": "AICredentialDetailView",
+                "api/documents/": "DocumentCollectionView",
+                "api/documents/<uuid:document_id>/": "DocumentDetailView",
+                "api/documents/<uuid:document_id>/content/": "DocumentContentView",
                 "api/dashboard/summary/": "DashboardSummaryView",
                 "api/requests/": "RequestCollectionView",
                 "api/requests/<uuid:run_id>/": "RequestDetailView",
@@ -96,10 +99,16 @@ class RouteInventoryTests(SimpleTestCase):
             if "run_id" in path:
                 self.assertIn("<uuid:run_id>", path)
 
-    def test_no_route_is_a_file_upload_export_or_dynamic_handler_registration(self):
+    def test_no_route_is_an_export_or_dynamic_handler_registration(self):
+        # DOC-1 added a deliberate document route (a raw-body PDF upload and a streaming download); the other words stay banned.
         for path in self.routes():
-            for word in ("upload", "export", "handler", "register", "task", "worker"):
+            for word in ("export", "handler", "register", "task", "worker"):
                 self.assertNotIn(word, path)
+
+    def test_the_only_file_upload_route_is_the_document_collection(self):
+        self.assertEqual([path for path in self.routes() if path.startswith("api/documents/") and not path.startswith("api/documents/<")], ["api/documents/"])
+        for path in self.routes():
+            self.assertNotIn("upload", path)  # the route is named by its resource, not by an action
 
     def test_the_health_routes_are_unchanged(self):
         paths = {p for p in self.routes() if p.startswith("api/health/")}
@@ -115,6 +124,9 @@ class RouteInventoryTests(SimpleTestCase):
             views_ai_connection_test.AIConnectionTestView: {"POST"},
             views_ai_credentials.AICredentialCollectionView: {"POST"},
             views_ai_credentials.AICredentialDetailView: {"GET", "PUT", "DELETE"},
+            views_documents.DocumentCollectionView: {"GET", "POST"},
+            views_documents.DocumentDetailView: {"GET"},
+            views_documents.DocumentContentView: {"GET"},
             views_dashboard.DashboardSummaryView: {"GET"},
             views_requests.RequestCollectionView: {"GET", "POST"},
             views_requests.RequestDetailView: {"GET"},
@@ -299,7 +311,7 @@ class SecuritySettingsTests(SimpleTestCase):
 
     def test_throttle_rates_exist_for_every_scope_and_login_is_stricter_than_general_use(self):
         rates = self.base.API_THROTTLE_RATES
-        self.assertEqual(set(rates), {"login_ip", "login_user", "login_user_hour", "api_user", "ai_connection_test", "ai_connection_test_hour", "ai_connection_test_all"})
+        self.assertEqual(set(rates), {"login_ip", "login_user", "login_user_hour", "api_user", "ai_connection_test", "ai_connection_test_hour", "ai_connection_test_all", "document_upload", "document_upload_hour"})
         per_minute = lambda r: int(r.split("/")[0]) * {"sec": 60, "min": 1, "hour": 1 / 60, "day": 1 / 1440}[r.split("/")[1]]  # noqa: E731
         self.assertLess(per_minute(rates["login_user"]), per_minute(rates["api_user"]))
         self.assertLess(per_minute(rates["login_ip"]), per_minute(rates["api_user"]))

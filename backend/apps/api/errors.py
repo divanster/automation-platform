@@ -42,6 +42,13 @@ from apps.ai_settings.errors import (
 )
 from apps.ai_settings.rules import ISSUE_INVALID_CONFIGURATION, PROVIDER_ISSUES
 from apps.cases.errors import RecordNotFoundError
+from apps.documents.errors import (
+    CODE_DISABLED as DOCUMENT_STORAGE_DISABLED,
+    REJECTION_REASONS as DOCUMENT_REJECTION_REASONS,
+    DocumentNotFoundError,
+    DocumentRejectedError,
+    DocumentStorageError,
+)
 from apps.intake.errors import (
     ClientRequestConflictError,
     DraftInvalidError,
@@ -99,6 +106,12 @@ MESSAGES = {
     "secret_store_unavailable": "The secret store is unavailable.",
     "secret_store_busy": "The secret store is busy; try again later.",
     "secret_unreadable": "The stored secret cannot be read.",
+    "document_too_large": "The document is larger than the permitted size.",
+    "unsupported_document_type": "Only PDF documents are accepted.",
+    "length_required": "The Content-Length header is required and must state the size of the document.",
+    "invalid_document": "The document is not acceptable.",
+    "document_storage_disabled": "Document storage is not configured.",
+    "document_storage_unavailable": "Document storage is unavailable.",
     "content_hash_mismatch": "The content hash is not the current revision's hash.",
     "run_not_in_review": "The request is not waiting for review.",
     "run_state_not_editable": "The request cannot be edited in its current state.",
@@ -205,10 +218,20 @@ def problem_for(exc) -> Problem:
         if exc.reason == "missing_permission":
             return Problem(403, "permission_denied")
         return Problem(403, "not_authenticated")
-    if isinstance(exc, (RecordNotFoundError, RequestSourceMissingError, Http404)):
+    if isinstance(exc, (RecordNotFoundError, RequestSourceMissingError, DocumentNotFoundError, Http404)):
         return Problem(404, "not_found")
     if isinstance(exc, DjangoPermissionDenied):  # DRF's own handler would convert it; this one replaces that handler
         return Problem(403, "permission_denied")
+    if isinstance(exc, DocumentRejectedError):  # a ValueError subclass: before any generic handling
+        if exc.reason == "too_large":
+            return Problem(413, "document_too_large")
+        if exc.reason == "unsupported_type":
+            return Problem(415, "unsupported_document_type")
+        if exc.reason == "length_required":
+            return Problem(411, "length_required")
+        return Problem(400, "invalid_document", {"reason": exc.reason if exc.reason in DOCUMENT_REJECTION_REASONS else "malformed_pdf"})
+    if isinstance(exc, DocumentStorageError):
+        return Problem(503, "document_storage_disabled" if exc.code == DOCUMENT_STORAGE_DISABLED else "document_storage_unavailable")
     if isinstance(exc, RequestTextError):  # a ValueError subclass: must come before any generic handling
         return Problem(400, "invalid_request_text", {"reason": exc.reason})
     if isinstance(exc, ClientRequestConflictError):

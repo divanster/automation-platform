@@ -45,6 +45,10 @@ ACTION_AI_SETTINGS_CONNECTION_CHANGED = "ai_settings.connection_changed"
 ACTION_AI_CREDENTIAL_CREATED = "ai_credential.created"
 ACTION_AI_CREDENTIAL_REPLACED = "ai_credential.replaced"
 ACTION_AI_CREDENTIAL_DELETED = "ai_credential.deleted"
+# DOC-1: the document slice (apps.documents) records an upload and the start of an authorized download. Core's own actions in the Core-reserved ``document`` namespace; no module can declare them.
+# The subject is the document (``SUBJECT_DOCUMENT``). Details are the byte length and the content hash only (never a file name, a path or any content).
+ACTION_DOCUMENT_UPLOADED = "document.uploaded"
+ACTION_DOCUMENT_DOWNLOADED = "document.downloaded"
 ACTIONS = (
     ACTION_REQUEST_SUBMITTED,
     ACTION_REVISION_CREATED,
@@ -60,6 +64,8 @@ ACTIONS = (
     ACTION_AI_CREDENTIAL_CREATED,
     ACTION_AI_CREDENTIAL_REPLACED,
     ACTION_AI_CREDENTIAL_DELETED,
+    ACTION_DOCUMENT_UPLOADED,
+    ACTION_DOCUMENT_DOWNLOADED,
 )
 
 SUBJECT_RUN = "run"
@@ -68,7 +74,8 @@ SUBJECT_APPROVAL = "approval"
 SUBJECT_REJECTION = "rejection"
 SUBJECT_MODULE = "module"  # a module as a subject: ``module.enabled`` and ``module.disabled`` (S4); ``subject_id`` is the ModuleState id
 SUBJECT_AI_SETTINGS = "ai_settings"  # the singleton AI extraction settings row; ``subject_id`` is the constant ``apps.ai_settings.models.SETTINGS_SUBJECT_ID``
-SUBJECT_TYPES = (SUBJECT_RUN, SUBJECT_REVISION, SUBJECT_APPROVAL, SUBJECT_REJECTION, SUBJECT_MODULE, SUBJECT_AI_SETTINGS)
+SUBJECT_DOCUMENT = "document"  # a stored document (``apps.documents.models.Document``); ``subject_id`` is its id
+SUBJECT_TYPES = (SUBJECT_RUN, SUBJECT_REVISION, SUBJECT_APPROVAL, SUBJECT_REJECTION, SUBJECT_MODULE, SUBJECT_AI_SETTINGS, SUBJECT_DOCUMENT)
 
 ACTOR_USER = "user"  # a login user, identified by ``User.public_id``
 ACTOR_SYSTEM = "system"  # the worker or the application itself; not a login user
@@ -95,6 +102,9 @@ DETAIL_KEYS = MappingProxyType(
         ACTION_AI_CREDENTIAL_CREATED: frozenset({"store"}),
         ACTION_AI_CREDENTIAL_REPLACED: frozenset({"store"}),
         ACTION_AI_CREDENTIAL_DELETED: frozenset({"store"}),
+        # ``content_hash`` is the SHA-256 hex of the stored bytes; ``byte_length`` their count; ``by_owner`` whether the downloader is the uploader. Never a name, a path or content.
+        ACTION_DOCUMENT_UPLOADED: frozenset({"byte_length", "content_hash"}),
+        ACTION_DOCUMENT_DOWNLOADED: frozenset({"byte_length", "content_hash", "by_owner"}),
     }
 )
 

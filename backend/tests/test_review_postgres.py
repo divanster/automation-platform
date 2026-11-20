@@ -33,7 +33,7 @@ from django.db.migrations.recorder import MigrationRecorder
 from django.test import TestCase, TransactionTestCase, tag
 
 from apps.accounts.errors import AuthorizationError
-from apps.accounts.roles import APPROVER, AUDITOR, OPERATOR, ROLE_PERMISSIONS, ROLES, split_permission
+from apps.accounts.roles import APPROVER, AUDITOR, OPERATOR, ROLE_PERMISSIONS, ROLES, granted_permissions, split_permission
 from apps.audit import events as audit_events
 from apps.audit.models import AuditEvent
 from apps.audit.recorder import AuditTransactionError, record_event
@@ -222,8 +222,8 @@ class SchemaTests(DedicatedTestDatabaseMixin, TestCase):
         self.assertFalse({"add_requestsource", "change_requestsource", "delete_requestsource", "view_requestsource"} & codenames)
 
     def test_migrate_created_every_permission_the_roles_need(self):
-        for roles in ROLE_PERMISSIONS.values():
-            for name in roles:
+        for role in ROLE_PERMISSIONS:
+            for name in granted_permissions(role):
                 app_label, codename = split_permission(name)
                 with self.subTest(permission=name):
                     self.assertTrue(Permission.objects.filter(content_type__app_label=app_label, codename=codename).exists())
@@ -264,7 +264,7 @@ class RolesCommandTests(DedicatedTestDatabaseMixin, TestCase):
         self.assertEqual(set(Group.objects.values_list("name", flat=True)), set(ROLES))
         for role in ROLES:
             with self.subTest(role=role):
-                self.assertEqual(self.permissions_of(role), set(ROLE_PERMISSIONS[role]))
+                self.assertEqual(self.permissions_of(role), set(granted_permissions(role)))  # the request matrix plus DOC-1's document matrix
 
     def test_running_it_again_changes_nothing(self):
         setup_roles()
@@ -280,7 +280,7 @@ class RolesCommandTests(DedicatedTestDatabaseMixin, TestCase):
         approver.permissions.add(Permission.objects.get(codename="submit_request"))  # an extra permission
         approver.permissions.remove(Permission.objects.get(codename="approve_request"))  # a missing one
         setup_roles()
-        self.assertEqual(self.permissions_of(APPROVER), set(ROLE_PERMISSIONS[APPROVER]))
+        self.assertEqual(self.permissions_of(APPROVER), set(granted_permissions(APPROVER)))
 
     def test_it_never_touches_users_memberships_or_other_groups(self):
         setup_roles()

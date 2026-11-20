@@ -1048,6 +1048,82 @@ git diff --check
 
 **What nobody has checked:** a test against a real Workbench, OpenAI-compatible or Ollama endpoint; the strict throttle across several web processes; how long a real provider holds the web request thread; and a browser or any UI.
 
+### 5.13 Document upload (DOC-1): storage set-up, use and checks
+
+**Status: DB-free validated in the development VM only; the PostgreSQL tests (and the two migrations) are written and NOT run; no real server, browser or frontend used it; no document was sent anywhere; no AI, OCR or extraction.** Design, contract and limits: [document-storage.md](../architecture/document-storage.md).
+
+**Set up once (owner; the account the web process runs as).**
+
+1. Choose a directory on a local fixed disk, outside the repository and outside OneDrive, whose parent exists (for example `C:\ProgramData\AutomationPlatform\documents` after creating `C:\ProgramData\AutomationPlatform`; on Linux, a directory such as `/var/lib/automation-platform/documents`). Not inside `C:\Projects\...\automation-platform`, a static or media folder, a junction or a network path.
+2. Put the lines in the git-ignored `.env` (or the service's environment; the web process reads them on every request, so no restart is needed for the directory, but a changed value needs the process that serves it to have it). Without `AP_DOCUMENT_STORAGE_DIRECTORY` the feature is **disabled**: every upload and download answers `503 document_storage_disabled`.
+
+   ```text
+   AP_DOCUMENT_STORAGE_DIRECTORY=C:\ProgramData\AutomationPlatform\documents
+   AP_DOCUMENT_MAX_BYTES=20971520
+   ```
+
+   Windows only, optional: `AP_DOCUMENT_STORAGE_EXPECTED_IDENTITY_SID` (the one SID the web process must run as) and `AP_DOCUMENT_STORAGE_APPROVED_IDENTITY_SIDS` (only to run as LocalSystem, LocalService or NetworkService; untested here).
+3. From `backend\`, AS THAT ACCOUNT, create the directory with restrictive permissions (it creates only that directory and its `incoming` and `objects` folders, never changes an existing directory and prints no path):
+
+   ```powershell
+   $Py = "..\.venv\Scripts\python.exe"
+   & $Py manage.py prepare_document_storage        # expect: The document storage directory is ready.
+   ```
+
+4. Apply the migrations and **run `setup_roles` again** so the roles hold the new document permissions (Operator: upload, view and download own; Approver: view and download any; Auditor: view any, no download):
+
+   ```powershell
+   & $Py manage.py migrate                          # documents.0001 and audit.0004 (additive)
+   & $Py manage.py setup_roles                      # repeatable; Operator: 6 permissions, Approver: 5, Auditor: 3
+   ```
+
+**A WSGI server is required** (`runserver` is one). Under ASGI the upload answers `503 document_storage_unavailable` by design, because the server would spool the body to the system temporary directory.
+
+**Try it once (owner; synthetic PDF only; never a real document).** The API is session based; there is no frontend for this slice. With a user holding the Operator role, from a PowerShell window, `curl.exe` keeping cookies in a file in a private folder (delete it afterwards):
+
+```powershell
+$Jar = "$env:TEMP\ap-docs.jar"; $Base = "http://127.0.0.1:8010"
+$Csrf = (curl.exe -s -c $Jar "$Base/api/auth/csrf/" | ConvertFrom-Json).csrf_token
+# log in: type the password yourself when prompted; it is not put on the command line or in a file
+$Pw = Read-Host "Password" -AsSecureString; $Plain = [System.Net.NetworkCredential]::new("", $Pw).Password
+$Body = @{ username = "<your operator>"; password = $Plain } | ConvertTo-Json -Compress; Remove-Variable Plain
+$Body | curl.exe -s -b $Jar -c $Jar -H "X-CSRFToken: $Csrf" -H "Content-Type: application/json" --data-binary "@-" "$Base/api/auth/login/"; Remove-Variable Body
+$Csrf = (curl.exe -s -b $Jar "$Base/api/auth/me/" | ConvertFrom-Json).csrf_token
+# upload a small synthetic PDF you made yourself (the raw bytes are the request body; the name is percent-encoded)
+curl.exe -s -b $Jar -H "X-CSRFToken: $Csrf" -H "Content-Type: application/pdf" -H "X-Document-Filename: test%20scan.pdf" --data-binary "@C:\path\to\synthetic.pdf" "$Base/api/documents/"
+curl.exe -s -b $Jar "$Base/api/documents/"                                  # the list
+curl.exe -s -b $Jar -o "$env:TEMP\back.pdf" "$Base/api/documents/<id>/content/"   # the download; compare its hash with the sha256 in the answer
+Remove-Item $Jar
+```
+
+Expect `201` with `processing_state: "uploaded"` and no path in the answer; a file under `<directory>\objects\<2 hex>\<32 hex>` (a random name); and one `document.uploaded` and one `document.downloaded` row in `audit_auditevent`. A text file renamed `.pdf` must answer `400 invalid_document` with `not_a_pdf`; a PDF cut in half `truncated_pdf`.
+
+**Failure reading.** `503 document_storage_disabled`: `AP_DOCUMENT_STORAGE_DIRECTORY` is unset in the web process. `503 document_storage_unavailable`: the directory is missing, was not prepared (run the command), is inside the repository or a static or media root, is on a non-NTFS or cloud-synced volume (Windows), has loosened permissions or ACL (Windows: re-run it as the right account; do not widen the ACL), the value of `AP_DOCUMENT_MAX_BYTES` is out of range, the request came through ASGI, or the object behind a row is missing or its size changed (restore the directory and database together). `403 permission_denied`: the user's roles hold no such permission (did you run `setup_roles` again?). `404` for a document that exists: it is somebody else's and the caller holds only an own permission.
+
+**Orphans.** After a crash, `incoming\*.partial` files or an object no row refers to may remain. Stop uploads, then delete `incoming\*.partial` files older than an hour; an object is an orphan only if no `documents_document.storage_key` equals its `<2 hex>/<32 hex>`. Never delete an object a row refers to. A log line `Document upload: the database commit was not confirmed; the stored object was kept` names the document id: check whether the row exists; if it does not, the object is an orphan.
+
+**Checks (DB-free; from `backend\`; no network, no key, no PostgreSQL):**
+
+```powershell
+$Py = "..\.venv\Scripts\python.exe"
+& $Py manage.py check
+& $Py manage.py makemigrations --check --dry-run                                        # expect: No changes detected
+& $Py -m compileall -q apps config tests manage.py
+& $Py manage.py test tests.test_documents_rules tests.test_documents_storage tests.test_documents_services tests.test_documents_api tests.test_documents_boundaries tests.test_documents_composition
+& $Py manage.py test                                                                  # expect OK (the count is in the final report of the slice; re-check the number)
+git diff --check
+```
+
+**PostgreSQL validation (LOCAL COMPUTER ONLY; owner-run; NOT YET RUN).** On a dedicated development server, no `--keepdb`, no `--noinput`: with `AP_RUN_DB_TESTS=1` set only around the command,
+
+```powershell
+& $Py manage.py test tests.test_documents_postgres --tag requires_postgres -v 2
+```
+
+then the suites whose expectations this slice changed (they now count the document permissions and the audit migration): `tests.test_review_postgres tests.test_authz_core_postgres tests.test_audit_vocabulary_postgres tests.test_ai_settings_postgres tests.test_api_postgres`, and finally the whole regression. Report the exact `Ran N tests` line; passing would cover the tested scenarios only. The new file covers upload persistence, visibility, download authorization, atomic rollback (a failed audit write, a CHECK violation, an error after the audit INSERT), concurrent uploads and downloads, the constraints, the permissions and `setup_roles`, and the `audit.0004` forward and refused-reverse behaviour.
+
+**What nobody has checked:** any of the PostgreSQL behaviour above; a real browser upload (a `File` as the body of `fetch` with `X-Document-Filename: encodeURIComponent(name)`); a real WSGI production server; the Windows policy under a service account, gMSA or LocalSystem (it ran as one developer account only); a POSIX host (the POSIX policy tests were skipped in this Windows development VM and have never run); large files (the 20 MiB default and the 100 MiB maximum were exercised with a few MiB in tests); antivirus interaction; backup and restore of the directory with the database.
+
 ## 6. Local Windows computer: setup and validation (reference procedure; owner-operated)
 
 > **Nothing in this section has been run.** No local repository, Python
@@ -1505,7 +1581,8 @@ be updated when that is done and confirmed.
 | Workflow attribution (MOD-1b S5: `WorkflowRun.module_id`, `workflow_key`, `workflow_version`; migrations `cases.0006` to `0009`; [section 5.2](#52-workflow-attribution-mod-1b-s5-migration-preflight-postgresql-tests-and-the-migration), [module-contract.md](../architecture/module-contract.md) section 3.12) | **Implemented on `feat/module-workflow-attribution`** (`e2a4c55`; PR not yet merged); DB-free tests pass on the VM (1998 in all); **the owner ran the four migrations, the 37 PostgreSQL tests and a 604-test regression locally, all passed** (owner-supplied, tested scenarios only); an installation holding a run without a Request Intake source stops at `0008` by design |
 | ModuleContext capability facade (MOD-1b S6: `apps/module_host/context.py`, `context_rules.py`, `config/module_context.py`; [section 5.3](#53-modulecontext-mod-1b-s6-db-free-checks-and-the-postgresql-tests), [module-contract.md](../architecture/module-contract.md) section 3.13) | **Implemented on `feat/module-capability-facade`** (`ee4198d`, test fix `5b61298`; pushed, PR not yet opened); DB-free tests pass on the VM (2129 in all); the owner ran the 72 PostgreSQL tests and a 676-test selected regression locally, all passed (owner-supplied, tested scenarios only); no module is registered, Request Intake does not use it, no migration, nothing in the application calls it; a naming and authority boundary, not a sandbox |
 | Request Intake as the first built-in module (MOD-2: `apps/intake/module.py`, `config/modules.py`, `config/task_registry.py`; [section 5.4](#54-request-intake-as-a-registered-module-mod-2-activation-sequence-and-postgresql-tests), [module-contract.md](../architecture/module-contract.md) section 3.14) | **Implemented on `feat/request-intake-module`** (`871bf2d`, test corrections `8915925` and `05cf1a7`; pushed, PR not opened); DB-free tests pass on the VM (2172 in all); the owner ran the PostgreSQL tests locally, 701 passed, and `module_sync` on the development database (owner-supplied, tested scenarios only); no migration; `module_sync` must be run before the worker claims Request Intake tasks on an installation that has already synced; the module is declared and gated, not sandboxed, and does not use `ModuleContext` |
-| Business workflow beyond that: documents, a login mechanism, exports | Not implemented |
+| Document upload backend (DOC-1: `apps/documents`, `config/document_storage.py`, `/api/documents/`, migrations `documents.0001` and `audit.0004`; [section 5.13](#513-document-upload-doc-1-storage-set-up-use-and-checks), [document-storage.md](../architecture/document-storage.md)) | **Implemented on `feat/document-upload-backend`** (not committed, not merged); DB-free tests pass in the development VM (see the final report for the count), including the real Windows directory policy run for real on one developer account; **the PostgreSQL tests and the two migrations are written and NOT run**; no frontend, no AI, OCR, extraction or worker task; plaintext at rest, no malware scan, no quota; development-validated, not production-ready |
+| Business workflow beyond that: a login mechanism, exports | Not implemented |
 | Task queue and background worker ([details](persistent-worker-slice.md)) | **Implemented** (first slice); the PostgreSQL tests passed in the owner's local run, tested scenarios only |
 | AI gateway foundation (AI-1a: contracts, policy, registry, deterministic test provider; [ai-gateway.md](../architecture/ai-gateway.md)) | **Implemented and merged** (PR #19); DB-free tests only; called only by the opt-in Request Intake extractor (AI-2a) |
 | KPMG Workbench provider adapter (AI-1b; [section 5.5](#55-kpmg-workbench-provider-ai-1b-configuration-and-local-validation), [ai-gateway.md](../architecture/ai-gateway.md) section 14) | **Merged** (PR #20); aligned with the client-side contract from the FI audit; 147 new DB-free tests with a mocked transport; the VM never ran it against the Workbench; the owner reports one local GPT-5 smoke test (owner-supplied, [section 14.10(d)](../architecture/ai-gateway.md)); not in the production composition (`config/ai_gateway.py` is empty); built only by the opt-in Request Intake composition |
