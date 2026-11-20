@@ -10,6 +10,7 @@ import ssl
 import unittest
 from unittest import mock
 
+from apps.ai_gateway import AIGatewayError
 from apps.ai_gateway.network import NetworkClass
 from apps.ai_gateway.transport import MAX_RESPONSE_BYTES, HttpRequest, HttpResponse, HttpTransport, TransportError
 from config import ai_guarded_transport
@@ -324,6 +325,17 @@ class ExchangeTests(unittest.TestCase):
         self.assertEqual(ctx.exception.kind, "protocol")
         transport = make_transport({CORP: ["10.1.2.3"]}, {"response": (200, b"x" * MAX_RESPONSE_BYTES)})
         self.assertEqual(len(transport.send(make_request()).body), MAX_RESPONSE_BYTES)
+
+    def test_a_lower_cap_can_be_asked_for_and_a_higher_or_invalid_one_never(self):
+        transport = make_transport({CORP: ["10.1.2.3"]}, {"response": (200, b"x" * 1025)}, max_response_bytes=1024)
+        with self.assertRaises(TransportError) as ctx:
+            transport.send(make_request())
+        self.assertEqual(ctx.exception.kind, "protocol")
+        transport = make_transport({CORP: ["10.1.2.3"]}, {"response": (200, b"x" * 1024)}, max_response_bytes=1024)
+        self.assertEqual(len(transport.send(make_request()).body), 1024)
+        for bad in (0, -1, MAX_RESPONSE_BYTES + 1, True, "10", 1.5):
+            with self.subTest(bad), self.assertRaises(AIGatewayError):
+                make_transport(max_response_bytes=bad)
 
     def test_nothing_secret_is_in_a_repr_or_an_error(self):
         transport = make_transport({CORP: ["127.0.0.1"]})

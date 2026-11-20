@@ -128,6 +128,10 @@ API_THROTTLE_RATES = {
     "login_user": "5/min",
     "login_user_hour": "20/hour",
     "api_user": "600/min",
+    # The AI connection test calls an external provider, so it is far stricter than general use: per administrator per minute and per hour, and one ceiling for all users together.
+    "ai_connection_test": "5/min",
+    "ai_connection_test_hour": "30/hour",
+    "ai_connection_test_all": "10/min",
 }
 
 # Largest accepted request body, in bytes (the parser refuses more with 413 before decoding it).

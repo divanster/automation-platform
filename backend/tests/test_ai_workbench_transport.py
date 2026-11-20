@@ -112,7 +112,7 @@ class DirectConnectionTests(unittest.TestCase):
         self.assertGreaterEqual(context.minimum_version, ssl.TLSVersion.TLSv1_2)
 
     def test_there_is_no_way_to_switch_verification_off(self):
-        self.assertEqual(set(inspect.signature(StdlibHttpsTransport.__init__).parameters) - {"self"}, {"proxy_url", "ca_bundle", "connection_factory"})
+        self.assertEqual(set(inspect.signature(StdlibHttpsTransport.__init__).parameters) - {"self"}, {"proxy_url", "ca_bundle", "connection_factory", "max_response_bytes"})  # the one added knob can only LOWER the response cap
         self.assertEqual((build_ssl_context().verify_mode, build_ssl_context().check_hostname), (ssl.CERT_REQUIRED, True))
         source = inspect.getsource(ai_http_transport)
         for forbidden in ("_create_unverified_context", "CERT_NONE", "check_hostname = False", "verify_mode ="):
@@ -175,6 +175,17 @@ class DirectConnectionTests(unittest.TestCase):
         self.assertEqual(ctx.exception.kind, "protocol")
         transport, _, _ = make_transport({"response": (200, b"x" * MAX_RESPONSE_BYTES)})
         self.assertEqual(len(transport.send(make_request()).body), MAX_RESPONSE_BYTES)
+
+    def test_a_lower_cap_can_be_asked_for_and_a_higher_or_invalid_one_never(self):
+        transport, _, _ = make_transport({"response": (200, b"x" * 1025)}, max_response_bytes=1024)
+        with self.assertRaises(TransportError) as ctx:
+            transport.send(make_request())
+        self.assertEqual(ctx.exception.kind, "protocol")
+        transport, _, _ = make_transport({"response": (200, b"x" * 1024)}, max_response_bytes=1024)
+        self.assertEqual(len(transport.send(make_request()).body), 1024)
+        for bad in (0, -1, MAX_RESPONSE_BYTES + 1, True, "10", 1.5):
+            with self.subTest(bad), self.assertRaises(AIGatewayError):
+                make_transport(max_response_bytes=bad)
 
 
 class FailureMappingTests(unittest.TestCase):

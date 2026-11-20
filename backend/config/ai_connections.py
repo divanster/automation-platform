@@ -191,27 +191,32 @@ def _load_settings(connection: ConnectionValues, model_id: str, environ, secret_
     return ai_ollama.load_ollama_settings(env)
 
 
-def build_connection_gateway(connection: ConnectionValues, profile_id: str, environ=None, *, transport: HttpTransport | None = None, secret_store=None) -> AIGateway:
+def build_connection_gateway(
+    connection: ConnectionValues, profile_id: str, environ=None, *, transport: HttpTransport | None = None, secret_store=None, max_response_bytes: int | None = None
+) -> AIGateway:
     """A gateway whose only provider is ``connection`` and whose only profile is ``profile_id``. Raises ``AIGatewayError('configuration_error')`` naming a field, never a value.
     Opens no connection and makes no network call; ``transport`` is for tests (otherwise the provider's own real, guarded transport is built). ``secret_store`` is for tests: a
-    managed connection otherwise reads the store this process is configured for (``config/secret_store.py``)."""
+    managed connection otherwise reads the store this process is configured for (``config/secret_store.py``). ``max_response_bytes`` (the connection test) can only LOWER the
+    real transport's response cap; it does not apply to a ``transport`` that is passed in."""
     selected = connection.profile(profile_id)
     if selected is None:
         raise configuration_error("unknown_profile", "The connection has no such profile.")
     kind = connection.provider_type
     if kind == TYPE_WORKBENCH:
         env = connection_environ(connection, selected.model_id, environ, secret_store=secret_store)
+        if transport is None and max_response_bytes is not None:
+            transport = ai_workbench.build_workbench_transport(ai_workbench.load_workbench_settings(env), max_response_bytes=max_response_bytes)
         gateway = ai_workbench.build_workbench_gateway(env, transport=transport)
         if gateway.profile(profile_id).model_id != selected.model_id:
             raise configuration_error("profile_model_mismatch", "The profile's model is not the connection's.")
         return gateway
     settings = _load_settings(connection, selected.model_id, environ, secret_store)
     if kind == TYPE_OPENAI_COMPATIBLE:
-        transport = ai_openai_compatible.build_openai_compatible_transport(settings) if transport is None else transport
+        transport = ai_openai_compatible.build_openai_compatible_transport(settings, max_response_bytes=max_response_bytes) if transport is None else transport
         provider = openai_compatible.OpenAICompatibleProvider(settings.config, transport)
         profile = ai_openai_compatible.build_openai_compatible_profile(settings)
     else:
-        transport = ai_ollama.build_ollama_transport() if transport is None else transport
+        transport = ai_ollama.build_ollama_transport(max_response_bytes=max_response_bytes) if transport is None else transport
         provider = ollama.OllamaProvider(settings.config, transport)
         profile = ai_ollama.build_ollama_profile(settings)
     return AIGateway(ProviderRegistry.build([provider]), (_named(profile, profile_id),))
@@ -221,7 +226,8 @@ def _named(profile: ModelProfile, profile_id: str) -> ModelProfile:
     return dataclasses.replace(profile, profile_id=profile_id)
 
 
-def _issue_of(error: AIGatewayError) -> str:
+def issue_of(error: AIGatewayError) -> str:
+    """The fixed status issue (one of ``PROVIDER_ISSUES``) a configuration error stands for. Never a message or a value."""
     reason = error.reason or ""
     if "api_key" in reason or "credential" in reason:
         return ISSUE_MISSING_API_KEY if reason.startswith("missing_") else ISSUE_INVALID_CONFIGURATION
@@ -237,7 +243,7 @@ def connection_status(connection: ConnectionValues, environ=None, secret_store=N
     try:
         _load_settings(connection, model_id, environ, secret_store)
     except AIGatewayError as error:
-        return ProviderStatus(False, _issue_of(error))
+        return ProviderStatus(False, issue_of(error))
     return ProviderStatus(True)
 
 

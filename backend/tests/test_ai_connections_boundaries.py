@@ -63,7 +63,7 @@ class CompositionBoundaryTests(SimpleTestCase):
                         holders.append(path.relative_to(BACKEND).as_posix())
                     elif isinstance(node, ast.Import) and any(a.name == "config.ai_connections" for a in node.names):
                         holders.append(path.relative_to(BACKEND).as_posix())
-        self.assertEqual(sorted(set(holders)), ["config/intake_extraction.py"])
+        self.assertEqual(sorted(set(holders)), ["config/ai_connection_test.py", "config/intake_extraction.py"])  # AI-CON-TEST-1: the connection test's composition builds the same gateway as the worker
 
     def test_nothing_on_the_task_path_or_in_the_app_packages_imports_the_connection_composition(self):
         for relative in ("apps/intake/handlers.py", "apps/intake/services.py", "apps/intake/ai_extraction.py", "apps/tasks/worker.py", "config/task_registry.py", "apps/api/views_ai_settings.py", "config/urls.py"):

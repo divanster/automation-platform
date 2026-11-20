@@ -88,9 +88,9 @@ def load_workbench_settings(environ=None) -> WorkbenchSettings:
     )
 
 
-def build_workbench_transport(settings: WorkbenchSettings) -> StdlibHttpsTransport:
-    """The real transport. Construction reads a CA file at most; it connects to nothing."""
-    return StdlibHttpsTransport(proxy_url=settings.proxy_url, ca_bundle=settings.ca_bundle)
+def build_workbench_transport(settings: WorkbenchSettings, *, max_response_bytes=None) -> StdlibHttpsTransport:
+    """The real transport. Construction reads a CA file at most; it connects to nothing. ``max_response_bytes`` can only LOWER the transport's response cap."""
+    return StdlibHttpsTransport(proxy_url=settings.proxy_url, ca_bundle=settings.ca_bundle, **({} if max_response_bytes is None else {"max_response_bytes": max_response_bytes}))
 
 
 def build_workbench_profiles(timeout_seconds: float) -> tuple:

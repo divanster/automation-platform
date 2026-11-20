@@ -12,7 +12,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.test import SimpleTestCase
 from django.urls import URLPattern, get_resolver
 
-from apps.api import base, views_ai_credentials, views_ai_settings, views_auth, views_dashboard, views_requests
+from apps.api import base, views_ai_connection_test, views_ai_credentials, views_ai_settings, views_auth, views_dashboard, views_requests
 from apps.intake import queries, review, submission
 from tests.settings_loader import load_settings
 from tests.test_request_intake_boundaries import imported_modules
@@ -78,6 +78,7 @@ class RouteInventoryTests(SimpleTestCase):
                 "api/auth/logout/": "LogoutView",
                 "api/auth/me/": "MeView",
                 "api/ai-settings/extraction/": "AIExtractionSettingsView",
+                "api/ai-settings/connections/<str:connection_id>/test/": "AIConnectionTestView",
                 "api/ai-credentials/": "AICredentialCollectionView",
                 "api/ai-credentials/<str:reference>/": "AICredentialDetailView",
                 "api/dashboard/summary/": "DashboardSummaryView",
@@ -111,6 +112,7 @@ class RouteInventoryTests(SimpleTestCase):
             views_auth.LogoutView: {"POST"},
             views_auth.MeView: {"GET"},
             views_ai_settings.AIExtractionSettingsView: {"GET", "PUT"},
+            views_ai_connection_test.AIConnectionTestView: {"POST"},
             views_ai_credentials.AICredentialCollectionView: {"POST"},
             views_ai_credentials.AICredentialDetailView: {"GET", "PUT", "DELETE"},
             views_dashboard.DashboardSummaryView: {"GET"},
@@ -297,10 +299,11 @@ class SecuritySettingsTests(SimpleTestCase):
 
     def test_throttle_rates_exist_for_every_scope_and_login_is_stricter_than_general_use(self):
         rates = self.base.API_THROTTLE_RATES
-        self.assertEqual(set(rates), {"login_ip", "login_user", "login_user_hour", "api_user"})
+        self.assertEqual(set(rates), {"login_ip", "login_user", "login_user_hour", "api_user", "ai_connection_test", "ai_connection_test_hour", "ai_connection_test_all"})
         per_minute = lambda r: int(r.split("/")[0]) * {"sec": 60, "min": 1, "hour": 1 / 60, "day": 1 / 1440}[r.split("/")[1]]  # noqa: E731
         self.assertLess(per_minute(rates["login_user"]), per_minute(rates["api_user"]))
         self.assertLess(per_minute(rates["login_ip"]), per_minute(rates["api_user"]))
+        self.assertLess(per_minute(rates["ai_connection_test"]), per_minute(rates["login_ip"]))  # a call to an external provider is the strictest ceiling of all
 
     def test_the_throttle_cache_is_explicit_local_memory_and_documented_as_per_process(self):
         self.assertEqual(self.base.CACHES["default"]["BACKEND"], "django.core.cache.backends.locmem.LocMemCache")

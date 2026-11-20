@@ -22,7 +22,9 @@ validated here like any other address. A host NAME is refused (``destination``) 
 process's sight and no address rule could be applied; there is no acknowledgement or other bypass. A ``loopback`` request is likewise refused while a proxy is
 configured, never silently sent around it.
 
-LIMITS. ``getaddrinfo`` cannot be given a timeout, so name resolution is not bounded by the call deadline. The check protects the destination of THIS connection;
+LIMITS. ``getaddrinfo`` cannot be given a timeout, so name resolution is not bounded by the call deadline. Everything after it (the connection attempts to every validated
+address, the request and the read) shares ONE budget, the request's ``read_timeout_seconds``: a watchdog (``config.ai_http_transport._Watchdog``) shuts the socket down when it is
+used up and the call fails with ``timeout``. The check protects the destination of THIS connection;
 it is not a firewall and does not replace network egress rules.
 """
 
@@ -32,9 +34,9 @@ import ssl
 from urllib.parse import urlsplit
 
 from apps.ai_gateway.network import DEFAULT_PORTS, NetworkClass, address_permitted, parse_ip
-from apps.ai_gateway.transport import MAX_RESPONSE_BYTES, HttpRequest, HttpResponse, HttpTransport, TransportError
+from apps.ai_gateway.transport import HttpRequest, HttpResponse, HttpTransport, TransportError
 
-from config.ai_http_transport import _parse_proxy, build_ssl_context
+from config.ai_http_transport import _parse_proxy, _Watchdog, build_ssl_context, checked_response_limit
 
 MAX_ADDRESSES = 4  # how many resolved addresses are tried; all of them must have passed the check
 
@@ -76,11 +78,12 @@ def open_connection(scheme, host, port, ip, timeout, context):
 
 
 class GuardedHttpTransport(HttpTransport):
-    def __init__(self, *, proxy_url=None, ca_bundle=None, resolver=system_resolver, connection_factory=open_connection):
+    def __init__(self, *, proxy_url=None, ca_bundle=None, resolver=system_resolver, connection_factory=open_connection, max_response_bytes=None):
         self._context = build_ssl_context(ca_bundle)
         self._proxy = None if proxy_url is None else _parse_proxy(proxy_url)
         self._resolver = resolver
         self._connection_factory = connection_factory
+        self._max_response_bytes = checked_response_limit(max_response_bytes)
 
     def __repr__(self):
         return f"GuardedHttpTransport(proxy={'yes' if self._proxy else 'no'})"
@@ -112,20 +115,23 @@ class GuardedHttpTransport(HttpTransport):
         connected = False
         failure = None
         status = body = None
+        watchdog = _Watchdog(request.read_timeout_seconds)
+        watchdog.start()
         try:
             if self._proxy is None:
-                connection = self._connect_any(scheme, host, port, addresses, request.connect_timeout_seconds)
+                connection = self._connect_any(scheme, host, port, addresses, request.connect_timeout_seconds, watchdog)
             else:
                 proxy_host, proxy_port, proxy_headers = self._proxy
                 connection = http.client.HTTPSConnection(proxy_host, proxy_port, timeout=request.connect_timeout_seconds, context=self._context)
                 connection.set_tunnel(host, port, headers=dict(proxy_headers))
+                watchdog.watch(connection)
                 connection.connect()
             connected = True
             connection.sock.settimeout(request.read_timeout_seconds)
             connection.request("POST", target, body=request.body, headers=dict(request.headers))
             response = connection.getresponse()
-            data = response.read(MAX_RESPONSE_BYTES + 1)
-            if len(data) > MAX_RESPONSE_BYTES:
+            data = response.read(self._max_response_bytes + 1)
+            if len(data) > self._max_response_bytes:
                 failure = "protocol"
             else:
                 status, body = response.status, data
@@ -133,14 +139,17 @@ class GuardedHttpTransport(HttpTransport):
             failure = "timeout" if connected else "connect"
         except ssl.SSLError:
             failure = "tls"
-        except (OSError, http.client.HTTPException):
+        except (OSError, ValueError, http.client.HTTPException):  # ValueError: a socket shut down by the watchdog while it was being read
             failure = "protocol" if connected else "connect"
         finally:
+            watchdog.cancel()
             if connection is not None:
                 try:
                     connection.close()
                 except Exception:  # nothing useful to do, and nothing to leak
                     pass
+        if watchdog.expired.is_set():
+            failure = "timeout"  # the whole exchange outlasted its budget: whatever arrived is discarded
         if failure is not None:
             raise TransportError(failure)  # raised outside the except blocks: the original exception is not this error's context
         return HttpResponse(status, body)
@@ -161,13 +170,18 @@ class GuardedHttpTransport(HttpTransport):
             raise TransportError("destination")
         return unique[:MAX_ADDRESSES]
 
-    def _connect_any(self, scheme, host, port, addresses, timeout):
-        """A connected connection to the first validated address that answers. Raises the last ``OSError`` when none does."""
+    def _connect_any(self, scheme, host, port, addresses, timeout, watchdog):
+        """A connected connection to the first validated address that answers. Raises the last ``OSError`` when none does. All attempts together stay inside the request's budget:
+        an attempt gets at most the time that is left, and none starts once it is used up."""
         last = None
         for ip in addresses:
-            candidate = self._connection_factory(scheme, host, port, ip, timeout, self._context)
+            left = watchdog.remaining()
+            if left <= 0:
+                raise TimeoutError
+            candidate = self._connection_factory(scheme, host, port, ip, min(timeout, left), self._context)
             try:
                 candidate.connect()
+                watchdog.watch(candidate)
                 return candidate
             except ssl.SSLError:
                 candidate.close()

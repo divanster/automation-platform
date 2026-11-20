@@ -1009,6 +1009,45 @@ git diff --check
 
 **What nobody has checked:** a credential created through the API by a running web process and read by a running worker under a real service account (and a gMSA, a virtual account or LocalSystem); a real provider call with a managed key; the worker refusing to start in each failure above against a real store; a browser; and the PostgreSQL tests.
 
+### 5.12 AI connection test (AI-CON-TEST-1): using the endpoint, reading the result and checks
+
+**Status: DB-free validated in the development VM only (mocked HTTP); nothing was ever sent to a real provider; no frontend; no migration.** Design and contract: [ai-gateway.md](../architecture/ai-gateway.md) section 21.
+
+**Use.** As an administrator (session and CSRF as for any API call), after saving a connection in the AI settings (the connection must be saved and enabled; the legacy environment-configured provider cannot be tested): `POST /api/ai-settings/connections/<connection_id>/test/` with `{"profile_id": "<one of its saved profiles>"}`. It makes ONE request with a fixed, synthetic prompt (no company data), a 20 s deadline, 128 output tokens, a 64 KiB response cap and no retry, using the credential and endpoint rules of the real worker: the environment variable or the managed secret the connection names, the operator's approved-origin lists, company CIDR ranges, proxy and CA settings. It changes no setting and starts no workflow; the provider's answer is discarded.
+
+**Reading the result.**
+
+| Answer | Meaning and next step |
+| --- | --- |
+| `200`, `ok: true` | the saved endpoint, credential and model returned a valid JSON object once, in the WEB process. It says nothing about the worker's environment: check that the worker's variables and (for a managed credential) Windows account match, and restart it after any change |
+| `200`, `ok: false`, `timeout` | no answer in 20 s (an Ollama model that is still loading, a slow or unreachable host); retry later |
+| `200`, `ok: false`, `rate_limit` or `provider_unavailable` | the provider refused or was unreachable; `retryable: true`; wait and retry |
+| `200`, `ok: false`, `authentication_failure` | the credential was rejected: rotate or re-enter it (`PUT /api/ai-credentials/<reference>/` for a managed one) |
+| `200`, `ok: false`, `unsupported_model` | the provider does not know the saved model identifier |
+| `200`, `ok: false`, `invalid_structured_output` | the model answered, but not the probe's JSON object (no output is shown) |
+| `200`, `ok: false`, `provider_error` | a TLS, protocol or destination refusal (for example an address the locality may not reach) or another provider failure |
+| `200`, `ok: false`, `policy_violation` | the saved data policy does not permit this connection's locality (or, with no saved AI policy, a cloud connection): nothing was sent |
+| `409 connection_disabled` | enable the connection first |
+| `409 connection_not_usable`, `missing_api_key` | the credential reference names an unset variable, or the managed credential is not stored |
+| `409 connection_not_usable`, `endpoint_not_approved` | the operator's origin list (`AP_AI_OPENAI_ALLOWED_ORIGINS`, `AP_AI_OLLAMA_ALLOWED_ORIGINS`) does not cover the endpoint |
+| `409 connection_not_usable`, `invalid_configuration` | an invalid or forbidden endpoint, a proxy set with a host-name endpoint, a secret store that is disabled or unavailable, or another invalid setting |
+| `429 throttled` | wait for `Retry-After` |
+| `429 connection_test_busy` | two tests are already running in this process; retry in a few seconds |
+
+**Checks (DB-free; from `backend\`; no network, no key, no PostgreSQL):**
+
+```powershell
+$Py = "..\.venv\Scripts\python.exe"
+& $Py manage.py check
+& $Py manage.py makemigrations --check --dry-run                                        # expect: No changes detected (no migration was added)
+& $Py -m compileall -q apps config tests manage.py
+& $Py manage.py test tests.test_ai_connection_test_api tests.test_ai_transport_deadline tests.test_api_boundaries tests.test_ai_openai_transport tests.test_ai_workbench_transport
+& $Py manage.py test                                                                  # expect OK (the count is in the final report of the slice; re-check the number)
+git diff --check
+```
+
+**What nobody has checked:** a test against a real Workbench, OpenAI-compatible or Ollama endpoint; the strict throttle across several web processes; how long a real provider holds the web request thread; and a browser or any UI.
+
 ## 6. Local Windows computer: setup and validation (reference procedure; owner-operated)
 
 > **Nothing in this section has been run.** No local repository, Python

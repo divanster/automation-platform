@@ -33,7 +33,14 @@ from apps.ai_credentials.errors import (
     CredentialStoreError,
     CredentialValidationError,
 )
-from apps.ai_settings.errors import AISettingsConflictError, AISettingsValidationError
+from apps.ai_settings.errors import (
+    AISettingsConflictError,
+    AISettingsValidationError,
+    ConnectionNotFoundError,
+    ConnectionTestBusyError,
+    ConnectionTestRefusedError,
+)
+from apps.ai_settings.rules import ISSUE_INVALID_CONFIGURATION, PROVIDER_ISSUES
 from apps.cases.errors import RecordNotFoundError
 from apps.intake.errors import (
     ClientRequestConflictError,
@@ -82,6 +89,9 @@ MESSAGES = {
     "stale_base_revision": "The revision is not the current revision.",
     "stale_revision": "The revision is not the current revision.",
     "stale_settings_revision": "The settings were changed since they were read.",
+    "connection_disabled": "The connection is disabled and cannot be tested.",
+    "connection_not_usable": "The connection cannot be used in this process, so nothing was sent.",
+    "connection_test_busy": "Other connection tests are still running; try again shortly.",
     "credential_not_found": "No credential is stored under that reference.",
     "credential_already_exists": "A credential is already stored under that reference.",
     "credential_in_use": "A connection uses this credential.",
@@ -207,6 +217,14 @@ def problem_for(exc) -> Problem:
         return Problem(400, "validation_error", {"fields": {_safe_settings_field(name): list(codes) for name, codes in exc.fields.items()}})
     if isinstance(exc, AISettingsConflictError):
         return Problem(409, "stale_settings_revision")
+    if isinstance(exc, ConnectionNotFoundError):
+        return Problem(404, "not_found")
+    if isinstance(exc, ConnectionTestBusyError):
+        return Problem(429, "connection_test_busy")
+    if isinstance(exc, ConnectionTestRefusedError):
+        if exc.code == "connection_disabled":
+            return Problem(409, "connection_disabled")
+        return Problem(409, "connection_not_usable", {"issue": exc.issue if exc.issue in PROVIDER_ISSUES else ISSUE_INVALID_CONFIGURATION})
     if isinstance(exc, CredentialValidationError):
         return Problem(400, "validation_error", {"fields": {_safe_field(name): list(codes) for name, codes in exc.fields.items()}})
     if isinstance(exc, CredentialNotFoundError):

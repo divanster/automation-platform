@@ -101,9 +101,9 @@ def load_ollama_settings(environ=None) -> OllamaSettings:
     )
 
 
-def build_ollama_transport() -> GuardedHttpTransport:
-    """The real transport, with no proxy. Construction resolves and connects to nothing."""
-    return GuardedHttpTransport(proxy_url=None, ca_bundle=None)
+def build_ollama_transport(*, max_response_bytes=None) -> GuardedHttpTransport:
+    """The real transport, with no proxy. Construction resolves and connects to nothing. ``max_response_bytes`` can only LOWER the transport's response cap."""
+    return GuardedHttpTransport(proxy_url=None, ca_bundle=None, **({} if max_response_bytes is None else {"max_response_bytes": max_response_bytes}))
 
 
 def build_ollama_profile(settings: OllamaSettings) -> ModelProfile:

@@ -513,6 +513,26 @@ class AICredentialStatusOutput(serializers.Serializer):
         return "worker_restart_required"
 
 
+class AIConnectionTestInput(StrictSerializer):
+    """``POST /api/ai-settings/connections/<connection_id>/test/``: which saved model profile of the connection to test. Shape only. There is no field for a prompt, text, endpoint,
+    key, timeout or token limit: the test sends a fixed probe to the saved connection with fixed bounds, and anything else is an ``unknown_field`` error."""
+
+    profile_id = StrictCharField(max_length=64)
+
+
+class AIConnectionTestOutput(serializers.Serializer):
+    """The sanitized outcome of one test. Fixed fields: no provider text, header, endpoint, reference, model output or request content has a field here."""
+
+    connection_id = serializers.CharField()
+    profile_id = serializers.CharField()
+    provider_type = serializers.CharField()
+    locality = serializers.CharField()
+    ok = serializers.BooleanField()
+    code = serializers.CharField(allow_null=True)  # null on success; else one of the AI Gateway's stable error codes
+    retryable = serializers.BooleanField()
+    duration_ms = serializers.IntegerField()
+
+
 def page_output(item_serializer, page) -> dict:
     """The paginated envelope ``{"count", "page", "page_size", "results"}`` for a service page."""
     return {

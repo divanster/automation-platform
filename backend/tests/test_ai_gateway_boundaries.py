@@ -137,9 +137,10 @@ class GatewayStaysOutOfCoreAndBusinessModulesTests(unittest.TestCase):
         outside = sorted(p for p in importers if not p.startswith("apps/ai_gateway/"))
         # AI-1b: the opt-in Workbench composition and the one real transport; the production root is still config/ai_gateway.py alone.
         # AI-2a: Request Intake's AI extractor (the ONE file of the app that names the gateway) and the composition that builds it.
+        # AI-CON-TEST-1: the connection test's composition (config/ai_connection_test.py) sends its fixed probe through the gateway.
         self.assertEqual(
             outside,
-            ["apps/intake/ai_extraction.py", "config/ai_connections.py", "config/ai_gateway.py", "config/ai_guarded_transport.py", "config/ai_http_transport.py", "config/ai_ollama.py", "config/ai_openai_compatible.py", "config/ai_workbench.py", "config/intake_extraction.py"],
+            ["apps/intake/ai_extraction.py", "config/ai_connection_test.py", "config/ai_connections.py", "config/ai_gateway.py", "config/ai_guarded_transport.py", "config/ai_http_transport.py", "config/ai_ollama.py", "config/ai_openai_compatible.py", "config/ai_workbench.py", "config/intake_extraction.py"],
         )
 
     def test_nothing_imports_the_composition_root_yet(self):
