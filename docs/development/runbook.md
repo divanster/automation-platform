@@ -952,7 +952,7 @@ finally { Remove-Item Env:AP_RUN_DB_TESTS -ErrorAction SilentlyContinue }
 
 Report the exact `Ran N tests` line and any failure; passing would cover the tested scenarios only (with a scripted transport; no real provider).
 
-**What nobody has checked:** any call through a stored connection to a real Workbench, OpenAI-compatible server or Ollama; the migration and the new constraint on PostgreSQL; concurrent saves on PostgreSQL; the status probe against the real environment of a running web process; the owner's `.env` loading of `AP_AI_CRED_*` variables; quality of any model; and a browser (there is no frontend for connections).
+**What nobody has checked:** any call through a stored connection to a real Workbench, OpenAI-compatible server or Ollama; the migration and the new constraint on PostgreSQL; concurrent saves on PostgreSQL; the status probe against the real environment of a running web process; the owner's `.env` loading of `AP_AI_CRED_*` variables; quality of any model; and a browser (the AI settings page of `frontend-slice.md` section 19 exists but has not been seen in one).
 
 ## 6. Local Windows computer: setup and validation (reference procedure; owner-operated)
 

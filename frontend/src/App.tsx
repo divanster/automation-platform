@@ -1,8 +1,10 @@
 import { Navigate, Route, Routes } from "react-router";
 
 import { RequireAuth } from "./auth/RequireAuth";
+import { RequireAdministrator } from "./auth/RequireAdministrator";
 import { Layout } from "./components/Layout";
 import { ToastProvider } from "./components/ui/Toast";
+import { AiSettingsPage } from "./pages/AiSettingsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { NewRequestPage } from "./pages/NewRequestPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
@@ -35,6 +37,14 @@ export function App() {
               <Route path="requests" element={<RequestsPage />} />
               <Route path="requests/new" element={<NewRequestPage />} />
               <Route path="requests/:runId" element={<RequestDetailPage />} />
+              <Route
+                path="settings/ai"
+                element={
+                  <RequireAdministrator>
+                    <AiSettingsPage />
+                  </RequireAdministrator>
+                }
+              />
               <Route path="*" element={<NotFoundPage />} />
             </Route>
           </Route>

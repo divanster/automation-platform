@@ -12,6 +12,8 @@ export interface NavItem {
   permission?: string;
   /** Shown only to users who hold at least one of these permissions (a hint; the server decides). */
   anyPermission?: readonly string[];
+  /** Shown only to administrators (superusers). A hint like the permissions above: the server decides. */
+  administratorOnly?: boolean;
   isActive(pathname: string): boolean;
 }
 
@@ -40,5 +42,13 @@ export const NAV_ITEMS: readonly NavItem[] = [
     icon: "plus",
     permission: "intake.submit_request",
     isActive: (pathname) => pathname.startsWith("/requests/new"),
+  },
+  {
+    id: "ai-settings",
+    label: "AI settings",
+    to: "/settings/ai",
+    icon: "settings",
+    administratorOnly: true,
+    isActive: (pathname) => pathname.startsWith("/settings/ai"),
   },
 ];

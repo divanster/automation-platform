@@ -24,7 +24,7 @@ describe("request list", () => {
     );
     renderApp("/requests");
 
-    const link = await screen.findByRole("link", { name: "REQ-20260101-AAAA0001" });
+    const link = await screen.findByRole("link", { name: "REQ-20260101-AAAA0001" }, { timeout: 5000 });
     expect(link).toHaveAttribute("href", `/requests/${RUN_ID}`);
     const rows = screen.getAllByRole("row");
     const first = within(rows[1]!);

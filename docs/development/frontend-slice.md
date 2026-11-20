@@ -22,7 +22,7 @@ hash, draft and findings.
 
 Not in UI-1: editing a draft, approving, rejecting and audit history (these are UI-2, section 13). Not in either slice: the
 source text, task monitoring, users and roles, workflows, AI providers, settings, document upload, exports, and any serving
-of the built app by Django. Real AI is not part of them: extraction is still the deterministic fixture parser.
+of the built app by Django (the administrators' AI settings page was added later, section 19). Real AI is not part of them: extraction is still the deterministic fixture parser.
 
 ## 2. Dependencies
 
@@ -869,3 +869,132 @@ passed; `npm run typecheck`, `npm run build` and `git diff --check` clean. No ba
   54); the 10 s interval is provisional and unmeasured.
 - Everything in 16.7 other than the endpoint use still applies (no history, no AI or worker figures, "Approved" excludes `exporting` and
   `exported`).
+
+## 19. AI-SET-3: the AI settings page (administrators)
+
+Frontend only, on `feat/fe-ai-settings`. **No backend, API, payload, migration or dependency change, and no request to any AI provider.**
+**Status: development-validated in jsdom with `fetch` stubbed (490 of 490 frontend tests); the owner reports that the page loads in the local
+browser after applying the required database migrations; saving and the worker were NOT exercised in a browser, and no live provider
+connection test was performed.** It is the interface for the API of `ai-gateway.md` section 19 (AI-SET-2); that section and
+`apps/api/serializers.py` (`AIExtractionSettingsInput`, `AIExtractionSettingsOutput`) are the contract, read before any field was written.
+
+### 19.1 What it is
+
+Route `/settings/ai`, nav entry "AI settings" (icon `settings`), one page:
+
+- **Extraction.** Mode (Deterministic parser, the default, or AI extraction). In AI mode: the **active connection** (a named connection, or
+  the environment-configured provider the catalog lists), the **model profile** of that source, the **data locality policy** and the
+  **timeout**. Nothing is chosen for the administrator: changing the connection clears the model, and no policy is preselected. A
+  selected cloud connection shows a warning and, on save, an explicit approval step (the settings policy says that selecting it under
+  `approved_cloud` is the approval).
+- **Connections** (at most 10, the backend's `MAX_CONNECTIONS`). One card per connection: name, provider type, locality, enabled state,
+  the status the server computed for the **saved** version (`Configured` or `Not configured` with a fixed explanation for
+  `missing_api_key`, `invalid_configuration`, `endpoint_not_approved`), the active marker, identifier, endpoint, the credential reference
+  **name**, and the models. Actions: **Add**, **Edit** (display name, locality, endpoint, credential reference, model profiles, enabled),
+  **Disable/Enable**, **Remove**. A provider with fixed profiles (the Workbench) offers them as checkboxes; one that names models
+  (OpenAI-compatible, Ollama) takes identifier and model rows. Identifier and provider type are fixed after the first save.
+- **One Save.** The whole page is one draft and one `PUT`, so settings and connections are saved together under one revision, as the
+  backend does. Save is enabled only when something changed; "Discard changes" asks first.
+
+### 19.2 API use
+
+`api/aiSettings.ts`: `GET` and `PUT /api/ai-settings/extraction/` through the existing `request()` (same origin, session cookie, `no-store`,
+`X-CSRFToken` on the `PUT` with the one retry after 403 `csrf_failed`, the 403 `not_authenticated` handling). `http.ts` gained the `PUT`
+method; nothing else changed there. The body is exactly the serializer's fields: `extraction_mode`, `provider_id`, `connection_id`,
+`profile_id`, `policy_mode`, `timeout_seconds`, `expected_revision` and, **only when the list changed**, `connections` (the complete list).
+Leaving it out makes the server keep the stored list, including any item this page could not read (`unreadable_connections`), so saving
+the timeout alone can never rewrite connections. In deterministic mode the five AI fields are sent as `null`. A provider is sent as the
+connection's `provider_type`; the environment provider is sent with `connection_id: null`.
+The answer is copied field by field into new objects and checked (`parseAiSettings`): a field the contract does not list is dropped, and
+a body of the wrong shape is `unexpected_response`.
+
+### 19.3 Permissions
+
+- **Administrator = `is_superuser`**, the backend's own test (`_require_administrator` in `apps/ai_settings/services.py`); `is_superuser`
+  is already in `GET /api/auth/me/`. `AuthContext` exposes it as `isAdministrator`; the nav item (`administratorOnly`) and the route
+  (`RequireAdministrator`) use it. A non-administrator sees no nav entry; opening the URL shows "Not available for your account", the page
+  is never mounted and **no settings request is made**.
+- **The backend stays authoritative.** Every call is re-checked there; the API answers 403 `permission_denied` (the code the backend
+  really uses, not `forbidden`). If the server says 403 to someone the page believed to be an administrator, the page shows "Not available
+  for your account" with no retry and no data.
+
+### 19.4 Secrets
+
+There is no field for a key, token, password, header, proxy or charge code, no `type="password"` input, and the API has none either (an
+attempt is a 400 `unknown_field`). A connection holds `credential_ref`, the **name** of a backend environment variable that starts with
+the catalog's `AP_AI_CRED_`. The field is checked against that shape before anything is sent, so a pasted key is **not sent**; the error
+text is a fixed sentence and never repeats the value. The key itself stays in the backend environment (`runbook.md` section 5.10). Nothing is
+written to browser storage (`security.test.ts` forbids it in application source, and a test spies on `Storage.setItem` while loading,
+editing and saving), and the page logs nothing (a test spies on every `console` method). Unlisted response fields are dropped (19.2).
+
+### 19.5 Worker restart
+
+Before any save the page says that a saved change reaches the worker only when it starts, that nothing falls back (no other connection,
+model, provider or deterministic extraction; a worker that cannot use the selection does not start and requests stay queued) and that
+nothing is downloaded. After a successful save it shows **"Worker restart required"** with the saved revision and "not active until the
+worker is restarted. This page cannot restart it". It never says the settings are active, offers no restart button and makes no call
+other than the settings `PUT`. The notice stays until the page is left (the page cannot know whether the worker was restarted since).
+
+### 19.6 Errors and unsaved edits
+
+Every failed save keeps the form exactly as the administrator left it; nothing is cleared or reloaded behind their back.
+
+| Answer | What is shown |
+|---|---|
+| Local check fails (mirrors the server; see below) | the problem beside the field, the connection opened, no request sent |
+| 400 `validation_error` | the server's field paths (`connections[0].profiles[0].model_id`, `timeout_seconds`, ...) mapped to the field with a fixed sentence per code; the card opens; unplaceable paths are listed in a notice, never with a value |
+| 403 `permission_denied` | "You do not have permission to do this. Nothing was saved, and your edits are still here." |
+| 409 `stale_settings_revision` | a notice and an explicit choice (as the draft editor of section 13.3): **Keep my edits on top of the latest** (the form is rebased on the revision just fetched; an **untouched** connection list takes the latest list, so another administrator's connection is not overwritten by a stale copy, while a list the user edited is kept) or **Discard my edits and load the latest** |
+| Network failure | "The server could not be reached... your edits are still here"; Save can be pressed again |
+| 403 `csrf_failed` | handled by `http.ts`: new token, one retry |
+
+The local checks are hints derived from the `catalog` the server sent (policies per locality, profiles per type, timeout range) and from
+the backend's documented shapes (identifier patterns, 10 connections and 10 profiles, the credential reference); no rule is invented. A
+policy the catalog does not permit for the selected locality is disabled in the list and refused on save. Anything the client cannot
+know (the endpoint against the operator's approved origins, the worker lease) is the server's answer, shown the same way. A save is
+guarded against a double submit.
+
+### 19.7 Tests (development VM, jsdom, `fetch` stubbed)
+
+New: `pages/AiSettingsPage.test.tsx` (65 tests: nav and route for administrator and non-administrator with no request made, the server's
+403, loading and error states, connection list and status wording, selection with no fallback or automatic model, policy and timeout
+validation, cloud approval, add, edit, remove and disable with confirmation, the 10-connection limit, duplicate identifiers, discard,
+credential-reference handling and refusal of a pasted secret, redaction of unlisted response fields, no storage writes and no logging, the
+exact set of request fields, CSRF header and retry, the worker restart notice, double submit, 400, 403, network and 409 flows including
+"keep my edits"), `lib/aiSettingsForm.test.ts` and `api/aiSettings.test.ts` (the form rules and the response contract), and fixtures in
+`test/aiSettings.ts`. Result: the three new files plus `security.test.ts` and the shell tests, 129 tests, passed. **Whole suite: 21 files,
+490 of 490 tests passed in three consecutive full runs**, after the existing flaky test was fixed (below). `npm run typecheck` and
+`npm run build` pass; `git diff --check` is clean. No backend test was run; no backend file was changed.
+
+**The flaky `RequestsPage` test.** `RequestsPage.test.tsx` "renders the rows from the API..." failed in the full suite and passed alone.
+It also failed on an unmodified `main` (checked in a temporary worktree), so this slice did not cause it. Evidence: about 210 ms alone,
+1.4 to 2 s in the parallel full suite, 447 ms with `--no-file-parallelism` (all 490 passed); the file has no fake timers or mocks and
+Vitest isolates files, so the cause is the first, cold render of the app plus a role-and-name query on a large jsdom tree exceeding
+Testing Library's default 1000 ms `findByRole` timeout under CPU contention. **Fix: only that test's first `findByRole` call got
+`{ timeout: 5000 }`** (one line, line 27); no assertion, mock, production code or global test configuration changed.
+
+**Browser and permissions (what is and is not shown).**
+- The owner reports that the AI settings page **loads in the local browser** after applying the required database migrations
+  (owner-supplied, load only; no output or screenshot is stored, and the VM did not observe it). Editing, saving and the conflict flow were
+  not reported as exercised in a browser.
+- **Admin-only access is covered by automated tests** (navigation entry, route, no settings request for a non-administrator, the server's
+  403) in jsdom with a stubbed `fetch`; it was not shown in a browser with a non-administrator account.
+- **No live provider connection test was performed.** Nothing was sent to the Workbench, an OpenAI-compatible server or Ollama, and the
+  page has no way to do so.
+- **Credentials remain backend-only** (section 19.4) and **a worker restart is required after every settings change** (section 19.5).
+
+### 19.8 Limitations
+
+- **Only page load was seen in a real browser** (owner-reported, 19.7); saving, the conflict flow and a non-administrator's view were not.
+  It was never run against a worker or a provider; the contract was read from the backend source and its tests, not exercised.
+- The page cannot restart the worker, cannot tell whether it was restarted, and does not poll: it shows the status the web process
+  computed when the page loaded (or last saved), which may differ from the worker's environment.
+- No connection test, no model list, no model download, no credential entry or store, no hot reload and no worker status report (all
+  out of scope of the backend API).
+- Limits and field patterns mirrored from the backend (10 connections, 10 profiles, identifier and reference shapes) are copies: the
+  backend refuses what it does not accept, but a backend change shows up here only as a server error until the frontend is updated; no
+  backend test pins them (unlike the run states in `test_frontend_contract.py`).
+- A connection's identifier and provider type cannot be changed after its first save (remove and add instead).
+- Visual layout was written against the design tokens and not reviewed on screen; the sticky save bar and the two-column field rows need
+  the owner's browser review (including the narrow-screen layout).
+- A list edited in two tabs is resolved only by the revision check (section 19.6); there is no live merge.

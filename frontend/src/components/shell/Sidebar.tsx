@@ -7,6 +7,7 @@ import { NAV_ITEMS } from "./navigation";
 export function Sidebar({
   id,
   can,
+  isAdministrator,
   collapsed,
   onToggleCollapse,
   onNavigate,
@@ -15,6 +16,7 @@ export function Sidebar({
 }: {
   id: string;
   can(permission: string): boolean;
+  isAdministrator: boolean;
   collapsed: boolean;
   onToggleCollapse(): void;
   /** A navigation link was followed (the mobile drawer closes). */
@@ -26,7 +28,9 @@ export function Sidebar({
   const { pathname } = useLocation();
   const items = NAV_ITEMS.filter(
     (item) =>
-      (item.permission === undefined || can(item.permission)) && (item.anyPermission === undefined || item.anyPermission.some((p) => can(p))),
+      (!item.administratorOnly || isAdministrator) &&
+      (item.permission === undefined || can(item.permission)) &&
+      (item.anyPermission === undefined || item.anyPermission.some((p) => can(p))),
   );
 
   return (

@@ -186,6 +186,101 @@ export interface AuditEvent {
   details: Record<string, AuditDetailValue>;
 }
 
+// --- AI settings (backend/apps/api/serializers.py, AIExtractionSettingsOutput and AIExtractionSettingsInput) ---
+// There is deliberately NO field that holds a credential: `credential_ref` is the NAME of a backend environment variable.
+
+export interface AiProviderStatus {
+  configured: boolean;
+  /** A fixed code (`missing_api_key`, `invalid_configuration`, `endpoint_not_approved`) or null. Never a value. */
+  issue: string | null;
+}
+
+export interface AiProfileRef {
+  profile_id: string;
+  model_id: string;
+}
+
+export interface AiCatalogProfile extends AiProfileRef {
+  permitted_policy_modes: string[];
+}
+
+export interface AiProvider {
+  provider_id: string;
+  label: string;
+  locality: string;
+  status: AiProviderStatus;
+  profiles: AiCatalogProfile[];
+}
+
+export interface AiProviderType {
+  provider_type: string;
+  label: string;
+  localities: string[];
+  needs_endpoint: boolean;
+  /** `none`, `optional` or `required_unless_local`. */
+  credential: string;
+  /** `fixed` (pick among `profiles`) or `declared` (name the model identifiers). */
+  profile_source: string;
+  profiles: AiCatalogProfile[];
+}
+
+export interface AiLocalityPolicy {
+  locality: string;
+  policy_modes: string[];
+}
+
+export interface AiConnectionFields {
+  connection_id: string;
+  display_name: string;
+  provider_type: string;
+  locality: string;
+  endpoint: string | null;
+  credential_ref: string | null;
+  enabled: boolean;
+  profiles: AiProfileRef[];
+}
+
+export interface AiConnection extends AiConnectionFields {
+  status: AiProviderStatus;
+}
+
+export interface AiSettingsValues {
+  extraction_mode: string;
+  provider_id: string | null;
+  connection_id: string | null;
+  profile_id: string | null;
+  policy_mode: string | null;
+  timeout_seconds: number | null;
+}
+
+export interface AiCatalog {
+  providers: AiProvider[];
+  provider_types: AiProviderType[];
+  locality_policies: AiLocalityPolicy[];
+  credential_ref_prefix: string;
+  policy_modes: string[];
+  timeout: { min: number; max: number; default: number };
+}
+
+export interface AiSettings {
+  settings: AiSettingsValues;
+  connections: AiConnection[];
+  unreadable_connections: number;
+  stored: boolean;
+  revision: number;
+  updated_at: string | null;
+  updated_by: string | null;
+  /** `worker_restart_required`: a saved change reaches a worker only when it starts. */
+  apply: string;
+  catalog: AiCatalog;
+}
+
+/** The body of PUT /api/ai-settings/extraction/. `connections`, when present, is the COMPLETE list and replaces the stored one. */
+export interface AiSettingsUpdate extends AiSettingsValues {
+  connections?: AiConnectionFields[];
+  expected_revision: number;
+}
+
 export interface ListQuery {
   page?: number;
   page_size?: number;

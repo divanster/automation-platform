@@ -60,7 +60,7 @@ export function setUnauthenticatedHandler(handler: (() => void) | null): void {
 }
 
 export interface RequestOptions {
-  method?: "GET" | "POST";
+  method?: "GET" | "POST" | "PUT";
   query?: Record<string, string | number | undefined>;
   body?: unknown;
   signal?: AbortSignal;
