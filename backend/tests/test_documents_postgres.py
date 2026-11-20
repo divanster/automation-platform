@@ -214,9 +214,9 @@ class DownloadAuthorizationTests(DocumentApiCase):
         self.before = len(document_events())
 
     def body(self, response):
-        out = b"".join(response.streaming_content)
-        response.close()
-        return out
+        # Exhausting the stream closes the response (the test client wraps it). A second explicit close() would fire request_finished again with close_old_connections
+        # connected and close the test's own connection inside the TestCase transaction.
+        return b"".join(response.streaming_content)
 
     def test_the_owner_and_an_approver_and_a_superuser_download_the_exact_bytes(self):
         for user in (self.operator, self.approver, self.superuser, self.hybrid):
@@ -268,7 +268,9 @@ class DownloadAuthorizationTests(DocumentApiCase):
         self.assertEqual(len(document_events()), self.before)
 
     def test_a_role_change_takes_effect_on_the_next_request(self):
-        self.assertEqual(self.as_(self.approver).get(self.url).status_code, 200)
+        first = self.as_(self.approver).get(self.url)
+        self.assertEqual(first.status_code, 200)
+        self.body(first)  # consume the stream so its file handle is released
         self.approver.groups.clear()
         self.assertEqual(self.as_(self.approver).get(self.url).status_code, 403)
         self.approver.groups.add(Group.objects.get(name=OPERATOR))
@@ -375,8 +377,7 @@ class ConcurrencyTests(StorageMixin, DedicatedTestDatabaseMixin, TransactionTest
 
         def fetch(browser):
             response = browser.get(url)
-            body = b"".join(response.streaming_content)
-            response.close()
+            body = b"".join(response.streaming_content)  # exhausting the stream closes the response
             return response.status_code, body
 
         results = run_threads(self, [lambda b=b: fetch(b) for b in browsers])

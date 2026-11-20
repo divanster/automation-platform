@@ -7,7 +7,9 @@ stored).
 
 UPLOAD IS A RAW BODY, NOT MULTIPART. ``POST /api/documents/`` carries the PDF itself as the request body with ``Content-Type: application/pdf``, ``Content-Length`` and the file name in the
 ``X-Document-Filename`` header (percent-encoded UTF-8). Multipart is refused: Django parses a form body in the middleware / authentication stage, before any view, and would stage a large file part in
-the system temporary directory (see the settings); a raw body is read once, by the storage, straight into its own protected directory. The view never reads ``request.data`` and so never triggers a parser.
+the system temporary directory (see the settings); a raw body is read once, by the storage, straight into its own protected directory. The view never reads ``request.data``, but session authentication's
+CSRF check reads ``request.POST``, which makes DRF parse the body: with the default JSON-only parser that is a 415 for every authenticated ``application/pdf`` upload. So the collection view sets ONE parser,
+``UnreadBodyParser``, which accepts any media type and reads nothing; the CSRF check then succeeds or fails on the token alone and the stream is left for the storage. The default parsers are unchanged.
 Session authentication and CSRF are the project defaults (the ``X-CSRFToken`` header). A WSGI server is required: the ASGI handler spools every request body to the system temporary directory before the view
 runs, so the view refuses an ASGI request (``document_storage_unavailable``) rather than weaken the guarantee.
 
@@ -26,6 +28,7 @@ from apps.documents import services
 from apps.documents.errors import CODE_UNAVAILABLE, DocumentStorageError
 
 from .base import ApiView, validated
+from .parsers import UnreadBodyParser
 from .serializers import DocumentOutput, PageQuery, page_output
 from .throttles import ApiUserThrottle, DocumentUploadHourThrottle, DocumentUploadThrottle
 
@@ -48,6 +51,8 @@ class _DocumentView(ApiView):
 
 class DocumentCollectionView(_DocumentView):
     """``GET /api/documents/`` (a page of the documents the user may view) and ``POST`` (upload one PDF as the raw request body)."""
+
+    parser_classes = [UnreadBodyParser]
 
     def get_throttles(self):
         extra = [DocumentUploadThrottle, DocumentUploadHourThrottle] if self.request.method == "POST" else []

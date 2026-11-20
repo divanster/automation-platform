@@ -14,14 +14,19 @@ import urllib.parse
 import uuid
 from unittest import mock
 
+from django.conf import settings
 from django.core.cache import cache
 from django.core.handlers.wsgi import WSGIRequest
+from django.middleware.csrf import _get_new_csrf_string, _mask_cipher_secret
 from django.test import RequestFactory, SimpleTestCase, override_settings
 from django.urls import resolve, reverse
+from rest_framework.settings import api_settings
 from rest_framework.test import APIClient, APIRequestFactory, force_authenticate
 
 from apps.accounts.models import User
 from apps.api import views_documents
+from apps.api.parsers import UnreadBodyParser
+from config.document_storage import build_document_store
 from tests.documents_support import (
     APPROVER,
     AUDITOR,
@@ -183,6 +188,110 @@ class AuthenticationTests(ApiCase):
             response.render()
         self.assertEqual((response.status_code, json.loads(response.content)["error"]["code"]), (500, "internal_error"))
         self.assertEqual((self.db.documents.rows, tree_listing(self.root)), ([], []))
+
+
+class SessionCsrfUploadTests(ApiCase):
+    """An authenticated raw-PDF upload through the REAL ``SessionAuthentication`` with CSRF enforced (no ``force_authenticate``): its CSRF check reads ``request.POST``, which must not consume the body or answer 415.
+
+    ``request.user`` is what ``AuthenticationMiddleware`` sets from a valid session; the cookie holds the CSRF secret and the ``X-CSRFToken`` header the masked token, as in a browser.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.secret = _get_new_csrf_string()
+        self.token = _mask_cipher_secret(self.secret)
+
+    def post(self, *, data=VALID_PDF, content_type="application/pdf", token="valid", cookie=True, spy=None):
+        factory = APIRequestFactory(enforce_csrf_checks=True)
+        if cookie:
+            factory.cookies[settings.CSRF_COOKIE_NAME] = self.secret
+        extra = {"HTTP_X_DOCUMENT_FILENAME": "a.pdf"}
+        if token is not None:
+            extra["HTTP_X_CSRFTOKEN"] = self.token if token == "valid" else token
+        request = factory.generic("POST", COLLECTION, data, content_type=content_type, **extra)
+        request.user = fake_user()
+        env_patch, policy_patch = self.environment()
+        real = views_documents.services.upload_document
+        with env_patch, policy_patch, patched_documents(self.db, OPERATOR), mock.patch.object(views_documents.services, "upload_document", side_effect=spy or real) as upload:
+            response = views_documents.DocumentCollectionView.as_view(store_factory=build_document_store)(request)
+            body = json.loads(response.rendered_content)
+        return response, body, upload
+
+    def assertNothingStored(self):
+        self.assertEqual((self.db.documents.rows, self.db.events, tree_listing(self.root)), ([], [], []))
+
+    def test_a_valid_raw_pdf_with_a_valid_csrf_token_is_stored(self):
+        response, body, _ = self.post()
+        self.assertEqual((response.status_code, set(body)), (201, OUTPUT_KEYS))
+        (row,) = self.db.documents.rows
+        with open(os.path.join(self.root, "objects", *row.storage_key.split("/")), "rb") as handle:
+            self.assertEqual(handle.read(), VALID_PDF)
+        self.assertEqual([e.action for e in self.db.events], ["document.uploaded"])
+
+    def test_the_upload_stream_is_still_unread_when_the_service_gets_it(self):
+        seen = {}
+
+        def spy(*, read, **kwargs):
+            seen["first"] = read(len(VALID_PDF))
+            seen["after"] = read(1)
+            raise views_documents.DocumentStorageError(views_documents.CODE_UNAVAILABLE)
+
+        response, _, upload = self.post(spy=spy)
+        self.assertEqual(response.status_code, 503)
+        upload.assert_called_once()
+        self.assertEqual((seen["first"], seen["after"]), (VALID_PDF, b""))  # the whole body was there, and only the service read it
+
+    def test_a_missing_csrf_token_is_403_csrf_failed_and_the_service_never_runs(self):
+        response, body, upload = self.post(token=None)
+        self.assertEqual((response.status_code, body["error"]["code"]), (403, "csrf_failed"))
+        upload.assert_not_called()
+        self.assertNothingStored()
+
+    def test_an_invalid_csrf_token_is_403_csrf_failed_and_the_service_never_runs(self):
+        for label, token in (("another secret", _mask_cipher_secret(_get_new_csrf_string())), ("garbage", "not-a-token"), ("empty", "")):
+            with self.subTest(token=label):
+                response, body, upload = self.post(token=token)
+                self.assertEqual((response.status_code, body["error"]["code"]), (403, "csrf_failed"))
+                upload.assert_not_called()
+        self.assertNothingStored()
+
+    def test_a_missing_csrf_cookie_is_403_csrf_failed(self):
+        response, body, upload = self.post(cookie=False)
+        self.assertEqual((response.status_code, body["error"]["code"]), (403, "csrf_failed"))
+        upload.assert_not_called()
+
+    def test_multipart_is_still_refused_with_a_valid_token_and_nothing_is_parsed_or_stored(self):
+        boundary = "x"
+        data = f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="a.pdf"\r\nContent-Type: application/pdf\r\n\r\n'.encode() + VALID_PDF + f"\r\n--{boundary}--\r\n".encode()
+        response, body, _ = self.post(data=data, content_type=f"multipart/form-data; boundary={boundary}")
+        self.assertEqual((response.status_code, body["error"]["code"]), (415, "unsupported_document_type"))
+        self.assertNothingStored()
+
+    def test_an_unsupported_content_type_is_still_refused_with_a_valid_token(self):
+        for content_type in ("text/plain", "application/octet-stream", "application/json", "application/x-www-form-urlencoded"):
+            with self.subTest(content_type=content_type):
+                response, body, _ = self.post(data=b"a=b" if "form" in content_type else VALID_PDF, content_type=content_type)
+                self.assertEqual((response.status_code, body["error"]["code"]), (415, "unsupported_document_type"))
+        self.assertNothingStored()
+
+    def test_the_size_limit_and_the_pdf_check_still_apply(self):
+        with mock.patch.dict(os.environ, {"AP_DOCUMENT_MAX_BYTES": "2048"}):
+            response, body, _ = self.post(data=make_pdf(padding=4000))
+        self.assertEqual((response.status_code, body["error"]["code"]), (413, "document_too_large"))
+        response, body, _ = self.post(data=b"hello " * 100)
+        self.assertEqual((response.status_code, body["error"]["code"]), (400, "invalid_document"))
+        self.assertNothingStored()
+
+    def test_the_parser_reads_nothing_and_only_the_upload_route_has_it(self):
+        class Exploding:
+            def read(self, *args):
+                raise AssertionError("the parser must not read the stream")
+
+        self.assertEqual(UnreadBodyParser().parse(Exploding(), "application/pdf", {}), {})
+        self.assertEqual(views_documents.DocumentCollectionView.parser_classes, [UnreadBodyParser])
+        for cls in (views_documents.DocumentDetailView, views_documents.DocumentContentView):
+            self.assertEqual(cls.parser_classes, api_settings.DEFAULT_PARSER_CLASSES)
+        self.assertEqual([parser.__name__ for parser in api_settings.DEFAULT_PARSER_CLASSES], ["BoundedJSONParser"])
 
 
 class UploadContractTests(ApiCase):

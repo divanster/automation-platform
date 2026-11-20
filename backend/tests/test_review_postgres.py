@@ -307,7 +307,9 @@ class RolesCommandTests(DedicatedTestDatabaseMixin, TestCase):
         out = io.StringIO()
         call_command("setup_roles", stdout=out)
         text = out.getvalue()
-        self.assertIn("Operator: created, 3 permissions", text)
+        self.assertIn("Operator: created, 6 permissions", text)  # the request matrix (3) plus DOC-1's document matrix (3)
+        self.assertIn("Approver: created, 5 permissions", text)
+        self.assertIn("Auditor: created, 3 permissions", text)
         self.assertNotIn("secret-username", text)
 
     def test_a_role_grants_what_it_says_through_django_itself(self):
