@@ -82,10 +82,10 @@ class GenericGatewayStaysGenericTests(unittest.TestCase):
         self.assertEqual(
             names,
             {
-                "__init__.py", "adapters/__init__.py", "adapters/deterministic.py", "adapters/workbench.py", "contracts.py", "errors.py", "gateway.py",
-                "jsonvalue.py", "policy.py", "provider.py", "registry.py", "structured.py", "transport.py",
+                "__init__.py", "adapters/__init__.py", "adapters/deterministic.py", "adapters/openai_compatible.py", "adapters/workbench.py", "contracts.py", "errors.py", "gateway.py",
+                "jsonvalue.py", "network.py", "policy.py", "provider.py", "registry.py", "structured.py", "transport.py",
             },
-        )  # fmt: skip
+        )  # fmt: skip  (AI-CON-1 added network.py and adapters/openai_compatible.py)
 
     def test_the_production_gateway_root_is_still_empty_and_the_workbench_is_still_opt_in(self):
         from config import ai_gateway

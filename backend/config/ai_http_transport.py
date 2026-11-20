@@ -68,6 +68,8 @@ class StdlibHttpsTransport(HttpTransport):
         return f"StdlibHttpsTransport(proxy={'yes' if self._proxy else 'no'})"
 
     def send(self, request: HttpRequest) -> HttpResponse:
+        if request.network_class is not None:  # a rule about resolved addresses that this transport cannot enforce: refuse rather than ignore it
+            raise TransportError("destination")
         try:
             parts = urlsplit(request.url)
             host, port = parts.hostname, parts.port or DEFAULT_HTTPS_PORT
